@@ -1,0 +1,80 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ragit"
+version = "0.2.0"
+description = "Domain-agnostic RAG toolkit: embeddings, chunking, vector stores, retrieval, ingestion, evaluation, and jobs."
+requires-python = ">=3.11"
+dependencies = [
+    "litellm>=1.84",
+    "pydantic-settings>=2.7",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "aiosqlite>=0.20",
+    "sqlalchemy[asyncio]>=2.0.30",
+]
+pgvector = [
+    "sqlalchemy[asyncio]>=2.0.30",
+]
+qdrant = [
+    "qdrant-client>=1.9",
+]
+chroma = [
+    "chromadb>=0.5",
+]
+faiss = [
+    "faiss-cpu>=1.8",
+]
+all = [
+    "ragit[pgvector,qdrant,chroma,faiss]",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "C4", "UP", "SIM", "PL", "RET", "S", "ERA"]
+ignore = [
+    "S101",
+    "PLR2004",
+    "RET504",
+    "B008",
+    "PLR0912",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "S101",
+    "PLR2004",
+    "E501",
+    "PLC0415",
+    "SIM105",
+    "S110",
+    "S105",
+    "S108",
+    "SIM117",
+]
+# The pgvector store builds raw SQL with validated identifiers
+# (every identifier passes validate_identifier; every value is a
+# bound parameter). Same per-file exemption as the backend's
+# pre-extraction pgvector_store.py.
+"src/ragit/stores/pgvector.py" = [
+    "S608",
+]

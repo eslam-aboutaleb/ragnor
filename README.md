@@ -1,0 +1,838 @@
+# ragit
+
+**Domain-agnostic RAG toolkit** — chunking, embeddings, vector stores, hybrid retrieval, idempotent ingestion, background jobs, and evaluation.
+
+ragit is a RAG _subsystem_, not an application. It grew out of a production financial-assistant deployment and was generalized so **any** host application — finance, legal, medical, anything — can plug its own domain bindings into the same machinery. It ships no application code: every host-specific dependency (settings, session factory, version tables, job tables, datasets) is injected through protocols and case-insensitive provider registries.
+
+---
+
+## Table of contents
+
+- [Features](#features)
+- [Architecture](#architecture)
+- [Installation](#installation)
+- [Your first index](#your-first-index)
+- [Configuration](#configuration)
+- [Chunking](#chunking)
+- [Embeddings](#embeddings)
+- [Vector stores](#vector-stores)
+- [Hybrid retrieval](#hybrid-retrieval)
+- [Ingestion](#ingestion)
+- [Job outbox and drainer](#job-outbox-and-drainer)
+- [Evaluation](#evaluation)
+- [Extending ragit: provider registries](#extending-ragit-provider-registries)
+- [Host integration checklist](#host-integration-checklist)
+- [Security model](#security-model)
+- [Troubleshooting](#troubleshooting)
+- [Glossary](#glossary)
+- [Examples](#examples)
+- [Testing](#testing)
+- [Project structure](#project-structure)
+- [Design invariants](#design-invariants)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
+## Features
+
+| Area                 | What you get                                                                                                                                                                                                                                                   |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Chunking**         | Sliding-window chunker with configurable overlap; Markdown section-aware chunker that preserves `##` boundaries                                                                                                                                                |
+| **Embeddings**       | LiteLLM-backed embedder; dimension registry with warn-and-fallback; `EmbeddingFunction` protocol                                                                                                                                                               |
+| **Vector stores**    | Any vector database behind one `VectorStore` ABC — five built in (`memory`, `pgvector`, `qdrant`, `chroma`, `faiss`), all selectable via `settings.vector_store_provider` and loaded lazily so driver deps stay optional; bring your own (Milvus, Weaviate, …) |
+| **Hybrid retrieval** | Dense vector similarity + sparse keyword search, fused with Reciprocal Rank Fusion (RRF)                                                                                                                                                                       |
+| **Ingestion**        | Content-hash snapshot comparison (idempotent re-ingest), versioned chunks, optional advisory-lock serialization                                                                                                                                                |
+| **Jobs**             | Outbox pattern with `FOR UPDATE SKIP LOCKED` claiming, retry/backoff, dead-letter, stale-job reclaim                                                                                                                                                           |
+| **Evaluation**       | Recall@K / Precision@K / MRR retrieval metrics; heuristic and LLM-as-judge answer scoring                                                                                                                                                                      |
+| **Extensibility**    | Case-insensitive provider registries for embedders, chunkers, and vector stores                                                                                                                                                                                |
+| **Security**         | Strict SQL-identifier allowlist; all values bound as parameters                                                                                                                                                                                                |
+
+---
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                     Host application                         │
+│  (settings, session factory, version/job tables, datasets)   │
+└───────────────┬──────────────────────────────────┬───────────┘
+                │ injects                          │ injects
+                ▼                                  ▼
+┌──────────────────────────────────────────────────────────────┐
+│                          ragit                              │
+│                                                              │
+│  ┌──────────┐  ┌───────────┐  ┌──────────┐  ┌───────────┐  │
+│  │ chunking │  │ embeddings│  │  stores  │  │ retrieval │  │
+│  │ sliding  │  │ litellm   │  │ memory   │  │ hybrid    │  │
+│  │ markdown │  │ dimensions│  │ pgvector │  │ RRF merge │  │
+│  │          │  │           │  │ qdrant   │  │           │  │
+│  │          │  │           │  │ chroma   │  │           │  │
+│  │          │  │           │  │ faiss    │  │           │  │
+│  └──────────┘  └───────────┘  └──────────┘  └───────────┘  │
+│  ┌──────────┐  ┌───────────┐  ┌──────────┐  ┌───────────┐  │
+│  │ingestion │  │   jobs    │  │evaluation│  │  config   │  │
+│  │ pipeline │  │  outbox   │  │ metrics  │  │ protocols │  │
+│  │ version  │  │  drainer  │  │ judges   │  │ registry  │  │
+│  │ locking  │  │  reclaim  │  │ runner   │  │ validation│  │
+│  └──────────┘  └───────────┘  └──────────┘  └───────────┘  │
+└──────────────────────────────────────────────────────────────┘
+                │ uses                          │ uses
+                ▼                              ▼
+        ┌───────────────┐             ┌───────────────┐
+        │ any vector DB │             │   LiteLLM /   │
+        │ memory        │             │  any provider │
+        │ pgvector      │             │               │
+        │ qdrant        │             │               │
+        │ chroma        │             │               │
+        │ faiss         │             │               │
+        └───────────────┘             └───────────────┘
+```
+
+**How the pieces fit.** A document enters through a `DocumentSource` and flows through the ingestion pipeline: the pipeline hashes the content, compares it against the active version's snapshot, chunks the text, embeds the chunks, validates the vectors, and upserts them into a vector store — inside one transaction, serialized by an advisory lock when a lock key is supplied. At query time, `HybridRetriever` embeds the query, delegates the two-stage search (vector similarity + keyword search) to the store, and fuses the results with RRF. Embedding work can be deferred to a background drainer through the job outbox. Finally, the evaluation harness scores retrieval quality against a curated test set. Every arrow in that flow is a protocol seam: the host injects settings, sessions, version storage, job storage, and datasets, and ragit never imports the host in return.
+
+**Two abstract factories.** Every SQL operation ragit performs — sessions, queries, mutations, and advisory locking — goes through the `SQLFactory` interface, implemented by `SQLAlchemyFactory` (any SQLAlchemy dialect). Vector stores are created through the `VectorStoreFactory` interface, implemented by `RegistryVectorStoreFactory` (registry-based selection, including the zero-SQL in-memory store). Hosts subclass either factory to target another stack.
+
+**Key design decisions.** ragit depends on the host through protocols and never imports it: settings via `RagSettings`, sessions via `SessionProvider`, version and job storage via `VersionStore` / `EmbeddingJobStore`. Providers register under names and are looked up case-insensitively, so swapping a provider never edits ragit. `Chunk`, `Document`, and `SearchResult` are the canonical value types, with the dict-based store API working alongside them. There are no module-level singletons — the host creates every registry, engine, and session factory per process.
+
+---
+
+## Installation
+
+ragit requires **Python ≥ 3.11**.
+
+The package is **not yet published to PyPI** — install it from GitHub:
+
+```bash
+# Install from GitHub (not yet published to PyPI)
+pip install git+https://github.com/eslam-aboutaleb/ragit.git
+
+# With a backend extra
+pip install "ragit[pgvector] @ git+https://github.com/eslam-aboutaleb/ragit.git"
+```
+
+As a uv/poetry dependency in `pyproject.toml`:
+
+```toml
+ragit @ git+https://github.com/eslam-aboutaleb/ragit.git
+# or with an extra:
+ragit[pgvector] @ git+https://github.com/eslam-aboutaleb/ragit.git
+```
+
+> **About the names.** The PyPI name `ragit` is free (no distribution exists) and reserved for this project's future publication. The PyPI packages `ragit` (an ingest4llm-based kit by HSPK) and `raglib` (an openai-agents-based Spanish RAG library by Harrison Chacon) are unrelated third-party projects. The GitHub repository is still named `ragit` while the Python package inside is `ragit` — repo and package names don't need to match.
+
+Local development install from a checkout:
+
+```bash
+# From the repository root
+pip install -e .
+
+# With a specific vector backend (each driver is optional)
+pip install -e ".[pgvector]"   # PostgreSQL: sqlalchemy[asyncio]
+pip install -e ".[qdrant]"     # Qdrant: qdrant-client
+pip install -e ".[chroma]"     # Chroma: chromadb
+pip install -e ".[faiss]"      # FAISS: faiss-cpu
+
+# Every backend at once
+pip install -e ".[all]"
+
+# With the test extras
+pip install -e ".[test]"
+
+# For the example app
+pip install -e . fastapi uvicorn
+```
+
+Dependencies: the core dependencies are only `litellm>=1.84` (embeddings and the LLM judge) and `pydantic-settings>=2.7` (host settings, type-only) — ragit's core imports with no database driver installed. Every vector backend ships as an optional extra: `pgvector` adds `sqlalchemy[asyncio]>=2.0.30` (the pgvector store and the advisory lock), `qdrant` adds `qdrant-client>=1.9`, `chroma` adds `chromadb>=0.5`, and `faiss` adds `faiss-cpu>=1.8`; the `all` extra installs every backend (`ragit[pgvector,qdrant,chroma,faiss]`). The `test` extra adds `pytest`, `pytest-asyncio`, `aiosqlite`, and `sqlalchemy[asyncio]`.
+
+---
+
+## Your first index
+
+This walkthrough traces one document through the whole subsystem using the offline in-memory path — no database, no API key. The complete runnable version (with the fake embedder, null session factory, and in-memory version store) lives in `examples/host_integration.py`.
+
+1. **Load.** A `DocumentSource` yields `RawDocument` objects; the built-in `FileDocumentSource` reads one file (a missing file is a no-op with a warning).
+2. **Chunk.** The chunker splits the text — `MarkdownSectionChunker` splits on `##` headers and delegates each section to an inner chunker, stamping every chunk with its section and a position-based `chunk_id`.
+3. **Snapshot.** The pipeline builds an `IngestionSnapshot` (source hash, embedding model and dimension, chunker version and tunables); if the active version carries the same snapshot, ingestion is skipped.
+4. **Embed and upsert.** Changed content is chunked, embedded, validated against the expected dimension, and upserted into the store, stamped with the new version id.
+5. **Retrieve.** `HybridRetriever` embeds the query and runs the two-stage hybrid search, returning `SearchResult` dataclasses.
+6. **Evaluate.** A curated `LabeledQuery` test set gates deployment through `RagEvaluationHarness`.
+
+The wiring looks like this:
+
+```python
+settings = MySettings()            # any object with the RagSettings fields
+store = InMemoryVectorStore()
+embedder = get_embedding_function(settings)
+chunker = MarkdownSectionChunker(SlidingWindowChunker())
+pipeline = IngestionPipeline(
+    store=store, embedder=embedder, chunker=chunker,
+    session_factory=null_session_factory, settings=settings,
+)
+count = await pipeline.run(FileDocumentSource("docs/policy.md"), version_store)
+
+retriever = HybridRetriever(
+    spec=RetrieverSpec(table_name="documents", metadata_fields=["chunk_id", "section"]),
+    settings=settings, session_factory=null_session_factory,
+)
+results = await retriever.retrieve("What is the refund policy?")
+```
+
+Run `python examples/host_integration.py` for the full offline demo: it ingests the bundled document, re-ingests it (demonstrating the idempotent skip), retrieves, and evaluates — all in process.
+
+---
+
+## Configuration
+
+ragit reads its configuration through the **`RagSettings` protocol** — your existing pydantic `Settings` class already works when it exposes these fields:
+
+| Field                              | Type    | Used by                                                                                                                |
+| ---------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `embedding_model`                  | `str`   | Embedder model name; dimension lookup                                                                                  |
+| `rag_distance_threshold`           | `float` | Default retrieval distance cutoff                                                                                      |
+| `vector_store_provider`            | `str`   | Store provider name (default `"memory"`; also `pgvector`, `qdrant`, `chroma`, `faiss`, or your own registered backend) |
+| `openai_api_key`                   | `str`   | LiteLLM provider credentials                                                                                           |
+| `openai_api_base`                  | `str`   | LiteLLM base URL override                                                                                              |
+| `embedding_drain_interval_seconds` | `float` | Drainer idle interval                                                                                                  |
+| `embedding_drain_batch_size`       | `int`   | Drainer batch size                                                                                                     |
+| `job_stale_after_seconds`          | `float` | Stale-job reclaim threshold                                                                                            |
+| `worker_id`                        | `str`   | Drainer identity stamped into `locked_by`                                                                              |
+| `ingest_on_startup`                | `bool`  | Host startup ingestion flag                                                                                            |
+| `database_url`                     | `str`   | Fallback session factory for the pgvector store; fallback URL for the Qdrant store                                     |
+
+Two fields are optional and read via `getattr`: `embedding_provider` (default `"litellm"`, selects the embedder provider) and `llm_model` (read by the LLM judge). The protocol is `@runtime_checkable`, so host applications validate their settings at start-up with a plain `isinstance(settings, RagSettings)`. A `SettingsProvider` protocol (any object with a `get_settings()` method) is also available for accessor-style hosts.
+
+---
+
+## Chunking
+
+Chunkers split raw text into `Chunk` objects. Every chunker reports a `version` tag and a `config` dict, which feed the ingestion snapshot comparison that makes re-ingestion idempotent.
+
+### Sliding-window chunker
+
+Splits text into overlapping chunks by **word count**: each chunk holds `chunk_size` words and consecutive chunks overlap by `overlap` words, preserving context across chunk boundaries. Use it for plain text with no structure to respect.
+
+```python
+from ragit.chunking import SlidingWindowChunker, sliding_window_chunk
+
+chunks = sliding_window_chunk(text, chunk_size=600, overlap=100)  # functional
+
+chunker = SlidingWindowChunker(chunk_size=600, overlap=100)  # protocol form
+chunks = chunker.chunk(text)   # -> list[Chunk] with uuid ids
+chunker.version                # "sliding-window-v1"
+```
+
+`chunk_size >= 1` and `0 <= overlap < chunk_size`; otherwise `ValueError`. Empty or whitespace-only text yields `[]`.
+
+### Markdown section chunker
+
+Splits a Markdown document on `##` headers to preserve semantic boundaries, reconstructs each section with its H2 header (so the title leads the chunk text), then delegates to an inner chunker. The two chunkers **compose** — Markdown handles structure, the inner chunker handles sizing:
+
+```python
+chunker = MarkdownSectionChunker(
+    inner=SlidingWindowChunker(),
+    source_name="policy.md",
+)
+chunks = chunker.chunk(markdown_text)
+```
+
+Every chunk's metadata carries the frozen key set `{chunk_id, section, source, chunk_index, sub_chunk_index}` — `chunk_id` is position-based and unique per document, which is why ingestion deletes a retired version's chunks before inserting the new ones. A preamble without an H1 title defaults to the section name `"Introduction"`. The chunker reports `version = "section-aware-v1"` and delegates `config` to the inner chunker.
+
+### Choosing a chunker
+
+| Your document               | Choose                   | Why                                                                |
+| --------------------------- | ------------------------ | ------------------------------------------------------------------ |
+| Plain text, no structure    | `SlidingWindowChunker`   | Simple overlapping windows                                         |
+| Markdown with `##` sections | `MarkdownSectionChunker` | Preserves section boundaries; delegates sizing to an inner chunker |
+
+Both are registered in `chunker_registry` under `"sliding-window"` and `"markdown"` (lookups are case-insensitive), so hosts can select by name.
+
+---
+
+## Embeddings
+
+### The EmbeddingFunction protocol
+
+Every embedder implements the same seam: an async `__call__` for batches, plus `embed_query` and `embed_documents` conveniences.
+
+```python
+class EmbeddingFunction(Protocol):
+    async def __call__(self, input: list[str]) -> list[list[float]]: ...
+    async def embed_query(self, input: str | list[str]) -> list[float]: ...
+    async def embed_documents(self, input: list[str]) -> list[list[float]]: ...
+```
+
+### LiteLLM provider (built-in)
+
+The default provider wraps `litellm.embedding`, so any LiteLLM-supported backend can serve embeddings. The synchronous litellm call runs in a thread so it never blocks the event loop.
+
+```python
+from ragit.embeddings import LitellmEmbeddingFunction
+
+embedder = LitellmEmbeddingFunction(
+    api_key="sk-...", model_name="text-embedding-3-small",
+)
+vectors = await embedder(["hello", "world"])
+```
+
+### Dimension registry
+
+The dimension registry is the single source of truth mapping model names to vector dimensions, so changing the embedding model cannot silently desynchronize the dimension checks at insert time. Known models return their dimension; **unknown models warn and fall back to `FALLBACK_DIMENSION` (1536)** instead of crashing start-up — register your model if the fallback is wrong.
+
+```python
+from ragit.embeddings import get_embedding_dimension, register_dimension
+
+get_embedding_dimension("text-embedding-3-small")  # 1536
+get_embedding_dimension("text-embedding-3-large")  # 3072
+get_embedding_dimension("text-embedding-ada-002")  # 1536
+register_dimension("my-model", 768)                # custom models
+```
+
+### Getting an embedder
+
+`get_embedding_function(settings)` reads `settings.embedding_provider` (default `"litellm"`) and instantiates the registered provider. Construct `LitellmEmbeddingFunction` directly when you know the concrete class; use the factory when you want provider selection to be a settings change.
+
+---
+
+## Vector stores
+
+ragit is vector-database agnostic: it ships no required database. Every backend — built-in or your own — implements the same `VectorStore` ABC with three methods: `hybrid_search`, `count`, and `upsert` (full signatures in `src/ragit/stores/base.py`; the ABC itself has no database dependency). Five backends ship in the box — `memory`, `pgvector`, `qdrant`, `chroma`, and `faiss` — each in its own module, imported lazily by the factory so its driver dependency stays optional until the backend is selected. Any other vector database plugs in through the registry.
+
+**Session ownership rule:** when the caller supplies a `session`, the caller owns the transaction (commit/rollback). When omitted, the store opens its own session and commits where the operation is transactional.
+
+### Choosing a store
+
+| Need                                        | Choose                             | Why                                                                                                                       |
+| ------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Tests, zero-dependency dev                  | `InMemoryVectorStore` (`"memory"`) | Brute-force L2 + token-overlap keyword approximation; same RRF merge; nothing persisted                                   |
+| Production on PostgreSQL                    | `PgVectorStore` (`"pgvector"`)     | Real pgvector L2 distance + `ts_rank` full-text search                                                                    |
+| Production vector search on a Qdrant server | `QdrantStore` (`"qdrant"`)         | Qdrant's native nearest-neighbor search + in-process token-overlap keyword stage, merged with RRF                         |
+| Embedded or server Chroma                   | `ChromaStore` (`"chroma"`)         | Chroma's native vector search + in-process token-overlap keyword stage; ephemeral or persistent                           |
+| In-process exact L2 index                   | `FaissStore` (`"faiss"`)           | Exact `IndexFlatL2` search over an in-process `IndexIDMap`; no server, nothing persisted                                  |
+| Production on another vector DB             | Your own `VectorStore` subclass    | Register it and select via `settings.vector_store_provider` — see [Extending ragit](#extending-ragit-provider-registries) |
+
+The in-memory, Qdrant, Chroma, and FAISS stores' keyword score is a **token-overlap ratio, not a real `ts_rank`** — expect ranking differences versus the pgvector backend, so never tune production thresholds against it.
+
+### In-memory store
+
+For tests and zero-dependency development — **not** a production backend. It accepts the same constructor kwargs as the pgvector store for drop-in compatibility; the database arguments are ignored. Pass `embedding_fn` to auto-embed queries when `hybrid_search` is called with an empty embedding.
+
+### pgvector store (built-in)
+
+The built-in production backend for PostgreSQL tables with `vector` and `tsvector` columns — the only ragit component that is PostgreSQL-specific. It requires the `pgvector` extra (`pip install -e ".[pgvector]"`), plus `table_name` and `embedding_dim`, and either a `session_factory` or `settings` carrying a `database_url` to open its own sessions. The optional `tsquery_config` (default `"english"`, a lowercase identifier) must match the tsvector column's configuration.
+
+```python
+from ragit.stores import PgVectorStore
+
+store = PgVectorStore(
+    table_name="policy_chunks",
+    embedding_dim=1536,                 # required
+    session_factory=my_session_factory, # or settings.database_url
+    embedding_fn=embedder,              # auto-embed queries
+)
+```
+
+### Qdrant store (built-in)
+
+Production vector search on a Qdrant server. Requires the `qdrant` extra (`pip install -e ".[qdrant]"`), plus `table_name` (the collection name) and `embedding_dim`. The client is created lazily from `url`/`api_key` (falling back to `settings.database_url`) on first use, or injected directly via `client` for hosts and tests that manage their own.
+
+```python
+from ragit.stores import QdrantStore
+
+store = QdrantStore(
+    table_name="policy_chunks",       # Qdrant collection name
+    embedding_dim=1536,               # required
+    url="http://localhost:6333",      # or settings.database_url
+    api_key="...",                    # optional, for authenticated servers
+    embedding_fn=embedder,            # auto-embed queries
+    # client=my_client,               # or inject a pre-built AsyncQdrantClient
+)
+```
+
+Qdrant identifies points by unsigned integers or UUIDs, so string document ids are mapped deterministically to `uuid5` point ids (the original id is kept in the payload under `id_field`). The vector stage uses Qdrant's native nearest-neighbor search (Euclid distance); the keyword stage scrolls the collection's payloads and scores token overlap in process, because Qdrant has no built-in full-text rank. Both stages are ranked independently and merged with RRF, so the result shape matches the other backends.
+
+### Chroma store (built-in)
+
+Embedded or server Chroma. Requires the `chroma` extra (`pip install -e ".[chroma]"`), plus `table_name` (the collection name) and `embedding_dim`. The client is created lazily on first use — an `EphemeralClient` by default, or a `PersistentClient` when `path` is given — or injected via `client`. The store talks to Chroma's synchronous client API and wraps every call in `asyncio.to_thread` so the event loop is never blocked.
+
+```python
+from ragit.stores import ChromaStore
+
+store = ChromaStore(
+    table_name="policy_chunks",       # Chroma collection name
+    embedding_dim=1536,               # required
+    embedding_fn=embedder,            # auto-embed queries
+    # path="./chroma_db",             # PersistentClient; omitted -> EphemeralClient
+    # client=my_client,               # or inject a pre-built client
+)
+```
+
+The vector stage uses Chroma's native nearest-neighbor search (L2 distance); the keyword stage scores token overlap in process over the collection's documents, because Chroma has no built-in full-text rank. Both stages are ranked independently and merged with RRF.
+
+### FAISS store (built-in)
+
+In-process exact L2 index — no server, nothing persisted. Requires the `faiss` extra (`pip install -e ".[faiss]"`), plus `embedding_dim`. The index is created lazily on first use — a `faiss.IndexIDMap` over `IndexFlatL2` — or injected via `index` for hosts and tests that manage their own.
+
+```python
+from ragit.stores import FaissStore
+
+store = FaissStore(
+    table_name="policy_chunks",       # logical name (logging only)
+    embedding_dim=1536,               # required
+    embedding_fn=embedder,            # auto-embed queries
+    # index=my_index,                 # or inject a pre-built IndexIDMap
+)
+```
+
+FAISS identifies vectors by 64-bit integers, so string document ids are mapped to consecutive int64 ids (and back) inside the store; the original ids are returned in results. FAISS cannot filter natively, so the vector search over-fetches candidates (10× `n_results`) and filters them in process; the keyword stage scores token overlap over the in-process record map, because FAISS has no text search. Both stages are ranked independently and merged with RRF.
+
+All backends return result dicts with the same keys: `id`, `document`, `metadata`, `distance` (vector hits only), `keyword_score` (keyword hits only), and `_rrf_score`. They also share the same behaviors: `strict=True` raises `RetrievalError` instead of swallowing failures, an `embedding_fn` auto-embeds queries when `hybrid_search` is called with an empty embedding, and `**filters` applies equality filters to both search stages.
+
+### Strict mode
+
+By default, store failures are logged and swallowed into an empty result list (or `0` for `count`) — the historical behavior. Pass `strict=True` to raise `ragit.types.RetrievalError` instead, which you want for fail-fast pipelines and tests.
+
+Stores are selected through `vector_store_registry` via `get_vector_store(...)`, which reads `settings.vector_store_provider` (default `"memory"`) and instantiates the provider with the remaining kwargs. To use another vector database, register your backend under a name and set `vector_store_provider` to it — no ragit code changes.
+
+---
+
+## Hybrid retrieval
+
+`HybridRetriever` orchestrates retrieval: it resolves the embedder and store from settings, embeds the query, delegates the two-stage search to the store, and returns `SearchResult` dataclasses.
+
+```python
+from ragit.retrieval import HybridRetriever, RetrieverSpec, as_dicts
+
+retriever = HybridRetriever(
+    spec=RetrieverSpec(table_name="policy_chunks", metadata_fields=["section", "source"]),
+    settings=settings,
+    session_factory=my_session_factory,
+)
+
+results = await retriever.retrieve(
+    "What is the refund policy?",
+    n_results=5,
+    distance_threshold=0.5,   # defaults to settings.rag_distance_threshold
+    owner_id="user-123",      # any equality filter, applied to both stages
+)
+rows = as_dicts(results)      # back to dicts for legacy consumers
+```
+
+`RetrieverSpec` validates every SQL identifier at construction time; `embedding_dim` is optional and defaults to the dimension registered for `settings.embedding_model`.
+
+**How the fusion works.** The store runs two independent stages — a dense vector search under the distance threshold and a sparse keyword search — ranks each, truncates both to `n_results`, and merges them with Reciprocal Rank Fusion: `score = 1/(60 + vector_rank) + 1/(60 + keyword_rank)`. A document found by both stages outranks one found by only one, and a query that fails one stage still returns results from the other. The pgvector backend implements the stages as SQL CTEs (`embedding <-> query` L2 distance and `tsvector @@ plainto_tsquery`); a custom backend implements the same contract with its native similarity and keyword search.
+
+---
+
+## Ingestion
+
+### The pipeline
+
+The pipeline orchestrates: **load source → hash content → compare snapshot → retire old version → chunk → embed → validate → upsert**. Pass a `lock_key` to serialize concurrent ingestion of the same source inside one transaction (a PostgreSQL advisory lock — see below); omit it and serialize ingestion in your own infrastructure.
+
+```python
+pipeline = IngestionPipeline(
+    store=store, embedder=embedder, chunker=chunker,
+    session_factory=my_session_factory, settings=settings,
+)
+
+# With a lock key: the pipeline owns the session, locks it, commits it
+count = await pipeline.run(
+    FileDocumentSource("docs/policy.md"), version_store, lock_key="docs/policy.md",
+)
+
+# With a caller-owned session: the pipeline never commits
+count = await pipeline.run(source, version_store, session=my_session)
+```
+
+The constructor also accepts `version_id_key` and `source_id_key` (defaults `"version_id"` / `"source_id"`), the metadata keys the version and source ids are stamped under.
+
+### Idempotency and snapshots
+
+The pipeline builds an `IngestionSnapshot` from the source hash, the embedding model and dimension, and the chunker version and tunables. When it matches the active version's stored snapshot, ingestion is skipped and the stored chunk count is returned — re-running ingestion on an unchanged document is a no-op, never re-embedding it.
+
+**Abort safety.** If chunking yields no chunks, the pipeline aborts _before_ touching the version table — otherwise a version row carrying the current snapshot would make every later run skip the source forever.
+
+**Version lifecycle.** On a changed source the pipeline:
+
+1. Closes the active version (sets its end timestamp)
+2. Deletes the retired version's chunks (chunk ids are position-based, so they would violate the unique constraint)
+3. Creates a new version row carrying the current snapshot
+4. Embeds and upserts the new chunks, stamped with the version id
+
+### Document sources
+
+`FileDocumentSource` reads a single file (a missing file is a no-op with a warning). For anything else — S3, databases, APIs — implement the `DocumentSource` protocol (`async load() -> list[RawDocument]`).
+
+### Advisory locking
+
+`advisory_lock(session, key)` holds a session-level PostgreSQL advisory lock via `pg_advisory_lock(hashtext(key))`, serializing concurrent ingestion of the same source across instances and tasks. This is the one PostgreSQL-specific piece of ingestion: on another database stack, call `pipeline.run(..., lock_key=None)` — the pipeline takes no lock when no key is given — and serialize ingestion in your own infrastructure. On failure the transaction is rolled back **before** the lock is released — a failed statement leaves the session in an aborted transaction, and any further command would raise `InFailedSQLTransactionError`, masking the real failure. A lock-cleanup failure is only logged: ending the transaction releases the lock anyway.
+
+### Version storage (host-implemented)
+
+The host implements the `VersionStore` protocol — `find_active`, `close_active`, `create_version`, `delete_chunks` — against its version tables. All methods receive the pipeline's session, so every mutation joins the ingestion transaction.
+
+---
+
+## Job outbox and drainer
+
+The outbox pattern decouples row insertion from background processing: a job row is written in the **same transaction** as the row it refers to, and a drainer worker claims pending jobs with `FOR UPDATE SKIP LOCKED`, processes them, and records the outcome.
+
+### Enqueue
+
+```python
+from ragit.jobs import enqueue_job
+
+# Inside your transaction: the job and the row land atomically
+await enqueue_job(store, {"text": "...", "metadata": {...}}, session=my_session)
+
+# Standalone: the store opens its own transaction and commits
+await enqueue_job(store, {"text": "..."})
+```
+
+With a session, `enqueue_job` only flushes — the caller owns the commit, which is what makes the outbox atomic.
+
+### Process
+
+```python
+from ragit.jobs import process_pending_jobs, reclaim_stale_jobs
+
+processed = await process_pending_jobs(store, processor, limit=10, worker_id="worker-1")
+```
+
+**Failure semantics:**
+
+- A failed job is retried with backoff (`1m`, `5m`, `30m`)
+- Jobs that exhaust `MAX_ATTEMPTS` (4) move to the terminal `dead_letter` state
+- Claimed jobs are stamped `locked_at`/`locked_by`; a worker that dies mid-pass leaves a visible lock
+- `reclaim_stale_jobs` resets abandoned `processing` rows (older than `stale_after_seconds`, or with a NULL lock timestamp) back to `pending`
+
+### Drainer
+
+```python
+from ragit.jobs.drainer import drain_forever, main
+
+# Programmatic: runs until the stop event is set
+await drain_forever(store, processor, interval=5.0, batch_size=10,
+                    worker_id="worker-1", stop=stop_event)
+
+# Console entry point: installs logging, handles SIGINT/SIGTERM
+main(store, processor, interval=5.0, batch_size=10, worker_id="worker-1")
+```
+
+Multiple drainers run concurrently: `SKIP LOCKED` keeps two workers from processing the same job, so the drainer scales horizontally without coordination. A failing pass is logged and retried on the next tick — a transient outage does not terminate the worker.
+
+The job table itself is host-owned: `EmbeddingJobStore` (claim, mark, enqueue, reclaim) and `JobProcessor` (the per-job work) are protocols the host implements.
+
+---
+
+## Evaluation
+
+### Retrieval metrics
+
+`RagEvaluationHarness` runs a curated test set of `LabeledQuery` objects through any async retrieval function and aggregates Recall@K, Precision@K, MRR, average latency, and error counts.
+
+```python
+from ragit.evaluation import LabeledQuery, RagEvaluationHarness
+
+harness = RagEvaluationHarness([
+    LabeledQuery(query="refund policy?", expected_chunk_ids={"chunk_0"}),
+])
+metrics = await harness.evaluate(retrieval_fn)
+# retrieval_fn: async (query: str) -> list[result dicts]
+```
+
+### Answer quality
+
+Two strategies, both producing `AnswerScore` (faithfulness, relevance, completeness, conciseness, overall — all in `[0, 1]`, overall weighted `0.30·F + 0.25·R + 0.30·C + 0.15·Conc`):
+
+| Strategy                    | Choose when                     | Trade-off                                                               |
+| --------------------------- | ------------------------------- | ----------------------------------------------------------------------- |
+| `evaluate_answer_heuristic` | CI, offline runs, no API budget | Deterministic and free; token-overlap based                             |
+| `evaluate_answer_llm`       | Richer judgment in dev/staging  | Costs LiteLLM API calls; **falls back to the heuristic on any failure** |
+
+The heuristic judge is domain-neutral by default: key facts are numbers, plus any host-supplied vocabulary passed via `domain_terms` (which boosts completeness). The LLM judge reads `settings.llm_model` and falls back to the heuristic when the setting is absent or the call fails.
+
+### The runner
+
+`run_evaluation(config, retrieval_fn, dataset, settings=None)` orchestrates a full run. It **requires** an injected `retrieval_fn` and `dataset` (it raises `ValueError` otherwise) — ragit never imports a host retriever or dataset.
+
+```python
+result = await run_evaluation(
+    EvalConfig(mode="end-to-end", judge="heuristic", n_results=5),
+    retrieval_fn,      # async (query: str) -> list[result dicts]
+    dataset,           # list[EvalSample], pre-filtered
+    settings=settings,
+)
+print(result.retrieval_metrics)   # recall@K, precision@K, MRR, latency
+print(result.answer_metrics)      # avg faithfulness/relevance/...
+print(result.summary)             # human-readable report
+```
+
+**Modes.** `retrieval-only` measures retrieval quality alone. `end-to-end` also scores answer quality — with an important nuance: it scores the **joined retrieved context** against the gold answer. The runner does _not_ generate answers with an LLM; the "answer" it judges is the retrieved context itself, so answer metrics reuse the exact context computed for retrieval and never re-retrieve.
+
+`EvalSample.category` is a free-form string (hosts define their own taxonomy); `difficulty` is an `easy`/`medium`/`hard` enum. The CLI entry point (`ragit.evaluation.runner:main`) exposes `--mode`, `--judge`, `--n-results`, `--category`, `--difficulty`, and `--output`; hosts pass their own `retrieval_fn`, `dataset`, and optional `runner` callable to inject domain dependencies behind the flags.
+
+---
+
+## Extending ragit: provider registries
+
+Providers register themselves in ragit's registries — swap a provider without editing ragit. A provider is a factory class that (1) accepts a `RagSettings` object in its constructor and (2) exposes a `create()` method returning the protocol instance:
+
+```python
+from ragit.embeddings import embedding_registry
+from ragit.embeddings.base import EmbeddingFunction
+
+
+@embedding_registry.register("my-provider")
+class MyEmbeddingProvider:
+    def __init__(self, settings) -> None:
+        self._settings = settings
+
+    def create(self) -> EmbeddingFunction:
+        return MyEmbedder(self._settings.openai_api_key)
+
+
+# Selected via settings.embedding_provider = "my-provider"
+```
+
+The same pattern applies to every registry:
+
+| Registry                | Module                      | Selected by                      |
+| ----------------------- | --------------------------- | -------------------------------- |
+| `embedding_registry`    | `ragit.embeddings.registry` | `settings.embedding_provider`    |
+| `vector_store_registry` | `ragit.stores.registry`     | `settings.vector_store_provider` |
+| `chunker_registry`      | `ragit.chunking.registry`   | explicit construction            |
+
+All lookups are case-insensitive; unknown names raise `KeyError` listing the registered providers. For a vector backend, subclass the `VectorStore` ABC and make the constructor accept the registry factory kwargs (`table_name`, `id_field`, `embedding_dim`, `session_factory`, `settings`, `embedding_fn`), because `get_vector_store` instantiates it with them — this is the seam for targeting Milvus, Weaviate, or any other vector database not shipped in the box.
+
+### Abstract factories
+
+Two abstract factories sit above the registries. `SQLFactory` is the seam for every SQL operation — sessions, queries, mutations, and advisory locking; inject a custom implementation via `sql_factory=` on `IngestionPipeline` and `PgVectorStore` to run ragit on another stack:
+
+```python
+from contextlib import asynccontextmanager
+
+from ragit.db.sql_factory import SQLFactory
+
+
+class MySqlFactory(SQLFactory):
+    def create_session_factory(self, database_url): ...
+    async def fetch_all(self, session, statement, params=None): ...
+    async def fetch_scalar(self, session, statement, params=None): ...
+    async def execute(self, session, statement, params=None): ...
+
+    @asynccontextmanager
+    async def advisory_lock(self, session, key):
+        yield  # your stack's locking primitive
+```
+
+`VectorStoreFactory` creates stores for any vector database — subclass it to customize backend construction, with `RegistryVectorStoreFactory` (the default) reading `settings.vector_store_provider` and instantiating the registered provider. Built-in backend modules are imported lazily, so their driver dependencies stay optional until the backend is actually selected.
+
+---
+
+## Host integration checklist
+
+ragit is host-agnostic by design — any domain application integrates by completing the checklist below. A complete runnable template lives in `examples/host_integration.py`: it wires settings, a registered embedder provider, a registered vector backend, the ingestion pipeline, the hybrid retriever, and the evaluation harness end to end, and runs fully offline (in-memory store + fake embedder).
+
+1. **Define domain settings.** A settings class exposing the `RagSettings` fields (see the table in [Configuration](#configuration)). Validate at start-up with `isinstance(settings, RagSettings)`.
+2. **Provide an embedder.** Either construct an `EmbeddingFunction` implementation directly and inject it into `IngestionPipeline`, or register a provider factory under a name (see [Extending ragit](#extending-ragit-provider-registries)) and select it via `settings.embedding_provider`.
+3. **Choose the vector backend.** Use a built-in (`"memory"` for dev/test, `"pgvector"` for PostgreSQL, `"qdrant"`, `"chroma"`, or `"faiss"`) or bring your own for any other vector database: subclass the `VectorStore` ABC, register it, and select it via `settings.vector_store_provider`. The constructor must accept the registry factory kwargs because `get_vector_store` instantiates it with them.
+4. **Register the embedding dimension.** Call `register_dimension("my-model", 768)` so insert-time dimension validation matches the model's real output; unknown models warn and fall back to 1536 instead of crashing start-up.
+5. **Wire ingestion.** Construct `IngestionPipeline(store, embedder, chunker, session_factory, settings)` plus a host-implemented `VersionStore`.
+6. **Wire retrieval.** Construct `HybridRetriever(spec=RetrieverSpec(table_name=..., metadata_fields=[...]), settings=settings, session_factory=...)`; retrieve with `await retriever.retrieve(query, n_results=5, **filters)`.
+7. **Validate retrieval quality before serving.** Curate a `LabeledQuery` test set and run `RagEvaluationHarness` (Recall@K / Precision@K / MRR); gate deployment on the metrics.
+
+The design invariants below are pinned by tests — see [Design invariants](#design-invariants) for the authoritative list.
+
+---
+
+## Security model
+
+The built-in pgvector store builds raw SQL (the hybrid query needs CTEs, window functions, and pgvector operators impractical to express in the ORM); the `VectorStore` ABC itself is database-agnostic. Where raw SQL is used, the security model compensates:
+
+1. **All user-supplied values are bound parameters.** They never appear in the SQL string, so they cannot inject SQL.
+2. **All SQL identifiers pass a strict allowlist** (`^[A-Za-z_][A-Za-z0-9_]*$`) via `validate_identifier` before interpolation — table names, column names, filter keys, metadata keys. Identifiers are never quoted or escaped; anything else is rejected.
+3. **Parameter namespacing.** Filter parameters are prefixed (`filter_<key>`), column parameters use `_col_<key>__<row>`, and extra fields use `_extra_<key>__<row>`, so a metadata key can never shadow a reserved bind parameter or a column value.
+4. **Embedding validation.** Every embedding is checked for the expected dimension and finite values before it reaches the database (`validate_embedding`).
+
+---
+
+## Troubleshooting
+
+**`KeyError: Unknown provider 'x'. Registered: ...`** — You misspelled a provider name in `settings.embedding_provider` or `settings.vector_store_provider`. The error message lists the registered names — for the built-in registries those are `litellm` (embeddings) and `memory`, `pgvector`, `qdrant`, `chroma`, `faiss` (stores). Lookups are case-insensitive, so check for typos, not case.
+
+**`ValueError: embedding_dim is required`** — You constructed a `PgVectorStore` without `embedding_dim`. Pass the dimension configured for the active embedding model — `get_embedding_dimension(settings.embedding_model)` resolves it.
+
+**`ValueError: embedding has N dimensions; expected M`** — A dimension mismatch at insert or query time. The usual cause is an unregistered embedding model that silently fell back to `FALLBACK_DIMENSION` (1536) while your backend produces a different size. Register the real dimension with `register_dimension()` and check the logs for the unknown-model warning.
+
+**Warning: `No embedding dimension registered for model '...'`** — The model is not in the dimension registry, so ragit assumed 1536. If that is wrong, call `register_dimension(model, dimension)` at start-up; otherwise the fallback is safe.
+
+**`RuntimeError: PgVectorStore needs a session_factory or settings with a database_url`** — The store has no way to open its own sessions. Pass `session_factory` or `settings` carrying a `database_url`.
+
+**`RuntimeError: QdrantStore needs a url, a client, or settings with a database_url pointing at the Qdrant server`** — The Qdrant store has no way to reach a server. Pass `url` (and `api_key` for authenticated servers), inject a `client`, or pass `settings` whose `database_url` points at the Qdrant server.
+
+**`ModuleNotFoundError: No module named 'sqlalchemy'`** (or `'qdrant_client'` / `'chromadb'` / `'faiss'`) — A vector backend was used without installing its extra. Run `pip install -e ".[pgvector]"` (or `.[qdrant]`, `.[chroma]`, `.[faiss]`; `pip install -e ".[test]"` includes the pgvector dependency).
+
+**Empty results (or `count` of 0) with no error** — Non-strict mode swallows store failures into `[]` / `0` by design. Pass `strict=True` to surface the underlying failure as a `RetrievalError` — the logged error line above the empty result names the real cause.
+
+**Jobs stuck in `dead_letter`** — A job exhausted `MAX_ATTEMPTS` (4) and moved to the terminal `dead_letter` state. Inspect the dead-letter rows' `status_detail` for the recorded error, fix the cause, and re-enqueue.
+
+**`InFailedSQLTransactionError` around advisory locks** — A failed statement left the session in an aborted transaction, and a later command on it raised this error. `advisory_lock` rolls back before unlocking precisely so the _original_ ingestion failure surfaces instead — look for the earlier log line naming the real error.
+
+---
+
+## Glossary
+
+- **RRF (Reciprocal Rank Fusion)** — the merge formula `1/(60 + vector_rank) + 1/(60 + keyword_rank)` that combines the vector and keyword result rankings; a hit found by both stages outranks a single-stage hit.
+- **Outbox** — the pattern of writing a job row in the same transaction as the row it refers to, so background work is triggered atomically with the data change.
+- **Drainer** — the background worker that claims pending outbox jobs, processes them, and records the outcome.
+- **Snapshot** — an `IngestionSnapshot` capturing everything that determines whether a stored index is current (source hash, embedding model and dimension, chunker version and tunables); comparing snapshots makes ingestion idempotent.
+- **Strict mode** — opt-in `strict=True` behavior where store failures raise `RetrievalError` instead of being swallowed into empty results.
+- **SKIP LOCKED** — the `FOR UPDATE SKIP LOCKED` clause that lets concurrent drainers claim different pending jobs without blocking each other.
+- **Advisory lock** — a PostgreSQL application-level lock (`pg_advisory_lock`) used to serialize ingestion of the same source across instances and tasks.
+- **SQL factory** — the `SQLFactory` interface every SQL operation goes through (sessions, queries, mutations, advisory locking); `SQLAlchemyFactory` is the built-in implementation, and hosts subclass it to target another stack.
+- **Vector store factory** — the `VectorStoreFactory` interface that creates vector stores; `RegistryVectorStoreFactory` is the default, selecting the backend from the provider registry.
+- **tsvector / pgvector** — PostgreSQL extensions for full-text search (tokenized text matched with `tsquery`) and vector similarity (L2 distance via the `<->` operator), respectively.
+- **retrieval_fn** — the injected async callable `(query: str) -> list[result dicts]` that evaluation runs against; the host supplies it, ragit never imports it.
+
+---
+
+## Examples
+
+`examples/minimal_app.py` is a complete FastAPI app using ragit with zero host code — in-memory store, fake embedder (unless `OPENAI_API_KEY` is set), no database:
+
+```bash
+pip install -e . fastapi uvicorn
+python examples/minimal_app.py
+curl "http://127.0.0.1:8000/search?query=refund"
+```
+
+The example also demonstrates the `VersionStore` and `SessionProvider` protocols with in-memory implementations (`MemoryVersionStore`, `_null_session_factory`) — a useful template for host adapters.
+
+`examples/host_integration.py` is the full host-integration template for any domain — domain settings, a registered embedder provider, a registered vector backend, end-to-end wiring, and retrieval-quality validation. It runs offline (no database, no API key):
+
+```bash
+python examples/host_integration.py
+```
+
+---
+
+## Testing
+
+```bash
+# Install the test extras
+pip install -e ".[test]"
+
+# Run the full suite
+python -m pytest -q
+
+# Run a single module
+python -m pytest tests/test_chunking.py -q
+```
+
+The suite is **377 passed, 3 skipped** with **100% coverage**. It covers:
+
+| Module                                      | Test file(s)                                                                                                                                                                 |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chunking`                                  | `test_chunking.py`                                                                                                                                                           |
+| `embeddings`                                | `test_embeddings.py`                                                                                                                                                         |
+| `stores` (memory)                           | `test_memory_store.py`, `test_vector_store_coverage.py`                                                                                                                      |
+| `stores` (pgvector)                         | `test_pgvector_store.py`, `test_pgvector_store_coverage.py`, `test_pgvector_strict_mode.py`, `test_hybrid_search_projection.py`, `test_hybrid_search_session_injection.py`   |
+| `stores` (qdrant, chroma, faiss)            | `test_vector_backends.py`, `test_qdrant_coverage.py`, `test_faiss_coverage.py`                                                                                               |
+| `retrieval`                                 | `test_retriever.py`                                                                                                                                                          |
+| `ingestion`                                 | `test_ingestion_pipeline.py`, `test_ingestion_sources.py`, `test_ingestion_versioning.py`, `test_ingestion_locking.py`                                                       |
+| `jobs`                                      | `test_embedding_jobs.py`, `test_embedding_jobs_coverage.py`, `test_embedding_drain.py`, `test_job_reclaim.py`                                                                |
+| `evaluation`                                | `test_rag_eval.py`, `test_evaluation_coverage.py`, `test_eval_runner_coverage.py`, `test_eval_dataset_coverage.py`, `test_answer_evaluator_coverage.py`                      |
+| `examples/host_integration.py`              | `test_host_integration.py`                                                                                                                                                   |
+| domain-agnostic seams                       | `test_agnostic_seams.py` (parametrized over two synthetic domains: settings, providers, dimensions, chunkers, stores, retrieval, ingestion, evaluation, pgvector validation) |
+| `registry`, `validation`, `types`, `config` | `test_registry.py`, `test_validation.py`, `test_types.py`, `test_config.py`                                                                                                  |
+| `db`                                        | `test_session_provider.py`                                                                                                                                                   |
+| factories (`db`, `stores`)                  | `test_factories.py`, `test_factory_coverage.py`                                                                                                                              |
+| invariants                                  | `test_no_app_imports.py` (ragit must never import the host `app` package)                                                                                                    |
+
+**Database-dependent tests** (pgvector strict mode, session injection) skip automatically unless `RAGIT_TEST_DATABASE_URL` points at a PostgreSQL instance with pgvector installed — that is the 3 skipped tests in a default run:
+
+```bash
+RAGIT_TEST_DATABASE_URL="postgresql+asyncpg://user:pass@localhost/ragit_test" \
+    python -m pytest -q
+```
+
+**Test doubles** for the job subsystem live in `tests/job_doubles.py` (`FakeJobStore`, `FakeJobProcessor`).
+
+---
+
+## Project structure
+
+```
+ragit/
+├── pyproject.toml            # packaging, pytest, ruff config
+├── README.md                 # this file
+├── examples/
+│   ├── minimal_app.py        # zero-dependency FastAPI example
+│   ├── host_integration.py   # host integration template (any domain)
+│   └── sample_document.md    # bundled example document
+├── src/ragit/
+│   ├── types.py              # Chunk, Document, SearchResult, RetrievalError
+│   ├── config.py             # RagSettings, SettingsProvider protocols
+│   ├── registry.py           # generic case-insensitive Registry[T]
+│   ├── validation.py         # validate_identifier, validate_embedding
+│   ├── chunking/             # sliding-window + Markdown section chunkers
+│   ├── embeddings/           # LiteLLM function, dimension registry
+│   ├── stores/               # VectorStore ABC, five built-in backends
+│   │   ├── memory.py         # in-memory store (dev/test)
+│   │   ├── pgvector.py       # PostgreSQL pgvector + tsvector store
+│   │   ├── qdrant.py         # Qdrant store
+│   │   ├── chroma.py         # Chroma store
+│   │   ├── faiss.py          # FAISS store
+│   │   ├── _scoring.py       # shared RRF merge, token overlap, L2 distance
+│   │   ├── registry.py       # vector_store_registry, get_vector_store
+│   │   └── store_factory.py  # VectorStoreFactory ABC + registry factory
+│   ├── retrieval/            # HybridRetriever, RetrieverSpec
+│   ├── ingestion/            # pipeline, versioning, locking, sources
+│   ├── jobs/                 # outbox, drainer
+│   ├── evaluation/           # metrics, judges, runner
+│   └── db/                   # SessionProvider protocol, session factory
+│       └── sql_factory.py    # SQLFactory ABC + SQLAlchemyFactory
+└── tests/                    # 377 tests, no host dependencies
+```
+
+---
+
+## Design invariants
+
+These invariants are pinned by tests and must hold for any change:
+
+1. **ragit never imports the host application** — enforced by `test_no_app_imports.py`.
+2. **No module-level singletons** — registries, engines, and session factories are created per process by the host.
+3. **Chunk metadata keys are frozen** — the Markdown chunker's metadata set is exactly `{chunk_id, section, source, chunk_index, sub_chunk_index}`.
+4. **Ingestion is idempotent** — an unchanged source is skipped via snapshot comparison, never re-embedded.
+5. **The outbox is atomic** — a job row is committed in the same transaction as the row it refers to.
+6. **Store failures are opt-in** — swallowed by default, raised as `RetrievalError` under `strict=True`.
+7. **SQL identifiers are allowlisted** — every interpolated identifier passes `validate_identifier`; every value is a bound parameter.
+
+---
+
+## Contributing
+
+1. Fork and branch from `main`.
+2. Add tests for any new behavior (the suite runs without a database; pgvector-specific tests skip gracefully).
+3. Run `python -m pytest -q` and `ruff check .` before pushing.
+4. Keep the design invariants above intact — especially the no-host-imports rule.
+
+### Pre-commit
+
+Install the hooks to run linting, formatting, and whitespace fixes automatically on every commit:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+The hooks run `ruff check`, `ruff format`, and the standard whitespace/EOF/YAML fixes defined in `.pre-commit-config.yaml`.
+
+---
+
+## License
+
+ragit is released under the MIT License. See the LICENSE file in the repository root.
