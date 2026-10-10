@@ -1,10 +1,23 @@
 """Generic ingestion pipeline.
 
-The pipeline orchestrates: load source, hash content, compare
-the ingestion snapshot, retire the old version, chunk,
-embed, validate, and upsert -- inside one transaction,
-serialized by an advisory lock taken through the SQL
-factory when a lock key is supplied.
+The pipeline orchestrates: load source, hash the
+source manifest, compare the ingestion snapshot,
+chunk, embed, and validate -- outside any
+transaction -- then retire the old version and
+upsert the new chunks inside one short
+transaction, serialized by an advisory lock taken
+through the SQL factory when a lock key is
+supplied.
+
+Splitting the work into a prepare phase and a
+short critical section keeps a slow remote
+embedding request from holding a transaction and
+an advisory lock open: the embedding happens
+before any session is opened for the version
+mutations, and the critical section re-checks the
+snapshot under the lock (double-checked locking)
+so a concurrent process that ingested meanwhile
+still wins.
 
 Version *storage* is application-side: the pipeline talks
 to a :class:`VersionStore` protocol, which the host
@@ -13,8 +26,9 @@ application implements against its version tables.
 
 from __future__ import annotations
 
-import hashlib
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -26,6 +40,7 @@ from ragit.ingestion.sources import DocumentSource, RawDocument
 from ragit.ingestion.versioning import (
     IngestionSnapshot,
     build_snapshot,
+    compute_source_hash,
     snapshot_matches,
 )
 from ragit.stores.base import VectorStore
@@ -132,8 +147,21 @@ class IngestionPipeline:
         version_store: VersionStore,
         lock_key: str | None = None,
         session: Any = None,
+        purge_on_empty: bool = False,
     ) -> int:
         """Ingest the source and return the stored chunk count.
+
+        The run has two phases. The *prepare* phase opens
+        no transaction and takes no lock: it loads the
+        source, hashes the source manifest, compares the
+        snapshot (an unchanged source skips without
+        embedding), chunks, embeds, and validates. The
+        *critical section* is short: it re-checks the
+        snapshot under the advisory lock (double-checked
+        locking -- a concurrent process may have ingested
+        the source while the embedding request was in
+        flight), retires the old version, creates the new
+        one, and upserts the chunks.
 
         The pipeline owns its session -- and commits it --
         when a ``lock_key`` is supplied: the advisory lock
@@ -150,18 +178,19 @@ class IngestionPipeline:
                 session, locks it, and commits it.
             session: Caller-supplied session. When supplied,
                 the pipeline runs on it without committing.
+            purge_on_empty: Treat an empty load as
+                authoritative. When ``True``, an empty
+                source retires the active version and
+                deletes its chunks from the search index,
+                so deleted content stops being searchable;
+                when ``False`` (the default), an empty
+                load is a historical no-op.
 
         Returns:
             The number of chunks stored, or the stored
             chunk count when the source was unchanged.
         """
         documents = await source.load()
-        if not documents:
-            logger.warning("No documents loaded from source; skipping ingestion.")
-            return 0
-
-        content = "".join(doc.content for doc in documents)
-        source_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
 
         sql_factory = None
         if lock_key is not None:
@@ -172,60 +201,39 @@ class IngestionPipeline:
 
             sql_factory = self._sql_factory or SQLAlchemyFactory()
 
+        if not documents:
+            if not purge_on_empty:
+                logger.warning("No documents loaded from source; skipping ingestion.")
+                return 0
+            # An authoritative empty dataset: retire the
+            # active version so deleted content stops being
+            # searchable.
+            async with self._transacting_session(
+                lock_key, sql_factory, session
+            ) as purge_session:
+                await self._retire_active(purge_session, version_store)
+            return 0
+
+        source_hash = compute_source_hash(documents)
+        current_snapshot = build_snapshot(source_hash, self._settings, self._chunker)
+
+        # Prepare phase: no transaction, no lock. The
+        # read-only snapshot check runs on a short-lived
+        # session (or read-only on the caller's session),
+        # so an unchanged source skips without embedding.
         if session is not None:
             # Caller-supplied session: the caller owns the
             # transaction, so the pipeline never commits it.
-            # The advisory lock is still taken on the
-            # caller's session when a lock key is supplied.
-            if sql_factory is not None:
-                async with sql_factory.advisory_lock(session, lock_key):
-                    return await self._ingest(session, documents, source_hash, version_store)
-            return await self._ingest(session, documents, source_hash, version_store)
-
-        if sql_factory is not None:
-            async with (
-                self._session_factory() as owned_session,
-                sql_factory.advisory_lock(owned_session, lock_key),
-            ):
-                count = await self._ingest(owned_session, documents, source_hash, version_store)
-                await owned_session.commit()
-                return count
-
-        async with self._session_factory() as owned_session:
-            count = await self._ingest(owned_session, documents, source_hash, version_store)
-            await owned_session.commit()
-            return count
-
-    async def _ingest(
-        self,
-        session: Any,
-        documents: list[RawDocument],
-        source_hash: str,
-        version_store: VersionStore,
-    ) -> int:
-        """Run the ingestion steps on ``session`` (no commit).
-
-        Args:
-            session: Session to run the transaction on.
-            documents: Loaded documents.
-            source_hash: SHA-256 hex digest of the content.
-            version_store: Application-side version storage.
-
-        Returns:
-            The number of chunks stored, or the stored chunk
-            count when the source was unchanged.
-        """
-        current_snapshot = build_snapshot(source_hash, self._settings, self._chunker)
-
-        active = await version_store.find_active(session)
-        if snapshot_matches(current_snapshot, active.snapshot if active else None):
-            count = await self._store.count(session=session)
-            logger.info(
-                "Source unchanged (snapshot %s); skipping ingestion. %d chunks already stored.",
-                current_snapshot,
-                count,
-            )
-            return count
+            active = await version_store.find_active(session)
+            if snapshot_matches(current_snapshot, active.snapshot if active else None):
+                return await self._skip_unchanged(session, current_snapshot)
+        else:
+            async with self._session_factory() as check_session:
+                active = await version_store.find_active(check_session)
+                if snapshot_matches(
+                    current_snapshot, active.snapshot if active else None
+                ):
+                    return await self._skip_unchanged(check_session, current_snapshot)
 
         chunks = self._chunk(documents)
         if not chunks:
@@ -238,6 +246,154 @@ class IngestionPipeline:
             # still reflects it and the next run retries.
             logger.warning("No chunks extracted from source. Ingestion aborted.")
             return 0
+
+        # Embedding and validation run outside any transaction
+        # and outside the advisory lock: a slow remote call
+        # must not hold either open.
+        embeddings = await self._embedder([chunk.text for chunk in chunks])
+        embedding_dim = get_embedding_dimension(self._settings.embedding_model)
+        documents_to_upsert: list[dict[str, Any]] = []
+        for chunk, embedding in zip(chunks, embeddings, strict=True):
+            validate_embedding(embedding, expected_dim=embedding_dim, label="chunk embedding")
+            documents_to_upsert.append(
+                {
+                    "id": chunk.id,
+                    "text": chunk.text,
+                    "metadata": chunk.metadata,
+                    "embedding": embedding,
+                }
+            )
+
+        # Critical section: short. The snapshot is re-checked
+        # under the lock -- a concurrent process may have
+        # ingested this source while the embedding request
+        # was in flight.
+        async with self._transacting_session(
+            lock_key, sql_factory, session
+        ) as critical_session:
+            return await self._commit_ingestion(
+                critical_session, current_snapshot, documents_to_upsert, version_store
+            )
+
+    @asynccontextmanager
+    async def _transacting_session(
+        self,
+        lock_key: str | None,
+        sql_factory: SQLFactory | None,
+        session: Any,
+    ) -> AsyncIterator[Any]:
+        """Yield the session a critical section transacts on.
+
+        A caller-supplied session is yielded as-is -- the
+        caller owns its transaction, so it is never
+        committed -- and the advisory lock is taken on it
+        when a lock key is supplied. Otherwise the
+        pipeline opens its own session, takes the advisory
+        lock on it when a lock key is supplied, and
+        commits it when the block succeeds.
+
+        Args:
+            lock_key: Advisory-lock key, or ``None``.
+            sql_factory: SQL factory for the advisory lock,
+                or ``None`` when no lock key was supplied.
+            session: Caller-supplied session, or ``None``.
+
+        Yields:
+            The session the critical section runs on.
+        """
+        if session is not None:
+            # Caller-supplied session: the caller owns the
+            # transaction, so the pipeline never commits it.
+            # The advisory lock is still taken on the
+            # caller's session when a lock key is supplied.
+            if sql_factory is not None:
+                async with sql_factory.advisory_lock(session, lock_key):
+                    yield session
+            else:
+                yield session
+            return
+
+        if sql_factory is not None:
+            async with (
+                self._session_factory() as owned_session,
+                sql_factory.advisory_lock(owned_session, lock_key),
+            ):
+                yield owned_session
+                await owned_session.commit()
+            return
+
+        async with self._session_factory() as owned_session:
+            yield owned_session
+            await owned_session.commit()
+
+    async def _retire_active(
+        self,
+        session: Any,
+        version_store: VersionStore,
+    ) -> None:
+        """Close the active version and delete its chunks (no commit).
+
+        Args:
+            session: Session to run the retirement on.
+            version_store: Application-side version storage.
+        """
+        active = await version_store.find_active(session)
+        if active is None:
+            return
+        await version_store.close_active(session)
+        await version_store.delete_chunks(session, active.version_id)
+
+    async def _skip_unchanged(
+        self,
+        session: Any,
+        current_snapshot: IngestionSnapshot,
+    ) -> int:
+        """Skip ingestion of an unchanged source (no commit).
+
+        Args:
+            session: Session the stored chunk count is read on.
+            current_snapshot: The snapshot that matched.
+
+        Returns:
+            The stored chunk count.
+        """
+        count = await self._store.count(session=session)
+        logger.info(
+            "Source unchanged (snapshot %s); skipping ingestion. %d chunks already stored.",
+            current_snapshot,
+            count,
+        )
+        return count
+
+    async def _commit_ingestion(  # noqa: PLR0913
+        self,
+        session: Any,
+        current_snapshot: IngestionSnapshot,
+        documents_to_upsert: list[dict[str, Any]],
+        version_store: VersionStore,
+    ) -> int:
+        """Run the version-table mutations and the upsert on ``session`` (no commit).
+
+        The snapshot is re-checked first (double-checked
+        locking): a concurrent process may have ingested
+        this source while the embedding request was in
+        flight, in which case the critical section skips
+        without touching the version table or the index.
+
+        Args:
+            session: Session to run the transaction on.
+            current_snapshot: The snapshot to record.
+            documents_to_upsert: Validated chunk documents
+                (id, text, metadata, embedding).
+            version_store: Application-side version storage.
+
+        Returns:
+            The number of chunks stored, or the stored chunk
+            count when a concurrent run ingested the source.
+        """
+        active = await version_store.find_active(session)
+        if snapshot_matches(current_snapshot, active.snapshot if active else None):
+            return await self._skip_unchanged(session, current_snapshot)
 
         if active is not None:
             # Close the old active version and remove its
@@ -252,20 +408,6 @@ class IngestionPipeline:
             await version_store.delete_chunks(session, active.version_id)
 
         version = await version_store.create_version(session, current_snapshot)
-
-        embeddings = await self._embedder([chunk.text for chunk in chunks])
-        embedding_dim = get_embedding_dimension(self._settings.embedding_model)
-        documents_to_upsert: list[dict[str, Any]] = []
-        for chunk, embedding in zip(chunks, embeddings, strict=True):
-            validate_embedding(embedding, expected_dim=embedding_dim, label="chunk embedding")
-            documents_to_upsert.append(
-                {
-                    "id": chunk.id,
-                    "text": chunk.text,
-                    "metadata": chunk.metadata,
-                    "embedding": embedding,
-                }
-            )
 
         for document in documents_to_upsert:
             document["metadata"][self._version_id_key] = version.version_id

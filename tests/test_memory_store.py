@@ -5,6 +5,12 @@ brute-force L2 vector search, token-overlap keyword
 matching (not a real full-text search), and the same
 RRF merge. Result dicts carry the same keys, so tests
 written against one store run against the others.
+
+The store subclasses ``HybridVectorStore``: the vector
+stage lives in ``vector_search``, the keyword stage in
+``keyword_search``, and the inherited composite
+``hybrid_search`` fuses them. Golden tests pin the
+composite's output against the pre-refactor behavior.
 """
 
 from __future__ import annotations
@@ -14,11 +20,373 @@ from unittest.mock import AsyncMock
 import pytest
 
 from ragit.stores._scoring import token_overlap as _token_overlap
+from ragit.stores.base import (
+    DocumentStore,
+    LexicalIndex,
+    VectorIndex,
+)
 from ragit.stores.memory import InMemoryVectorStore
 
 
 def _store(**kwargs: object) -> InMemoryVectorStore:
     return InMemoryVectorStore(embedding_dim=3, **kwargs)  # type: ignore[arg-type]
+
+
+def test_store_satisfies_capability_protocols():
+    store = _store()
+    assert isinstance(store, VectorIndex)
+    assert isinstance(store, LexicalIndex)
+    assert isinstance(store, DocumentStore)
+
+
+@pytest.mark.asyncio
+async def test_golden_hybrid_search_composite_matches_pre_refactor_output():
+    """The inherited composite reproduces the pre-refactor hybrid_search.
+
+    Golden output captured from the fused implementation for a fixed
+    corpus: ids, scores, and ordering must be identical.
+    """
+    store = _store(table_name="docs", id_field="id")
+    await store.upsert(
+        [
+            {
+                "id": "doc-1",
+                "text": "alpha beta gamma",
+                "metadata": {"tenant": "a"},
+                "embedding": [0.1, 0.2, 0.3],
+            },
+            {
+                "id": "doc-2",
+                "text": "alpha delta",
+                "metadata": {"tenant": "a"},
+                "embedding": [0.9, 0.9, 0.9],
+            },
+            {
+                "id": "doc-3",
+                "text": "omega",
+                "metadata": {"tenant": "b"},
+                "embedding": [0.11, 0.21, 0.31],
+            },
+            {
+                "id": "doc-4",
+                "text": "beta gamma delta",
+                "metadata": {"tenant": "b"},
+                "embedding": [0.5, 0.5, 0.5],
+            },
+        ]
+    )
+
+    results = await store.hybrid_search(
+        "alpha beta", [0.1, 0.2, 0.3], n_results=5, threshold=1.0
+    )
+
+    assert results == [
+        {
+            "id": "doc-1",
+            "document": "alpha beta gamma",
+            "metadata": {},
+            "distance": 0.0,
+            "keyword_score": 1.0,
+            "_rrf_score": pytest.approx(2.0 / 61),
+        },
+        {
+            "id": "doc-4",
+            "document": "beta gamma delta",
+            "metadata": {},
+            "distance": pytest.approx(0.5385164807134505),
+            "keyword_score": 0.5,
+            "_rrf_score": pytest.approx(2.0 / 63),
+        },
+        {
+            "id": "doc-2",
+            "document": "alpha delta",
+            "metadata": {},
+            "distance": None,
+            "keyword_score": 0.5,
+            "_rrf_score": pytest.approx(1.0 / 62),
+        },
+        {
+            "id": "doc-3",
+            "document": "omega",
+            "metadata": {},
+            "distance": pytest.approx(0.017320508075688763),
+            "keyword_score": None,
+            "_rrf_score": pytest.approx(1.0 / 62),
+        },
+    ]
+
+    # n_results truncates each stage before the fusion.
+    truncated = await store.hybrid_search(
+        "alpha beta", [0.1, 0.2, 0.3], n_results=2, threshold=1.0
+    )
+    assert [row["id"] for row in truncated] == ["doc-1", "doc-2"]
+
+    # Filters scope both stages.
+    filtered = await store.hybrid_search(
+        "alpha beta", [0.1, 0.2, 0.3], n_results=5, threshold=1.0, tenant="a"
+    )
+    assert [row["id"] for row in filtered] == ["doc-1", "doc-2"]
+
+    # Metadata projection flows through both stages.
+    projected = await store.hybrid_search(
+        "alpha beta",
+        [0.1, 0.2, 0.3],
+        n_results=5,
+        threshold=1.0,
+        metadata_fields=["tenant"],
+    )
+    assert [row["metadata"] for row in projected] == [
+        {"tenant": "a"},
+        {"tenant": "b"},
+        {"tenant": "a"},
+        {"tenant": "b"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_vector_search_only():
+    store = _store()
+    await store.upsert(
+        [
+            {"id": "1", "text": "alpha beta", "embedding": [1.0, 0.0, 0.0]},
+            {"id": "2", "text": "gamma delta", "embedding": [0.0, 1.0, 0.0]},
+        ]
+    )
+    results = await store.vector_search(
+        [1.0, 0.0, 0.0], n_results=5, threshold=1.3
+    )
+    assert [row["id"] for row in results] == ["1"]
+    assert results[0]["distance"] == 0.0
+    assert results[0]["keyword_score"] is None
+    assert results[0]["document"] == "alpha beta"
+    # The vector stage applies filters.
+    scoped = await store.vector_search(
+        [1.0, 0.0, 0.0], n_results=5, threshold=1.3, owner="b"
+    )
+    assert scoped == []
+
+
+@pytest.mark.asyncio
+async def test_vector_search_validates_embedding_dimension():
+    store = _store()
+    with pytest.raises(ValueError, match="dimensions"):
+        await store.vector_search([1.0, 0.0], n_results=5, threshold=1.3)
+
+
+@pytest.mark.asyncio
+async def test_keyword_search_only():
+    store = _store()
+    await store.upsert(
+        [
+            {"id": "1", "text": "alpha beta", "embedding": [1.0, 0.0, 0.0]},
+            {"id": "2", "text": "alpha gamma", "embedding": [0.0, 1.0, 0.0]},
+            {"id": "3", "text": "omega", "embedding": [0.0, 0.0, 1.0]},
+        ]
+    )
+    results = await store.keyword_search("alpha beta", n_results=5)
+    assert [row["id"] for row in results] == ["1", "2"]
+    assert results[0]["keyword_score"] == pytest.approx(1.0)
+    assert results[1]["keyword_score"] == pytest.approx(0.5)
+    assert results[0]["distance"] is None
+    # The keyword stage applies filters.
+    scoped = await store.keyword_search("alpha", n_results=5, owner="b")
+    assert scoped == []
+
+
+@pytest.mark.asyncio
+async def test_keyword_search_truncates_to_n_results():
+    store = _store()
+    await store.upsert(
+        [
+            {"id": str(i), "text": "shared token", "embedding": [0.0, 0.0, 1.0]}
+            for i in range(5)
+        ]
+    )
+    results = await store.keyword_search("shared token", n_results=2)
+    assert [row["id"] for row in results] == ["0", "1"]
+
+
+@pytest.mark.asyncio
+async def test_delete_by_ids():
+    store = _store()
+    await store.upsert(
+        [
+            {"id": "1", "text": "alpha", "embedding": [1.0, 0.0, 0.0]},
+            {"id": "2", "text": "beta", "embedding": [0.0, 1.0, 0.0]},
+        ]
+    )
+    deleted = await store.delete(ids=["1"])
+    assert deleted == 1
+    assert await store.count() == 1
+    assert await store.delete(ids=["missing"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_by_filters():
+    store = _store()
+    await store.upsert(
+        [
+            {
+                "id": "1",
+                "text": "alpha",
+                "embedding": [1.0, 0.0, 0.0],
+                "metadata": {"owner": "a"},
+            },
+            {
+                "id": "2",
+                "text": "beta",
+                "embedding": [0.0, 1.0, 0.0],
+                "metadata": {"owner": "b"},
+            },
+        ]
+    )
+    deleted = await store.delete(filters={"owner": "a"})
+    assert deleted == 1
+    assert await store.count() == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_by_ids_and_filters_is_conjunction():
+    store = _store()
+    await store.upsert(
+        [
+            {
+                "id": "1",
+                "text": "alpha",
+                "embedding": [1.0, 0.0, 0.0],
+                "metadata": {"owner": "a"},
+            },
+            {
+                "id": "2",
+                "text": "beta",
+                "embedding": [0.0, 1.0, 0.0],
+                "metadata": {"owner": "a"},
+            },
+            {
+                "id": "3",
+                "text": "gamma",
+                "embedding": [0.0, 0.0, 1.0],
+                "metadata": {"owner": "b"},
+            },
+        ]
+    )
+    # id "2" matches the filter; id "1" matches the filter too; id "3"
+    # does not. Deleting ids ["1", "3"] with owner="a" deletes only "1".
+    deleted = await store.delete(ids=["1", "3"], filters={"owner": "a"})
+    assert deleted == 1
+    assert await store.count(owner="a") == 1
+    assert await store.count(owner="b") == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_rejects_empty_ids():
+    store = _store()
+    with pytest.raises(ValueError, match="empty"):
+        await store.delete(ids=[])
+
+
+@pytest.mark.asyncio
+async def test_delete_rejects_missing_selector():
+    store = _store()
+    with pytest.raises(ValueError, match="at least one"):
+        await store.delete()
+
+
+@pytest.mark.asyncio
+async def test_delete_rejects_unsafe_filter_key():
+    store = _store()
+    with pytest.raises(ValueError, match="Unsafe"):
+        await store.delete(filters={"bad-key": "v"})
+
+
+@pytest.mark.asyncio
+async def test_get_by_ids():
+    store = _store()
+    await store.upsert(
+        [
+            {
+                "id": "1",
+                "text": "alpha",
+                "embedding": [1.0, 0.0, 0.0],
+                "metadata": {"section": "A"},
+            },
+            {"id": "2", "text": "beta", "embedding": [0.0, 1.0, 0.0]},
+        ]
+    )
+    rows = await store.get(ids=["1", "2"])
+    assert [row["id"] for row in rows] == ["1", "2"]
+    assert rows[0]["document"] == "alpha"
+    assert rows[0]["metadata"] == {}
+    assert rows[1]["document"] == "beta"
+    # metadata_fields projection
+    projected = await store.get(ids=["1"], metadata_fields=["section"])
+    assert projected[0]["metadata"] == {"section": "A"}
+    # unknown ids are simply absent
+    assert await store.get(ids=["missing"]) == []
+
+
+@pytest.mark.asyncio
+async def test_get_by_filters():
+    store = _store()
+    await store.upsert(
+        [
+            {
+                "id": "1",
+                "text": "alpha",
+                "embedding": [1.0, 0.0, 0.0],
+                "metadata": {"owner": "a"},
+            },
+            {
+                "id": "2",
+                "text": "beta",
+                "embedding": [0.0, 1.0, 0.0],
+                "metadata": {"owner": "b"},
+            },
+        ]
+    )
+    rows = await store.get(filters={"owner": "b"})
+    assert [row["id"] for row in rows] == ["2"]
+
+
+@pytest.mark.asyncio
+async def test_get_with_no_selector_returns_everything():
+    store = _store()
+    await store.upsert(
+        [
+            {"id": "1", "text": "alpha", "embedding": [1.0, 0.0, 0.0]},
+            {"id": "2", "text": "beta", "embedding": [0.0, 1.0, 0.0]},
+        ]
+    )
+    rows = await store.get()
+    assert {row["id"] for row in rows} == {"1", "2"}
+
+
+@pytest.mark.asyncio
+async def test_get_by_ids_and_filters_is_conjunction():
+    store = _store()
+    await store.upsert(
+        [
+            {
+                "id": "1",
+                "text": "alpha",
+                "embedding": [1.0, 0.0, 0.0],
+                "metadata": {"owner": "a"},
+            },
+            {
+                "id": "2",
+                "text": "beta",
+                "embedding": [0.0, 1.0, 0.0],
+                "metadata": {"owner": "a"},
+            },
+        ]
+    )
+    rows = await store.get(ids=["1", "2"], filters={"owner": "a"})
+    assert [row["id"] for row in rows] == ["1", "2"]
+    rows = await store.get(ids=["2"], filters={"owner": "a"})
+    assert [row["id"] for row in rows] == ["2"]
+    rows = await store.get(ids=["1"], filters={"owner": "b"})
+    assert rows == []
+
 
 
 def test_token_overlap_empty_query_tokens():

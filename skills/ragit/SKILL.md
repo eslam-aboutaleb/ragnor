@@ -12,6 +12,21 @@ description: >-
 
 ragit is a RAG _subsystem_, not an application: chunking, embeddings, vector stores, hybrid retrieval, idempotent ingestion, background jobs, and evaluation. Every host-specific dependency (settings, session factory, version/job tables) is injected through protocols and case-insensitive provider registries — ragit never imports the host.
 
+## Quick start
+
+The high-level convenience API (`ragit.builder`) needs three lines — `RagitBuilder.local(embedder=...).build()` → `await rag.ingest([Document(...)])` → `await rag.search("...")` — with fully offline defaults: the in-memory vector store, the sliding-window chunker, the built-in `InMemoryVersionStore`, and a null session provider (no database, no driver, no API key). ragit ships no local embedder in core, so the builder requires an injected embedder; `examples/local_quickstart.py` defines a deterministic fake and runs with `pip install ragit` only.
+
+```python
+from ragit.builder import RagitBuilder
+from ragit.types import Document
+
+rag = await RagitBuilder.local(embedder=my_embedder).build()
+await rag.ingest([Document(id="policy", text="The refund policy covers water damage.")])
+results = await rag.search("refund policy")
+```
+
+The builder sits **on the low-level seams**: it wires the existing `IngestionPipeline` and `HybridRetriever` unchanged (idempotent snapshot ingestion; version replacement that deletes retired chunks through the store's `delete` capability), and every part is overridable — `with_store`, `with_embedder`, `with_chunker`, `with_version_store`, `with_settings` — while `rag.store`, `rag.pipeline`, and `rag.retriever` keep the low-level seams reachable. For production databases, drop to those seams with your real session factory and version tables (the builder's defaults are the offline path), or pass your own store and `VersionStore` through the builder's overrides.
+
 ## 1. Install
 
 **The PyPI name `ragit` is FREE** (no distribution exists) but the package is **not yet published there** — install from GitHub, never from PyPI. The PyPI names `ragit` (an ingest4llm-based kit by HSPK) and `raglib` (an openai-agents-based Spanish RAG library by Harrison Chacon) are taken by unrelated third-party packages, and the GitHub repository is still named `ragit` while the Python package is `ragit`.
@@ -29,7 +44,7 @@ As a uv/poetry git dependency in `pyproject.toml`:
 ragit @ git+https://github.com/eslam-aboutaleb/ragit.git
 ```
 
-Extras: `[pgvector]` (sqlalchemy[asyncio]), `[qdrant]` (qdrant-client), `[chroma]` (chromadb), `[faiss]` (faiss-cpu), `[all]`, `[test]` (pytest, pytest-asyncio, aiosqlite, sqlalchemy[asyncio]). Requires **Python >= 3.11**. Core dependencies are only `litellm` and `pydantic-settings` — no database driver is imported until a backend is selected.
+Extras: `[litellm]` (litellm>=1.84 — LiteLLM embeddings provider and LLM judge), `[pgvector]` (sqlalchemy[asyncio]), `[qdrant]` (qdrant-client), `[chroma]` (chromadb), `[faiss]` (faiss-cpu), `[local-embeddings]` (reserved, currently empty — future local-model backend), `[all]`, `[test]` (pytest, pytest-asyncio, aiosqlite, sqlalchemy[asyncio]). Requires **Python >= 3.11**. Core has no third-party dependencies — no database driver is imported until a backend is selected, and litellm is imported only when the LiteLLM integration is used.
 
 ## 2. Core concepts
 
@@ -43,15 +58,17 @@ Extras: `[pgvector]` (sqlalchemy[asyncio]), `[qdrant]` (qdrant-client), `[chroma
 
 ## 3. Choose a vector backend
 
-Selected via `settings.vector_store_provider`. **Default is `"memory"`** (not pgvector). Backend modules load lazily — driver dependencies stay optional until a backend is actually selected.
+Selected via `settings.vector_store_provider`. **Default is `"memory"`** (not pgvector). Backend modules load lazily — driver dependencies stay optional until a backend is selected.
 
-| Provider     | Class                 | Use                        | Notes                                                                                               |
-| ------------ | --------------------- | -------------------------- | --------------------------------------------------------------------------------------------------- |
-| `"memory"`   | `InMemoryVectorStore` | dev/test, zero-dep         | brute-force L2 + token-overlap keyword approximation; nothing persisted                             |
-| `"pgvector"` | `PgVectorStore`       | PostgreSQL production      | real pgvector L2 + `ts_rank` full-text search; needs `[pgvector]` extra                             |
-| `"qdrant"`   | `QdrantStore`         | Qdrant server              | native vector search + in-process token-overlap keyword; `url`/`api_key` or `settings.database_url` |
-| `"chroma"`   | `ChromaStore`         | embedded/persistent/server | `path=` for persistent, else ephemeral; sync client wrapped in `asyncio.to_thread`                  |
-| `"faiss"`    | `FaissStore`          | in-process exact L2        | `IndexIDMap` over `IndexFlatL2`; nothing persisted                                                  |
+Every built-in backend satisfies the three capability Protocols structurally: `VectorIndex` (`vector_search`), `LexicalIndex` (`keyword_search`), and `DocumentStore` (`upsert`/`count`/`delete`/`get`). The "lexical capability" column says whether the keyword stage is a **native full-text index** (production-scale) or an **in-process fallback** (full-corpus token-overlap scan — local development, small corpora, and testing only). At scale, combine a pgvector `VectorIndex` with an external lexical engine adapted to `LexicalIndex`.
+
+| Provider     | Class                 | Use                        | Lexical capability                          | Notes                                                                                               |
+| ------------ | --------------------- | -------------------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `"memory"`   | `InMemoryVectorStore` | dev/test, zero-dep         | in-process fallback (token overlap)         | brute-force L2 + token-overlap keyword approximation; nothing persisted                             |
+| `"pgvector"` | `PgVectorStore`       | PostgreSQL production      | **native FTS** (`ts_rank`, production-scale) | real pgvector L2 + `ts_rank` full-text search; needs `[pgvector]` extra                             |
+| `"qdrant"`   | `QdrantStore`         | Qdrant server              | in-process fallback (token overlap)         | native vector search + in-process token-overlap keyword; `url`/`api_key` or `settings.database_url` |
+| `"chroma"`   | `ChromaStore`         | embedded/persistent/server | in-process fallback (token overlap)         | `path=` for persistent, else ephemeral; sync client wrapped in `asyncio.to_thread`                  |
+| `"faiss"`    | `FaissStore`          | in-process exact L2        | in-process fallback (token overlap)         | `IndexIDMap` over `IndexFlatL2`; nothing persisted                                                  |
 
 ```python
 from ragit.stores import get_vector_store
@@ -65,6 +82,8 @@ store = get_vector_store(
 ```
 
 Session ownership rule: when the caller supplies a `session`, the caller owns the transaction (commit/rollback); when omitted, the store opens its own session and commits.
+
+Retrieval strategies (`ragit.retrieval.strategies`) compose the capability Protocols instead of the fused store: `DenseRetrieval(vector_index, embedder)`, `KeywordRetrieval(lexical_index)` (keyword-only, **no embedding dependency**), and `HybridRetrieval(vector_index, lexical_index, embedder, reranker=None)` — the two stages may be different objects (e.g. a pgvector `VectorIndex` plus an external lexical engine adapted to `LexicalIndex`). Inject a strategy into `HybridRetriever(spec, settings, strategy=...)` to bypass eager embedder/store construction.
 
 ## 4. Wire ingestion
 
@@ -146,10 +165,11 @@ metrics = await harness.evaluate(retrieval_fn)  # async (query: str) -> list[res
 result = await run_evaluation(
     EvalConfig(mode="end-to-end", judge="heuristic", n_results=5),
     retrieval_fn, dataset, settings=settings,
+    answer_fn=answer_fn,  # async (query: str, context: str) -> answer
 )
 ```
 
-Answer-quality judges: `evaluate_answer_heuristic` (free, deterministic, token-overlap; pass `domain_terms` to boost completeness) vs `evaluate_answer_llm` (LiteLLM calls; **falls back to the heuristic on any failure**). `run_evaluation` requires injected `retrieval_fn` and `dataset` (raises `ValueError` otherwise) — ragit never imports a host retriever. Modes: `retrieval-only`, or `end-to-end` (scores the joined retrieved context against the gold answer; the runner does not generate answers).
+Answer-quality judges: `evaluate_answer_heuristic` (free, deterministic, token-overlap; pass `domain_terms` to boost completeness) vs `evaluate_answer_llm` (LiteLLM calls; **falls back to the heuristic on any failure**). `run_evaluation` requires injected `retrieval_fn` and `dataset` (raises `ValueError` otherwise) — ragit never imports a host retriever. Modes: `retrieval-only` (retrieval quality only), `context` (scores the joined retrieved context against the gold answer — the legacy behavior under an honest name; measures whether the chunks contain the answer, not whether a model answers faithfully), or `end-to-end` (judges a **real model output** from the injected `answer_fn`; the judges receive the actual answer and the actual retrieved context as separate inputs). `end-to-end` **requires** `answer_fn` and raises `ValueError` naming the three modes otherwise — a loud failure beats a silently wrong metric. Per-sample results carry `context`, `generated_answer`, `gold_answer`, and `chunks_found` separately.
 
 ## 8. Register custom providers
 
@@ -168,24 +188,49 @@ class MyEmbeddingProvider:
         return MyEmbedder(self._settings.openai_api_key)
 ```
 
-**Custom vector backend** (selected via `settings.vector_store_provider`): subclass the `VectorStore` ABC. The constructor **must accept the registry factory kwargs** (`table_name`, `id_field`, `embedding_dim`, `session_factory`, `settings`, `embedding_fn`) because `get_vector_store` instantiates it with them:
+**Custom vector backend** (selected via `settings.vector_store_provider`). Two paths:
+
+**Path A — implement the capability Protocols structurally** (recommended). Implement `vector_search`, `keyword_search`, `upsert`, `count`, `delete`, and `get` — no ragit inheritance needed, `isinstance(your_store, VectorIndex)` etc. hold automatically because the Protocols are `@runtime_checkable`. For a backend that wants the RRF-fused `hybrid_search`, subclass `HybridVectorStore` and implement the two search stages; the base provides the composite `hybrid_search`, `delete`/`get` semantics (at least one selector, empty `ids` rejected, conjunction when both supplied), and the uniform registry constructor kwargs:
 
 ```python
-from ragit.stores import VectorStore, vector_store_registry
+from ragit.stores import HybridVectorStore, vector_store_registry
 
 @vector_store_registry.register("my-backend")
-class MyVectorStore(VectorStore):
+class MyVectorStore(HybridVectorStore):
     def __init__(self, table_name="documents", id_field="id", embedding_dim=None,
                  session_factory=None, settings=None, embedding_fn=None):
-        ...
+        super().__init__(table_name=table_name, id_field=id_field,
+                         embedding_dim=embedding_dim, session_factory=session_factory,
+                         settings=settings, embedding_fn=embedding_fn)
 
-    async def hybrid_search(self, query, embedding, n_results, threshold,
+    async def vector_search(self, embedding, n_results, threshold,
                             text_field="text", metadata_fields=None,
-                            session=None, strict=False, **filters): ...
-    async def count(self, session=None, strict=False, **filters) -> int: ...
+                            session=None, **filters): ...   # always raises on failure
+
+    async def keyword_search(self, query, n_results, text_field="text",
+                             metadata_fields=None, session=None, **filters): ...
+
     async def upsert(self, documents, session=None, text_field="text",
                      embedding_field="embedding", id_field=None, extra_fields=None): ...
+    async def count(self, session=None, strict=False, **filters) -> int: ...
+    async def delete(self, ids=None, filters=None, session=None) -> int: ...
+    async def get(self, ids=None, filters=None, session=None,
+                  text_field="text", metadata_fields=None) -> list[dict]: ...
 ```
+
+**Path B — keep the legacy fused interface.** If your backend already implements only `hybrid_search`/`count`/`upsert` (a fused hybrid result cannot be decomposed into independent vector and keyword stages), wrap it in `LegacyHybridStoreAdapter` — the adapter delegates the three legacy methods and deliberately claims **no** capabilities (`isinstance(adapter, VectorIndex)` is `False`), so it never pretends to satisfy the Protocols:
+
+```python
+from ragit.stores import LegacyHybridStoreAdapter, vector_store_registry
+
+@vector_store_registry.register("my-legacy-backend")
+class MyLegacyStore(LegacyHybridStoreAdapter):
+    def __init__(self, table_name="documents", id_field="id", embedding_dim=None,
+                 session_factory=None, settings=None, embedding_fn=None):
+        super().__init__(backend=_MyLegacyBackend(...))
+```
+
+The constructor **must accept the registry factory kwargs** (`table_name`, `id_field`, `embedding_dim`, `session_factory`, `settings`, `embedding_fn`) because `get_vector_store` instantiates it with them.
 
 ## 9. Gotchas
 

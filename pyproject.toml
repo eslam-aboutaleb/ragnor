@@ -7,10 +7,7 @@ name = "ragit"
 version = "0.2.0"
 description = "Domain-agnostic RAG toolkit: embeddings, chunking, vector stores, retrieval, ingestion, evaluation, and jobs."
 requires-python = ">=3.11"
-dependencies = [
-    "litellm>=1.84",
-    "pydantic-settings>=2.7",
-]
+dependencies = []
 
 [project.optional-dependencies]
 test = [
@@ -19,6 +16,12 @@ test = [
     "aiosqlite>=0.20",
     "sqlalchemy[asyncio]>=2.0.30",
 ]
+litellm = [
+    "litellm>=1.84",
+]
+# Reserved for a future local-model embedding backend
+# (e.g. sentence-transformers); currently empty.
+local-embeddings = []
 pgvector = [
     "sqlalchemy[asyncio]>=2.0.30",
 ]
@@ -31,8 +34,10 @@ chroma = [
 faiss = [
     "faiss-cpu>=1.8",
 ]
+# The extra names "pdf" and "web" are reserved for
+# future loader/serving integrations.
 all = [
-    "ragit[pgvector,qdrant,chroma,faiss]",
+    "ragit[litellm,pgvector,qdrant,chroma,faiss]",
 ]
 
 [tool.setuptools.packages.find]

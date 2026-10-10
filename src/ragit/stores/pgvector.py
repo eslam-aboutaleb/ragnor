@@ -388,6 +388,387 @@ class PgVectorStore(VectorStore):
                 raise RetrievalError(f"Hybrid search failed on {self.table_name}: {exc}") from exc
             return []
 
+    async def vector_search(  # noqa: PLR0913, PLR0917
+        self,
+        embedding: list[float],
+        n_results: int,
+        threshold: float,
+        text_field: str = "text",
+        metadata_fields: list[str] | None = None,
+        session: Any = None,
+        **filters: Any,
+    ) -> list[dict[str, Any]]:
+        """Standalone dense vector search (the hybrid search's vector stage).
+
+        One round-trip: a single ``SELECT`` ordered by
+        ``embedding <-> :embedding`` with the distance
+        threshold and equality filters applied as bound
+        parameters.
+
+        Args:
+            embedding: Query embedding vector (required; the
+                method does not auto-embed).
+            n_results: Maximum number of results to return.
+            threshold: Maximum distance for vector search.
+            text_field: Name of the column containing the
+                document text.
+            metadata_fields: Additional column names to
+                include in the result metadata dict.
+            session: Optional external session. When
+                supplied, the caller owns the transaction
+                (commit/rollback). When omitted, the store
+                opens its own session.
+            **filters: Additional filters (e.g., tenant_id).
+
+        Returns:
+            list[dict]: Result dicts ordered by distance
+            ascending (tie-broken by id), each carrying
+            ``id``, ``document``, ``metadata``,
+            ``distance``, and ``keyword_score`` (``None``).
+
+        Raises:
+            ValueError: If identifiers are unsafe,
+                ``n_results`` is not positive, or the
+                embedding has the wrong dimension.
+            Exception: Re-raises database errors.
+        """
+        validate_identifier(text_field, "text_field")
+        for key in filters:
+            validate_identifier(key, "filter key")
+        metadata_fields = metadata_fields or []
+        for field in metadata_fields:
+            validate_identifier(field, "metadata_field")
+        if n_results < 1:
+            raise ValueError(f"n_results must be a positive integer; got {n_results}")
+        validate_embedding(embedding, self.embedding_dim, label="query embedding")
+
+        select_columns = [self.id_field, text_field, *metadata_fields]
+        select_sql = ", ".join(select_columns)
+
+        filter_parts = []
+        params: dict[str, Any] = {
+            "embedding": f"[{','.join(str(x) for x in embedding)}]",
+            "distance_threshold": threshold,
+            "n_results": n_results,
+        }
+        for key, value in filters.items():
+            param_name = f"filter_{key}"
+            filter_parts.append(f"{key} = :{param_name}")
+            params[param_name] = value
+
+        where_clause = (
+            "WHERE embedding <-> cast(:embedding as vector) < :distance_threshold"
+        )
+        if filter_parts:
+            where_clause += " AND " + " AND ".join(filter_parts)
+
+        stmt = f"""
+            SELECT {select_sql},
+                   embedding <-> cast(:embedding as vector) AS distance
+            FROM {self.table_name}
+            {where_clause}
+            ORDER BY embedding <-> cast(:embedding as vector), {self.id_field}
+            LIMIT :n_results
+        """
+
+        owns_session = session is None
+        if owns_session:
+            session_factory = self._resolve_session_factory()
+            async with session_factory() as owned_session:
+                rows = await self._sql.fetch_all(owned_session, stmt, params)
+        else:
+            rows = await self._sql.fetch_all(session, stmt, params)
+
+        results = []
+        for row in rows:
+            metadata = {
+                field: row[field]
+                for field in metadata_fields
+                if field in row and row[field] is not None
+            }
+            results.append(
+                {
+                    "id": str(row[self.id_field]),
+                    "document": row[text_field],
+                    "metadata": metadata,
+                    "distance": row["distance"],
+                    "keyword_score": None,
+                }
+            )
+        return results
+
+    async def keyword_search(  # noqa: PLR0913, PLR0917
+        self,
+        query: str,
+        n_results: int,
+        text_field: str = "text",
+        metadata_fields: list[str] | None = None,
+        session: Any = None,
+        **filters: Any,
+    ) -> list[dict[str, Any]]:
+        """Standalone keyword search (the hybrid search's keyword stage).
+
+        One round-trip: a single ``SELECT`` using PostgreSQL
+        full-text search (``tsvector @@ plainto_tsquery``)
+        ordered by ``ts_rank`` descending, with equality
+        filters applied as bound parameters.
+
+        Args:
+            query: Natural language search query.
+            n_results: Maximum number of results to return.
+            text_field: Name of the column containing the
+                document text.
+            metadata_fields: Additional column names to
+                include in the result metadata dict.
+            session: Optional external session. When
+                supplied, the caller owns the transaction
+                (commit/rollback). When omitted, the store
+                opens its own session.
+            **filters: Additional filters (e.g., tenant_id).
+
+        Returns:
+            list[dict]: Result dicts ordered by
+            ``ts_rank`` descending (tie-broken by id),
+            each carrying ``id``, ``document``,
+            ``metadata``, ``distance`` (``None``), and
+            ``keyword_score``.
+
+        Raises:
+            ValueError: If identifiers are unsafe or
+                ``n_results`` is not positive.
+            Exception: Re-raises database errors.
+        """
+        validate_identifier(text_field, "text_field")
+        for key in filters:
+            validate_identifier(key, "filter key")
+        metadata_fields = metadata_fields or []
+        for field in metadata_fields:
+            validate_identifier(field, "metadata_field")
+        if n_results < 1:
+            raise ValueError(f"n_results must be a positive integer; got {n_results}")
+
+        select_columns = [self.id_field, text_field, *metadata_fields]
+        select_sql = ", ".join(select_columns)
+        tsquery_expr = (
+            "plainto_tsquery(cast(:tsquery_config as regconfig), :query)"
+        )
+
+        filter_parts = []
+        params: dict[str, Any] = {
+            "query": query,
+            "tsquery_config": self.tsquery_config,
+            "n_results": n_results,
+        }
+        for key, value in filters.items():
+            param_name = f"filter_{key}"
+            filter_parts.append(f"{key} = :{param_name}")
+            params[param_name] = value
+
+        where_clause = f"tsvector @@ {tsquery_expr}"
+        if filter_parts:
+            where_clause += " AND " + " AND ".join(filter_parts)
+
+        stmt = f"""
+            SELECT {select_sql},
+                   ts_rank(tsvector, {tsquery_expr}) AS score
+            FROM {self.table_name}
+            WHERE {where_clause}
+            ORDER BY ts_rank(tsvector, {tsquery_expr}) DESC, {self.id_field}
+            LIMIT :n_results
+        """
+
+        owns_session = session is None
+        if owns_session:
+            session_factory = self._resolve_session_factory()
+            async with session_factory() as owned_session:
+                rows = await self._sql.fetch_all(owned_session, stmt, params)
+        else:
+            rows = await self._sql.fetch_all(session, stmt, params)
+
+        results = []
+        for row in rows:
+            metadata = {
+                field: row[field]
+                for field in metadata_fields
+                if field in row and row[field] is not None
+            }
+            results.append(
+                {
+                    "id": str(row[self.id_field]),
+                    "document": row[text_field],
+                    "metadata": metadata,
+                    "distance": None,
+                    "keyword_score": row["score"],
+                }
+            )
+        return results
+
+    async def delete(
+        self,
+        ids: list[Any] | None = None,
+        filters: dict[str, Any] | None = None,
+        session: Any = None,
+    ) -> int:
+        """Delete documents selected by ``ids`` and/or ``filters``.
+
+        At least one selector must be supplied; an empty
+        ``ids`` list is rejected. When both are supplied,
+        both restrictions apply (conjunction). The deletion
+        count is reported by the statement itself
+        (``RETURNING`` over the deleted rows), so the
+        returned count is the number of rows the database
+        deleted.
+
+        Args:
+            ids: Document ids to delete.
+            filters: Equality filters (e.g., tenant_id).
+            session: Optional external session. When
+                supplied, the caller owns the transaction
+                (commit/rollback). When omitted, the store
+                opens its own session and commits.
+
+        Returns:
+            int: Number of deleted documents.
+
+        Raises:
+            ValueError: If no selector is supplied, ``ids``
+                is empty, or a filter key is unsafe.
+            Exception: Re-raises database errors.
+        """
+        if ids is None and filters is None:
+            raise ValueError(
+                "delete requires at least one of ids or filters"
+            )
+        if ids is not None and len(ids) == 0:
+            raise ValueError(
+                "ids must not be empty; an empty id list never "
+                "means delete everything"
+            )
+        if filters is not None:
+            for key in filters:
+                validate_identifier(key, "filter key")
+
+        conditions = []
+        params: dict[str, Any] = {}
+        if ids is not None:
+            conditions.append(f"{self.id_field} = ANY(:ids)")
+            params["ids"] = list(ids)
+        for key, value in (filters or {}).items():
+            param_name = f"filter_{key}"
+            conditions.append(f"{key} = :{param_name}")
+            params[param_name] = value
+
+        stmt = f"""
+            WITH deleted AS (
+                DELETE FROM {self.table_name}
+                WHERE {' AND '.join(conditions)}
+                RETURNING 1
+            )
+            SELECT count(*) FROM deleted
+        """
+
+        owns_session = session is None
+        if owns_session:
+            session_factory = self._resolve_session_factory()
+            async with session_factory() as owned_session:
+                count = await self._sql.fetch_scalar(
+                    owned_session, stmt, params
+                )
+                await owned_session.commit()
+        else:
+            count = await self._sql.fetch_scalar(session, stmt, params)
+        return int(count) if count is not None else 0
+
+    async def get(  # noqa: PLR0913, PLR0917
+        self,
+        ids: list[Any] | None = None,
+        filters: dict[str, Any] | None = None,
+        session: Any = None,
+        text_field: str = "text",
+        metadata_fields: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fetch documents selected by ``ids`` and/or ``filters``.
+
+        The selection is a single ``SELECT`` by primary key
+        (``{id_field} = ANY(:ids)``) and/or equality
+        filters. With no selector, every document is
+        returned.
+
+        Args:
+            ids: Document ids to fetch.
+            filters: Equality filters (e.g., tenant_id).
+            session: Optional external session. When
+                supplied, the caller owns the transaction
+                (commit/rollback). When omitted, the store
+                opens its own session.
+            text_field: Name of the column containing the
+                document text.
+            metadata_fields: Additional column names to
+                include in the result metadata dict.
+
+        Returns:
+            list[dict]: ``id``/``document``/``metadata``
+            dicts (score keys are meaningless for direct
+            fetches).
+
+        Raises:
+            ValueError: If any identifier is unsafe.
+            Exception: Re-raises database errors.
+        """
+        validate_identifier(text_field, "text_field")
+        metadata_fields = metadata_fields or []
+        for field in metadata_fields:
+            validate_identifier(field, "metadata_field")
+        if filters is not None:
+            for key in filters:
+                validate_identifier(key, "filter key")
+
+        select_columns = [self.id_field, text_field, *metadata_fields]
+        select_sql = ", ".join(select_columns)
+
+        conditions = []
+        params: dict[str, Any] = {}
+        if ids is not None:
+            conditions.append(f"{self.id_field} = ANY(:ids)")
+            params["ids"] = list(ids)
+        for key, value in (filters or {}).items():
+            param_name = f"filter_{key}"
+            conditions.append(f"{key} = :{param_name}")
+            params[param_name] = value
+
+        where_clause = (
+            f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        )
+        stmt = f"""
+            SELECT {select_sql}
+            FROM {self.table_name}
+            {where_clause}
+        """
+
+        owns_session = session is None
+        if owns_session:
+            session_factory = self._resolve_session_factory()
+            async with session_factory() as owned_session:
+                rows = await self._sql.fetch_all(owned_session, stmt, params)
+        else:
+            rows = await self._sql.fetch_all(session, stmt, params)
+
+        results = []
+        for row in rows:
+            metadata = {
+                field: row[field]
+                for field in metadata_fields
+                if field in row and row[field] is not None
+            }
+            results.append(
+                {
+                    "id": str(row[self.id_field]),
+                    "document": row[text_field],
+                    "metadata": metadata,
+                }
+            )
+        return results
+
     async def count(
         self,
         session: Any = None,

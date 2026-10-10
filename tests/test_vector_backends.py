@@ -99,6 +99,11 @@ class _FakeMatchValue:
         self.value = value
 
 
+class _FakeMatchAny:
+    def __init__(self, any: list[Any]) -> None:
+        self.any = list(any)
+
+
 class _FakeFieldCondition:
     def __init__(self, key: str, match: Any) -> None:
         self.key = key
@@ -108,6 +113,16 @@ class _FakeFieldCondition:
 class _FakeFilter:
     def __init__(self, must: list[Any]) -> None:
         self.must = must
+
+
+class _FakePointIdsList:
+    def __init__(self, points: list[Any]) -> None:
+        self.points = list(points)
+
+
+class _FakeFilterSelector:
+    def __init__(self, filter: Any) -> None:
+        self.filter = filter
 
 
 class _FakePointStruct:
@@ -134,7 +149,11 @@ def _qdrant_filter_matches(
     if query_filter is None:
         return True
     for condition in query_filter.must:
-        if payload.get(condition.key) != condition.match.value:
+        match = condition.match
+        if isinstance(match, _FakeMatchAny):
+            if payload.get(condition.key) not in match.any:
+                return False
+        elif payload.get(condition.key) != match.value:
             return False
     return True
 
@@ -208,6 +227,20 @@ class _FakeQdrantClient:
         ]
         return types.SimpleNamespace(count=len(matching))
 
+    async def delete(
+        self, collection_name: str, points_selector: Any = None
+    ) -> None:
+        if isinstance(points_selector, _FakePointIdsList):
+            for point_id in points_selector.points:
+                self.points.pop(point_id, None)
+            return
+        if isinstance(points_selector, _FakeFilterSelector):
+            for point_id, point in list(self.points.items()):
+                if _qdrant_filter_matches(point.payload, points_selector.filter):
+                    del self.points[point_id]
+            return
+        raise AssertionError(f"unexpected points_selector: {points_selector!r}")
+
 
 @pytest.fixture
 def qdrant_module(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
@@ -216,8 +249,11 @@ def qdrant_module(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
     module.Distance = _FakeDistance
     module.VectorParams = _FakeVectorParams
     module.MatchValue = _FakeMatchValue
+    module.MatchAny = _FakeMatchAny
     module.FieldCondition = _FakeFieldCondition
     module.Filter = _FakeFilter
+    module.PointIdsList = _FakePointIdsList
+    module.FilterSelector = _FakeFilterSelector
     module.PointStruct = _FakePointStruct
     module.AsyncQdrantClient = _FakeAsyncQdrantClient
     monkeypatch.setitem(sys.modules, "qdrant_client", module)
@@ -291,20 +327,32 @@ class _FakeChromaCollection:
             ],
         }
 
-    def get(self, where: Any = None) -> dict[str, Any]:
-        ids = [
+    def get(self, ids: Any = None, where: Any = None) -> dict[str, Any]:
+        selected = [
             doc_id
             for doc_id, record in self.records.items()
             if _chroma_matches(record["metadata"], where)
         ]
+        if ids is not None:
+            selected = [doc_id for doc_id in selected if doc_id in set(ids)]
         return {
-            "ids": ids,
-            "documents": [self.records[doc_id]["document"] for doc_id in ids],
-            "metadatas": [self.records[doc_id]["metadata"] for doc_id in ids],
+            "ids": selected,
+            "documents": [self.records[doc_id]["document"] for doc_id in selected],
+            "metadatas": [self.records[doc_id]["metadata"] for doc_id in selected],
         }
 
     def count(self) -> int:
         return len(self.records)
+
+    def delete(self, ids: Any = None, where: Any = None) -> None:
+        if ids is not None:
+            for doc_id in ids:
+                self.records.pop(doc_id, None)
+            return
+        if where is not None:
+            for doc_id, record in list(self.records.items()):
+                if _chroma_matches(record["metadata"], where):
+                    del self.records[doc_id]
 
 
 class _FakeChromaClient:
@@ -657,6 +705,226 @@ class TestQdrantStore:
             store._resolve_client()
 
 
+class TestQdrantStoreCapabilities:
+    """Capability split: vector_search, keyword_search, delete, get."""
+
+    async def test_satisfies_capability_protocols(
+        self, qdrant_module: types.ModuleType, qdrant_client: _FakeQdrantClient
+    ) -> None:
+        from ragit.stores.base import (
+            DocumentStore,
+            LexicalIndex,
+            VectorIndex,
+        )
+
+        store = _qdrant_store(qdrant_client)
+        assert isinstance(store, VectorIndex)
+        assert isinstance(store, LexicalIndex)
+        assert isinstance(store, DocumentStore)
+
+    async def test_golden_hybrid_search_composite_matches_pre_refactor_output(
+        self, qdrant_module: types.ModuleType, qdrant_client: _FakeQdrantClient
+    ) -> None:
+        """The inherited composite reproduces the pre-refactor hybrid_search.
+
+        Golden output captured from the fused implementation: ids,
+        scores, and ordering must be identical.
+        """
+        store = _qdrant_store(qdrant_client)
+        await store.upsert(documents=DOCUMENTS)
+
+        results = await store.hybrid_search(
+            QUERY, QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD
+        )
+
+        assert [r["id"] for r in results] == ["doc-1", "doc-2", "doc-3"]
+        by_id = {r["id"]: r for r in results}
+        assert by_id["doc-1"]["distance"] == pytest.approx(0.0)
+        assert by_id["doc-1"]["keyword_score"] == pytest.approx(1.0)
+        assert by_id["doc-1"]["_rrf_score"] == pytest.approx(2.0 / 61)
+        assert by_id["doc-2"]["distance"] is None
+        assert by_id["doc-2"]["keyword_score"] == pytest.approx(0.5)
+        assert by_id["doc-2"]["_rrf_score"] == pytest.approx(1.0 / 62)
+        assert by_id["doc-3"]["distance"] == pytest.approx(
+            l2_distance(QUERY_EMBEDDING, [0.11, 0.21, 0.31])
+        )
+        assert by_id["doc-3"]["keyword_score"] is None
+        assert by_id["doc-3"]["_rrf_score"] == pytest.approx(1.0 / 62)
+
+    async def test_vector_search_only(
+        self, qdrant_module: types.ModuleType, qdrant_client: _FakeQdrantClient
+    ) -> None:
+        store = _qdrant_store(qdrant_client)
+        await store.upsert(documents=DOCUMENTS)
+
+        results = await store.vector_search(
+            QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD
+        )
+
+        # doc-1 (distance 0) and doc-3 (distance ~0.017) are within the
+        # threshold; doc-2 is beyond it.
+        assert [r["id"] for r in results] == ["doc-1", "doc-3"]
+        assert results[0]["distance"] == pytest.approx(0.0)
+        assert results[0]["keyword_score"] is None
+        assert results[1]["distance"] == pytest.approx(
+            l2_distance(QUERY_EMBEDDING, [0.11, 0.21, 0.31])
+        )
+        # The vector stage applies filters.
+        scoped = await store.vector_search(
+            QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD, tenant="b"
+        )
+        assert [r["id"] for r in scoped] == ["doc-3"]
+
+    async def test_keyword_search_only(
+        self, qdrant_module: types.ModuleType, qdrant_client: _FakeQdrantClient
+    ) -> None:
+        store = _qdrant_store(qdrant_client)
+        await store.upsert(documents=DOCUMENTS)
+
+        results = await store.keyword_search(QUERY, n_results=5)
+
+        assert [r["id"] for r in results] == ["doc-1", "doc-2"]
+        assert results[0]["keyword_score"] == pytest.approx(1.0)
+        assert results[1]["keyword_score"] == pytest.approx(0.5)
+        assert results[0]["distance"] is None
+        # The keyword stage applies filters.
+        scoped = await store.keyword_search(QUERY, n_results=5, tenant="b")
+        assert scoped == []
+
+    async def test_keyword_search_truncates_to_n_results(
+        self, qdrant_module: types.ModuleType, qdrant_client: _FakeQdrantClient
+    ) -> None:
+        store = _qdrant_store(qdrant_client)
+        await store.upsert(
+            documents=[
+                {
+                    "id": f"doc-{i}",
+                    "text": "shared token",
+                    "metadata": {"tenant": "a"},
+                    "embedding": [0.1, 0.2, 0.3],
+                }
+                for i in range(5)
+            ]
+        )
+
+        results = await store.keyword_search("shared token", n_results=2)
+
+        assert [r["id"] for r in results] == ["doc-0", "doc-1"]
+
+    async def test_delete_by_ids(
+        self, qdrant_module: types.ModuleType, qdrant_client: _FakeQdrantClient
+    ) -> None:
+        store = _qdrant_store(qdrant_client)
+        await store.upsert(documents=DOCUMENTS)
+
+        deleted = await store.delete(ids=["doc-1", "doc-3"])
+
+        assert deleted == 2
+        assert await store.count() == 1
+        assert await store.delete(ids=["missing"]) == 0
+
+    async def test_delete_by_filters(
+        self, qdrant_module: types.ModuleType, qdrant_client: _FakeQdrantClient
+    ) -> None:
+        store = _qdrant_store(qdrant_client)
+        await store.upsert(documents=DOCUMENTS)
+
+        deleted = await store.delete(filters={"tenant": "a"})
+
+        assert deleted == 2
+        assert await store.count() == 1
+
+    async def test_delete_by_ids_and_filters_is_conjunction(
+        self, qdrant_module: types.ModuleType, qdrant_client: _FakeQdrantClient
+    ) -> None:
+        store = _qdrant_store(qdrant_client)
+        await store.upsert(documents=DOCUMENTS)
+
+        # doc-1 and doc-2 carry tenant "a"; only doc-1 is in the id list.
+        deleted = await store.delete(ids=["doc-1", "doc-3"], filters={"tenant": "a"})
+
+        assert deleted == 1
+        assert await store.count() == 2
+
+    async def test_delete_rejects_empty_ids(
+        self, qdrant_module: types.ModuleType, qdrant_client: _FakeQdrantClient
+    ) -> None:
+        store = _qdrant_store(qdrant_client)
+
+        with pytest.raises(ValueError, match="empty"):
+            await store.delete(ids=[])
+
+    async def test_delete_rejects_missing_selector(
+        self, qdrant_module: types.ModuleType, qdrant_client: _FakeQdrantClient
+    ) -> None:
+        store = _qdrant_store(qdrant_client)
+
+        with pytest.raises(ValueError, match="at least one"):
+            await store.delete()
+
+    async def test_get_by_ids(
+        self, qdrant_module: types.ModuleType, qdrant_client: _FakeQdrantClient
+    ) -> None:
+        store = _qdrant_store(qdrant_client)
+        await store.upsert(documents=DOCUMENTS)
+
+        rows = await store.get(ids=["doc-2", "doc-3"], metadata_fields=["tenant"])
+
+        assert [row["id"] for row in rows] == ["doc-2", "doc-3"]
+        assert rows[0]["document"] == "alpha delta"
+        assert rows[0]["metadata"] == {"tenant": "a"}
+        assert await store.get(ids=["missing"]) == []
+
+    async def test_get_by_filters(
+        self, qdrant_module: types.ModuleType, qdrant_client: _FakeQdrantClient
+    ) -> None:
+        store = _qdrant_store(qdrant_client)
+        await store.upsert(documents=DOCUMENTS)
+
+        rows = await store.get(filters={"tenant": "b"})
+
+        assert [row["id"] for row in rows] == ["doc-3"]
+
+    async def test_get_by_ids_and_filters_is_conjunction(
+        self, qdrant_module: types.ModuleType, qdrant_client: _FakeQdrantClient
+    ) -> None:
+        store = _qdrant_store(qdrant_client)
+        await store.upsert(documents=DOCUMENTS)
+
+        rows = await store.get(ids=["doc-1", "doc-3"], filters={"tenant": "b"})
+
+        assert [row["id"] for row in rows] == ["doc-3"]
+
+    async def test_get_with_no_selector_returns_everything(
+        self, qdrant_module: types.ModuleType, qdrant_client: _FakeQdrantClient
+    ) -> None:
+        store = _qdrant_store(qdrant_client)
+        await store.upsert(documents=DOCUMENTS)
+
+        rows = await store.get()
+
+        assert {row["id"] for row in rows} == {"doc-1", "doc-2", "doc-3"}
+
+    async def test_delete_and_get_failures_propagate(
+        self, qdrant_module: types.ModuleType
+    ) -> None:
+        """Lifecycle operations have no strict parameter: failures raise."""
+
+        class _FailingClient(_FakeQdrantClient):
+            async def count(self, *args: Any, **kwargs: Any) -> Any:
+                raise RuntimeError("qdrant down")
+
+            async def scroll(self, *args: Any, **kwargs: Any) -> Any:
+                raise RuntimeError("qdrant down")
+
+        store = _qdrant_store(_FailingClient())
+
+        with pytest.raises(RuntimeError, match="qdrant down"):
+            await store.delete(filters={"tenant": "a"})
+        with pytest.raises(RuntimeError, match="qdrant down"):
+            await store.get()
+
+
 # ---------------------------------------------------------------------------
 # ChromaStore (fake client)
 # ---------------------------------------------------------------------------
@@ -875,6 +1143,193 @@ class TestChromaStore:
             )
 
 
+class TestChromaStoreCapabilities:
+    """Capability split: vector_search, keyword_search, delete, get."""
+
+    async def test_satisfies_capability_protocols(
+        self, chroma_client: _FakeChromaClient
+    ) -> None:
+        from ragit.stores.base import (
+            DocumentStore,
+            LexicalIndex,
+            VectorIndex,
+        )
+
+        store = _chroma_store(chroma_client)
+        assert isinstance(store, VectorIndex)
+        assert isinstance(store, LexicalIndex)
+        assert isinstance(store, DocumentStore)
+
+    async def test_golden_hybrid_search_composite_matches_pre_refactor_output(
+        self, chroma_client: _FakeChromaClient
+    ) -> None:
+        """The inherited composite reproduces the pre-refactor hybrid_search."""
+        store = _chroma_store(chroma_client)
+        await store.upsert(documents=DOCUMENTS)
+
+        results = await store.hybrid_search(
+            QUERY, QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD
+        )
+
+        assert [r["id"] for r in results] == ["doc-1", "doc-2", "doc-3"]
+        by_id = {r["id"]: r for r in results}
+        assert by_id["doc-1"]["distance"] == pytest.approx(0.0)
+        assert by_id["doc-1"]["keyword_score"] == pytest.approx(1.0)
+        assert by_id["doc-1"]["_rrf_score"] == pytest.approx(2.0 / 61)
+        assert by_id["doc-2"]["distance"] is None
+        assert by_id["doc-2"]["keyword_score"] == pytest.approx(0.5)
+        assert by_id["doc-2"]["_rrf_score"] == pytest.approx(1.0 / 62)
+        assert by_id["doc-3"]["keyword_score"] is None
+        assert by_id["doc-3"]["_rrf_score"] == pytest.approx(1.0 / 62)
+
+    async def test_vector_search_only(
+        self, chroma_client: _FakeChromaClient
+    ) -> None:
+        store = _chroma_store(chroma_client)
+        await store.upsert(documents=DOCUMENTS)
+
+        results = await store.vector_search(
+            QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD
+        )
+
+        assert [r["id"] for r in results] == ["doc-1", "doc-3"]
+        assert results[0]["distance"] == pytest.approx(0.0)
+        assert results[0]["keyword_score"] is None
+        scoped = await store.vector_search(
+            QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD, tenant="b"
+        )
+        assert [r["id"] for r in scoped] == ["doc-3"]
+
+    async def test_keyword_search_only(
+        self, chroma_client: _FakeChromaClient
+    ) -> None:
+        store = _chroma_store(chroma_client)
+        await store.upsert(documents=DOCUMENTS)
+
+        results = await store.keyword_search(QUERY, n_results=5)
+
+        assert [r["id"] for r in results] == ["doc-1", "doc-2"]
+        assert results[0]["keyword_score"] == pytest.approx(1.0)
+        assert results[1]["keyword_score"] == pytest.approx(0.5)
+        assert results[0]["distance"] is None
+        scoped = await store.keyword_search(QUERY, n_results=5, tenant="b")
+        assert scoped == []
+
+    async def test_keyword_search_truncates_to_n_results(
+        self, chroma_client: _FakeChromaClient
+    ) -> None:
+        store = _chroma_store(chroma_client)
+        await store.upsert(
+            documents=[
+                {
+                    "id": f"doc-{i}",
+                    "text": "shared token",
+                    "metadata": {"tenant": "a"},
+                    "embedding": [0.1, 0.2, 0.3],
+                }
+                for i in range(5)
+            ]
+        )
+
+        results = await store.keyword_search("shared token", n_results=2)
+
+        assert [r["id"] for r in results] == ["doc-0", "doc-1"]
+
+    async def test_delete_by_ids(
+        self, chroma_client: _FakeChromaClient
+    ) -> None:
+        store = _chroma_store(chroma_client)
+        await store.upsert(documents=DOCUMENTS)
+
+        deleted = await store.delete(ids=["doc-1", "doc-3"])
+
+        assert deleted == 2
+        assert await store.count() == 1
+        assert await store.delete(ids=["missing"]) == 0
+
+    async def test_delete_by_filters(
+        self, chroma_client: _FakeChromaClient
+    ) -> None:
+        store = _chroma_store(chroma_client)
+        await store.upsert(documents=DOCUMENTS)
+
+        deleted = await store.delete(filters={"tenant": "a"})
+
+        assert deleted == 2
+        assert await store.count() == 1
+
+    async def test_delete_by_ids_and_filters_is_conjunction(
+        self, chroma_client: _FakeChromaClient
+    ) -> None:
+        store = _chroma_store(chroma_client)
+        await store.upsert(documents=DOCUMENTS)
+
+        # doc-1 and doc-2 carry tenant "a"; only doc-1 is in the id list.
+        deleted = await store.delete(ids=["doc-1", "doc-3"], filters={"tenant": "a"})
+
+        assert deleted == 1
+        assert await store.count() == 2
+
+    async def test_delete_rejects_empty_ids(
+        self, chroma_client: _FakeChromaClient
+    ) -> None:
+        store = _chroma_store(chroma_client)
+
+        with pytest.raises(ValueError, match="empty"):
+            await store.delete(ids=[])
+
+    async def test_delete_rejects_missing_selector(
+        self, chroma_client: _FakeChromaClient
+    ) -> None:
+        store = _chroma_store(chroma_client)
+
+        with pytest.raises(ValueError, match="at least one"):
+            await store.delete()
+
+    async def test_get_by_ids(
+        self, chroma_client: _FakeChromaClient
+    ) -> None:
+        store = _chroma_store(chroma_client)
+        await store.upsert(documents=DOCUMENTS)
+
+        rows = await store.get(ids=["doc-2", "doc-3"], metadata_fields=["tenant"])
+
+        assert [row["id"] for row in rows] == ["doc-2", "doc-3"]
+        assert rows[0]["document"] == "alpha delta"
+        assert rows[0]["metadata"] == {"tenant": "a"}
+        assert await store.get(ids=["missing"]) == []
+
+    async def test_get_by_filters(
+        self, chroma_client: _FakeChromaClient
+    ) -> None:
+        store = _chroma_store(chroma_client)
+        await store.upsert(documents=DOCUMENTS)
+
+        rows = await store.get(filters={"tenant": "b"})
+
+        assert [row["id"] for row in rows] == ["doc-3"]
+
+    async def test_get_by_ids_and_filters_is_conjunction(
+        self, chroma_client: _FakeChromaClient
+    ) -> None:
+        store = _chroma_store(chroma_client)
+        await store.upsert(documents=DOCUMENTS)
+
+        rows = await store.get(ids=["doc-1", "doc-3"], filters={"tenant": "b"})
+
+        assert [row["id"] for row in rows] == ["doc-3"]
+
+    async def test_get_with_no_selector_returns_everything(
+        self, chroma_client: _FakeChromaClient
+    ) -> None:
+        store = _chroma_store(chroma_client)
+        await store.upsert(documents=DOCUMENTS)
+
+        rows = await store.get()
+
+        assert {row["id"] for row in rows} == {"doc-1", "doc-2", "doc-3"}
+
+
 # ---------------------------------------------------------------------------
 # ChromaStore (real client, when chromadb is installed)
 # ---------------------------------------------------------------------------
@@ -1078,6 +1533,197 @@ class TestFaissStore:
             await store.hybrid_search(
                 QUERY, [], n_results=5, threshold=THRESHOLD
             )
+
+
+class TestFaissStoreCapabilities:
+    """Capability split: vector_search, keyword_search, delete, get."""
+
+    async def test_satisfies_capability_protocols(
+        self, faiss_index: _FakeFaissIndex
+    ) -> None:
+        from ragit.stores.base import (
+            DocumentStore,
+            LexicalIndex,
+            VectorIndex,
+        )
+
+        store = _faiss_store(faiss_index)
+        assert isinstance(store, VectorIndex)
+        assert isinstance(store, LexicalIndex)
+        assert isinstance(store, DocumentStore)
+
+    async def test_golden_hybrid_search_composite_matches_pre_refactor_output(
+        self, faiss_index: _FakeFaissIndex
+    ) -> None:
+        """The inherited composite reproduces the pre-refactor hybrid_search."""
+        store = _faiss_store(faiss_index)
+        await store.upsert(documents=DOCUMENTS)
+
+        results = await store.hybrid_search(
+            QUERY, QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD
+        )
+
+        assert [r["id"] for r in results] == ["doc-1", "doc-2", "doc-3"]
+        by_id = {r["id"]: r for r in results}
+        assert by_id["doc-1"]["distance"] == pytest.approx(0.0)
+        assert by_id["doc-1"]["keyword_score"] == pytest.approx(1.0)
+        assert by_id["doc-1"]["_rrf_score"] == pytest.approx(2.0 / 61)
+        assert by_id["doc-2"]["distance"] is None
+        assert by_id["doc-2"]["keyword_score"] == pytest.approx(0.5)
+        assert by_id["doc-2"]["_rrf_score"] == pytest.approx(1.0 / 62)
+        assert by_id["doc-3"]["keyword_score"] is None
+        assert by_id["doc-3"]["_rrf_score"] == pytest.approx(1.0 / 62)
+
+    async def test_vector_search_only(
+        self, faiss_index: _FakeFaissIndex
+    ) -> None:
+        store = _faiss_store(faiss_index)
+        await store.upsert(documents=DOCUMENTS)
+
+        results = await store.vector_search(
+            QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD
+        )
+
+        assert [r["id"] for r in results] == ["doc-1", "doc-3"]
+        assert results[0]["distance"] == pytest.approx(0.0)
+        assert results[0]["keyword_score"] is None
+        scoped = await store.vector_search(
+            QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD, tenant="b"
+        )
+        assert [r["id"] for r in scoped] == ["doc-3"]
+
+    async def test_keyword_search_only(
+        self, faiss_index: _FakeFaissIndex
+    ) -> None:
+        store = _faiss_store(faiss_index)
+        await store.upsert(documents=DOCUMENTS)
+
+        results = await store.keyword_search(QUERY, n_results=5)
+
+        assert [r["id"] for r in results] == ["doc-1", "doc-2"]
+        assert results[0]["keyword_score"] == pytest.approx(1.0)
+        assert results[1]["keyword_score"] == pytest.approx(0.5)
+        assert results[0]["distance"] is None
+        scoped = await store.keyword_search(QUERY, n_results=5, tenant="b")
+        assert scoped == []
+
+    async def test_keyword_search_truncates_to_n_results(
+        self, faiss_index: _FakeFaissIndex
+    ) -> None:
+        store = _faiss_store(faiss_index)
+        await store.upsert(
+            documents=[
+                {
+                    "id": f"doc-{i}",
+                    "text": "shared token",
+                    "metadata": {"tenant": "a"},
+                    "embedding": [0.1, 0.2, 0.3],
+                }
+                for i in range(5)
+            ]
+        )
+
+        results = await store.keyword_search("shared token", n_results=2)
+
+        assert [r["id"] for r in results] == ["doc-0", "doc-1"]
+
+    async def test_delete_by_ids(
+        self, faiss_index: _FakeFaissIndex
+    ) -> None:
+        store = _faiss_store(faiss_index)
+        await store.upsert(documents=DOCUMENTS)
+
+        deleted = await store.delete(ids=["doc-1", "doc-3"])
+
+        assert deleted == 2
+        assert await store.count() == 1
+        # The deleted vectors are gone from the FAISS index.
+        assert faiss_index.ntotal == 1
+        assert await store.delete(ids=["missing"]) == 0
+
+    async def test_delete_by_filters(
+        self, faiss_index: _FakeFaissIndex
+    ) -> None:
+        store = _faiss_store(faiss_index)
+        await store.upsert(documents=DOCUMENTS)
+
+        deleted = await store.delete(filters={"tenant": "a"})
+
+        assert deleted == 2
+        assert await store.count() == 1
+        assert faiss_index.ntotal == 1
+
+    async def test_delete_by_ids_and_filters_is_conjunction(
+        self, faiss_index: _FakeFaissIndex
+    ) -> None:
+        store = _faiss_store(faiss_index)
+        await store.upsert(documents=DOCUMENTS)
+
+        # doc-1 and doc-2 carry tenant "a"; only doc-1 is in the id list.
+        deleted = await store.delete(ids=["doc-1", "doc-3"], filters={"tenant": "a"})
+
+        assert deleted == 1
+        assert await store.count() == 2
+        assert faiss_index.ntotal == 2
+
+    async def test_delete_rejects_empty_ids(
+        self, faiss_index: _FakeFaissIndex
+    ) -> None:
+        store = _faiss_store(faiss_index)
+
+        with pytest.raises(ValueError, match="empty"):
+            await store.delete(ids=[])
+
+    async def test_delete_rejects_missing_selector(
+        self, faiss_index: _FakeFaissIndex
+    ) -> None:
+        store = _faiss_store(faiss_index)
+
+        with pytest.raises(ValueError, match="at least one"):
+            await store.delete()
+
+    async def test_get_by_ids(
+        self, faiss_index: _FakeFaissIndex
+    ) -> None:
+        store = _faiss_store(faiss_index)
+        await store.upsert(documents=DOCUMENTS)
+
+        rows = await store.get(ids=["doc-2", "doc-3"], metadata_fields=["tenant"])
+
+        assert [row["id"] for row in rows] == ["doc-2", "doc-3"]
+        assert rows[0]["document"] == "alpha delta"
+        assert rows[0]["metadata"] == {"tenant": "a"}
+        assert await store.get(ids=["missing"]) == []
+
+    async def test_get_by_filters(
+        self, faiss_index: _FakeFaissIndex
+    ) -> None:
+        store = _faiss_store(faiss_index)
+        await store.upsert(documents=DOCUMENTS)
+
+        rows = await store.get(filters={"tenant": "b"})
+
+        assert [row["id"] for row in rows] == ["doc-3"]
+
+    async def test_get_by_ids_and_filters_is_conjunction(
+        self, faiss_index: _FakeFaissIndex
+    ) -> None:
+        store = _faiss_store(faiss_index)
+        await store.upsert(documents=DOCUMENTS)
+
+        rows = await store.get(ids=["doc-1", "doc-3"], filters={"tenant": "b"})
+
+        assert [row["id"] for row in rows] == ["doc-3"]
+
+    async def test_get_with_no_selector_returns_everything(
+        self, faiss_index: _FakeFaissIndex
+    ) -> None:
+        store = _faiss_store(faiss_index)
+        await store.upsert(documents=DOCUMENTS)
+
+        rows = await store.get()
+
+        assert {row["id"] for row in rows} == {"doc-1", "doc-2", "doc-3"}
 
 
 # ---------------------------------------------------------------------------

@@ -2,18 +2,31 @@
 
 Provides hybrid search (vector similarity + token-overlap
 keyword matching with Reciprocal Rank Fusion), document
-counting, and upsert operations against an in-process
-FAISS index.
+counting, lifecycle operations, and upsert operations
+against an in-process FAISS index.
+
+The store subclasses :class:`ragit.stores.base.HybridVectorStore`:
+the vector stage lives in :meth:`vector_search` (an exact
+FAISS L2 search) and the keyword stage in
+:meth:`keyword_search` (an in-process token-overlap scan
+over the record map, because FAISS has no text search).
+The inherited composite ``hybrid_search`` runs both stages
+and fuses them with RRF, so the result shape matches the
+other backends.
+
+Keyword-search performance notice: the keyword stage is an
+in-process fallback that scans every document in the
+record map and scores token overlap. It is intended for
+local development, small corpora, and testing -- not for
+production-scale keyword retrieval. Hosts at scale combine
+a pgvector :class:`VectorIndex` with an external lexical
+engine adapted to :class:`ragit.stores.base.LexicalIndex`.
 
 FAISS is a vector index library, not a database: the
 store keeps a ``faiss.IndexIDMap`` over
 ``IndexFlatL2`` for exact L2 search, plus an
 in-process record map holding each document's text and
-metadata. The keyword stage scores token overlap over
-that record map (the same approximation the in-memory
-store uses), because FAISS has no text search. Both
-stages are ranked independently and merged with RRF,
-so the result shape matches the other backends.
+metadata.
 
 FAISS identifies vectors by 64-bit integers, so string
 document ids are mapped to consecutive integers (and
@@ -35,17 +48,19 @@ from typing import Any
 
 import numpy as np
 
-from ragit.stores._scoring import rrf_merge, token_overlap, tokenize
-from ragit.stores.base import EmbeddingFunction, VectorStore
+from ragit.stores._scoring import token_overlap, tokenize
+from ragit.stores.base import (
+    EmbeddingFunction,
+    HybridVectorStore,
+)
 from ragit.stores.registry import vector_store_registry
-from ragit.types import RetrievalError
 from ragit.validation import validate_embedding, validate_identifier
 
 logger = logging.getLogger(__name__)
 
 
 @vector_store_registry.register("faiss")
-class FaissStore(VectorStore):
+class FaissStore(HybridVectorStore):
     """FAISS vector store.
 
     Hybrid search combines an exact FAISS L2 search
@@ -93,17 +108,19 @@ class FaissStore(VectorStore):
                 contain unsafe characters, or
                 ``embedding_dim`` is omitted.
         """
-        validate_identifier(table_name, "table_name")
-        validate_identifier(id_field, "id_field")
+        super().__init__(
+            table_name=table_name,
+            id_field=id_field,
+            embedding_dim=embedding_dim,
+            embedding_fn=embedding_fn,
+            settings=settings,
+            session_factory=session_factory,
+        )
         if embedding_dim is None:
             raise ValueError(
                 "embedding_dim is required; pass the dimension configured "
                 "for the active embedding model"
             )
-        self.table_name = table_name
-        self.id_field = id_field
-        self.embedding_dim = embedding_dim
-        self._embedding_fn = embedding_fn
         self._index = index
         self._string_to_int: dict[str, int] = {}
         self._int_to_string: dict[int, str] = {}
@@ -135,52 +152,52 @@ class FaissStore(VectorStore):
             self._int_to_string[int_id] = doc_id
         return self._string_to_int[doc_id]
 
-    async def hybrid_search(  # noqa: PLR0913, PLR0917
+    def _matches_filters(self, record: dict[str, Any], filters: dict[str, Any]) -> bool:
+        """Return whether ``record`` satisfies every equality filter."""
+        return all(record.get(key) == value for key, value in filters.items())
+
+    def _metadata_projection(
         self,
-        query: str,
+        record: dict[str, Any],
+        metadata_fields: list[str],
+    ) -> dict[str, Any]:
+        """Project ``metadata_fields`` out of ``record``."""
+        return {
+            field: record[field]
+            for field in metadata_fields
+            if field in record and record[field] is not None
+        }
+
+    async def vector_search(  # noqa: PLR0913, PLR0917
+        self,
         embedding: list[float],
         n_results: int,
         threshold: float,
         text_field: str = "text",
         metadata_fields: list[str] | None = None,
         session: Any = None,
-        strict: bool = False,
         **filters: Any,
     ) -> list[dict[str, Any]]:
-        """Hybrid search with vector similarity and keyword RRF.
+        """Exact L2 search over the FAISS index.
 
-        Executes a two-stage retrieval:
-          1. Vector search using an exact FAISS L2 search,
-             with the distance threshold applied in process.
-          2. Keyword search scoring token overlap over the
-             in-process record map.
-
-        Results from both stages are merged using
-        Reciprocal Rank Fusion (RRF), which combines the
-        ranks from each retrieval method to produce a
-        unified ranking.
+        FAISS returns ``-1`` labels for slots beyond the
+        index size. The search over-fetches (10×) because
+        FAISS cannot filter natively: candidates that do
+        not match the filters are dropped in process, so
+        matching documents deeper in the ranking are still
+        found.
 
         Args:
-            query: Natural language search query.
-            embedding: Query embedding vector. If empty,
-                the query is embedded automatically using
-                the injected ``embedding_fn``.
-            n_results: Maximum number of results to
-                return.
-            threshold: Maximum L2 distance for the vector
-                search part. Smaller values enforce
-                stricter matching.
+            embedding: Query embedding vector (required;
+                the method does not auto-embed).
+            n_results: Maximum number of results to return.
+            threshold: Maximum L2 distance.
             text_field: Record key containing the document
                 text.
             metadata_fields: Record keys to include in the
                 result metadata dict.
             session: Accepted for interface compatibility;
                 ignored (FAISS is in-process).
-            strict: When ``True``, a failed search raises
-                :class:`ragit.types.RetrievalError`. The
-                default ``False`` preserves the behavior of
-                logging the error and returning an empty
-                list.
             **filters: Equality filters matched against
                 document fields (metadata and extra
                 fields). FAISS cannot filter natively, so
@@ -188,17 +205,102 @@ class FaissStore(VectorStore):
                 and filters them in process.
 
         Returns:
-            list[dict]: A list of result dicts sorted by
-            RRF score, each containing ``id``,
-            ``document``, ``metadata``, ``distance`` (L2
-            distance, or ``None`` for keyword-only hits),
-            ``keyword_score`` (token-overlap ratio, or
-            ``None`` for vector-only hits), and
-            ``_rrf_score``.
+            list[dict]: Result dicts ordered by distance ascending,
+            each carrying ``id``, ``document``, ``metadata``,
+            ``distance``, and ``keyword_score`` (``None``).
 
         Raises:
-            ragit.types.RetrievalError: If the search
-                fails and ``strict=True``.
+            ValueError: If identifiers are unsafe or the embedding
+                has the wrong dimension.
+            Exception: Re-raises FAISS errors.
+        """
+        validate_identifier(text_field, "text_field")
+        for key in filters:
+            validate_identifier(key, "filter key")
+        metadata_fields = metadata_fields or []
+        for field in metadata_fields:
+            validate_identifier(field, "metadata_field")
+        validate_embedding(embedding, self.embedding_dim, label="query embedding")
+
+        index = self._resolve_index()
+
+        search_limit = n_results * 10
+        query_vector = np.asarray([embedding], dtype="float32")
+        faiss_distances, faiss_labels = await asyncio.to_thread(
+            index.search, query_vector, search_limit
+        )
+        vector_ranked: list[str] = []
+        distances: dict[str, float] = {}
+        for distance, label in zip(
+            faiss_distances[0], faiss_labels[0], strict=False
+        ):
+            if int(label) < 0:
+                continue
+            doc_id = self._int_to_string.get(int(label))
+            if doc_id is None:
+                continue
+            record = self._records.get(doc_id, {})
+            if not self._matches_filters(record, filters):
+                continue
+            if float(distance) >= threshold:
+                continue
+            vector_ranked.append(doc_id)
+            distances[doc_id] = float(distance)
+        vector_ranked = vector_ranked[:n_results]
+
+        results = []
+        for doc_id in vector_ranked:
+            record = self._records.get(doc_id, {})
+            results.append(
+                {
+                    "id": doc_id,
+                    "document": record.get(text_field),
+                    "metadata": self._metadata_projection(record, metadata_fields),
+                    "distance": distances[doc_id],
+                    "keyword_score": None,
+                }
+            )
+        return results
+
+    async def keyword_search(  # noqa: PLR0913, PLR0917
+        self,
+        query: str,
+        n_results: int,
+        text_field: str = "text",
+        metadata_fields: list[str] | None = None,
+        session: Any = None,
+        **filters: Any,
+    ) -> list[dict[str, Any]]:
+        """Token-overlap keyword search over the record map.
+
+        FAISS has no text search, so the keyword stage
+        scores token overlap over every document in the
+        in-process record map -- an in-process fallback
+        intended for local development, small corpora,
+        and testing, not production-scale keyword
+        retrieval.
+
+        Args:
+            query: Natural language search query.
+            n_results: Maximum number of results to return.
+            text_field: Record key containing the document
+                text.
+            metadata_fields: Record keys to include in the
+                result metadata dict.
+            session: Accepted for interface compatibility;
+                ignored (FAISS is in-process).
+            **filters: Equality filters matched against
+                document fields (metadata and extra
+                fields).
+
+        Returns:
+            list[dict]: Result dicts ordered by keyword score
+            descending (tie-broken by id), each carrying ``id``,
+            ``document``, ``metadata``, ``distance`` (``None``),
+            and ``keyword_score``.
+
+        Raises:
+            ValueError: If identifiers are unsafe.
         """
         validate_identifier(text_field, "text_field")
         for key in filters:
@@ -207,108 +309,34 @@ class FaissStore(VectorStore):
         for field in metadata_fields:
             validate_identifier(field, "metadata_field")
 
-        if n_results < 1:
-            raise ValueError(f"n_results must be a positive integer; got {n_results}")
-
-        if not embedding:
-            if self._embedding_fn is None:
-                raise ValueError(
-                    "embedding_fn is required to auto-embed the query; "
-                    "pass an embedding or construct the store with embedding_fn"
-                )
-            embedding_list = await self._embedding_fn([query])
-            embedding = embedding_list[0]
-
-        validate_embedding(embedding, self.embedding_dim, label="query embedding")
-
-        try:
-            index = self._resolve_index()
-
-            # Vector stage: exact L2 search. FAISS returns
-            # -1 labels for slots beyond the index size.
-            # The search over-fetches (10x) because FAISS
-            # cannot filter natively: candidates that do
-            # not match the filters are dropped in process
-            # below, so matching documents deeper in the
-            # ranking are still found.
-            search_limit = n_results * 10
-            query_vector = np.asarray([embedding], dtype="float32")
-            faiss_distances, faiss_labels = await asyncio.to_thread(
-                index.search, query_vector, search_limit
+        query_tokens = set(tokenize(query))
+        keyword_scores: dict[str, float] = {}
+        for doc_id, record in self._records.items():
+            if not self._matches_filters(record, filters):
+                continue
+            score = token_overlap(
+                query_tokens, tokenize(str(record.get(text_field, "")))
             )
-            vector_ranked: list[str] = []
-            distances: dict[str, float] = {}
-            for distance, label in zip(
-                faiss_distances[0], faiss_labels[0], strict=False
-            ):
-                if int(label) < 0:
-                    continue
-                doc_id = self._int_to_string.get(int(label))
-                if doc_id is None:
-                    continue
-                record = self._records.get(doc_id, {})
-                if not all(
-                    record.get(key) == value for key, value in filters.items()
-                ):
-                    continue
-                if float(distance) >= threshold:
-                    continue
-                vector_ranked.append(doc_id)
-                distances[doc_id] = float(distance)
-            vector_ranked = vector_ranked[:n_results]
+            if score > 0.0:
+                keyword_scores[doc_id] = score
 
-            # Keyword stage: token-overlap scoring over
-            # every document in the record map (FAISS has
-            # no text search).
-            keyword_scores: dict[str, float] = {}
-            query_tokens = set(tokenize(query))
-            for doc_id, record in self._records.items():
-                if not all(record.get(key) == value for key, value in filters.items()):
-                    continue
-                score = token_overlap(
-                    query_tokens, tokenize(str(record.get(text_field, "")))
-                )
-                if score > 0.0:
-                    keyword_scores[doc_id] = score
+        keyword_ranked = sorted(
+            keyword_scores, key=lambda doc_id: (-keyword_scores[doc_id], doc_id)
+        )[:n_results]
 
-            keyword_ranked = sorted(
-                keyword_scores, key=lambda doc_id: (-keyword_scores[doc_id], doc_id)
-            )
-
-            results = []
-            for doc_id, rrf_score in rrf_merge(
-                vector_ranked, keyword_ranked, n_results
-            ):
-                record = self._records.get(doc_id, {})
-                metadata = {
-                    field: record[field]
-                    for field in metadata_fields
-                    if field in record and record[field] is not None
+        results = []
+        for doc_id in keyword_ranked:
+            record = self._records.get(doc_id, {})
+            results.append(
+                {
+                    "id": doc_id,
+                    "document": record.get(text_field),
+                    "metadata": self._metadata_projection(record, metadata_fields),
+                    "distance": None,
+                    "keyword_score": keyword_scores[doc_id],
                 }
-                results.append(
-                    {
-                        "id": doc_id,
-                        "document": record.get(text_field),
-                        "metadata": metadata,
-                        "distance": distances.get(doc_id),
-                        "keyword_score": keyword_scores.get(doc_id),
-                        "_rrf_score": rrf_score,
-                    }
-                )
-            logger.debug(
-                "hybrid_search('%s') on %s: found %d results.",
-                query,
-                self.table_name,
-                len(results),
             )
-            return results
-        except Exception as exc:
-            logger.error("Hybrid search failed on %s: %s", self.table_name, exc)
-            if strict:
-                raise RetrievalError(
-                    f"Hybrid search failed on {self.table_name}: {exc}"
-                ) from exc
-            return []
+        return results
 
     async def count(
         self,
@@ -336,8 +364,131 @@ class FaissStore(VectorStore):
         return sum(
             1
             for record in self._records.values()
-            if all(record.get(key) == value for key, value in filters.items())
+            if self._matches_filters(record, filters)
         )
+
+    async def delete(
+        self,
+        ids: list[Any] | None = None,
+        filters: dict[str, Any] | None = None,
+        session: Any = None,
+    ) -> int:
+        """Delete documents selected by ``ids`` and/or ``filters``.
+
+        At least one selector must be supplied; an empty ``ids``
+        list is rejected. When both are supplied, both
+        restrictions apply (conjunction). The selected
+        documents' vectors are removed from the FAISS index
+        (``remove_ids``) and their record-map entries are
+        cleaned up.
+
+        Args:
+            ids: Document ids to delete.
+            filters: Equality filters matched against document
+                fields (metadata and extra fields).
+            session: Accepted for interface compatibility;
+                ignored (FAISS is in-process).
+
+        Returns:
+            int: Number of deleted documents.
+
+        Raises:
+            ValueError: If no selector is supplied, ``ids`` is
+                empty, or a filter key is unsafe.
+            Exception: Re-raises FAISS errors.
+        """
+        if ids is None and filters is None:
+            raise ValueError(
+                "delete requires at least one of ids or filters"
+            )
+        if ids is not None and len(ids) == 0:
+            raise ValueError(
+                "ids must not be empty; an empty id list never "
+                "means delete everything"
+            )
+        if filters is not None:
+            for key in filters:
+                validate_identifier(key, "filter key")
+
+        to_delete = [
+            doc_id
+            for doc_id in list(self._records)
+            if (ids is None or doc_id in set(ids))
+            and (filters is None or self._matches_filters(self._records[doc_id], filters))
+        ]
+        if not to_delete:
+            return 0
+
+        index = self._resolve_index()
+        int_ids = np.asarray(
+            [self._string_to_int[doc_id] for doc_id in to_delete],
+            dtype="int64",
+        )
+        await asyncio.to_thread(index.remove_ids, int_ids)
+        for doc_id in to_delete:
+            del self._records[doc_id]
+            self._embeddings.pop(doc_id, None)
+            int_id = self._string_to_int.pop(doc_id, None)
+            if int_id is not None:
+                self._int_to_string.pop(int_id, None)
+        logger.info("Deleted %d documents from %s.", len(to_delete), self.table_name)
+        return len(to_delete)
+
+    async def get(  # noqa: PLR0913, PLR0917
+        self,
+        ids: list[Any] | None = None,
+        filters: dict[str, Any] | None = None,
+        session: Any = None,
+        text_field: str = "text",
+        metadata_fields: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fetch documents selected by ``ids`` and/or ``filters``.
+
+        The selection is a record-map lookup: documents whose
+        id is in ``ids`` (when supplied) and that match every
+        equality filter (when supplied). With no selector,
+        every document is returned.
+
+        Args:
+            ids: Document ids to fetch.
+            filters: Equality filters matched against document
+                fields (metadata and extra fields).
+            session: Accepted for interface compatibility;
+                ignored (FAISS is in-process).
+            text_field: Record key containing the document
+                text. Defaults to "text".
+            metadata_fields: Record keys to include in the
+                result metadata dict.
+
+        Returns:
+            list[dict]: ``id``/``document``/``metadata`` dicts
+            (score keys are meaningless for direct fetches).
+
+        Raises:
+            ValueError: If any identifier is unsafe.
+        """
+        validate_identifier(text_field, "text_field")
+        metadata_fields = metadata_fields or []
+        for field in metadata_fields:
+            validate_identifier(field, "metadata_field")
+        if filters is not None:
+            for key in filters:
+                validate_identifier(key, "filter key")
+
+        results = []
+        for doc_id, record in self._records.items():
+            if ids is not None and doc_id not in set(ids):
+                continue
+            if filters is not None and not self._matches_filters(record, filters):
+                continue
+            results.append(
+                {
+                    "id": doc_id,
+                    "document": record.get(text_field),
+                    "metadata": self._metadata_projection(record, metadata_fields),
+                }
+            )
+        return results
 
     async def upsert(  # noqa: PLR0913, PLR0917
         self,

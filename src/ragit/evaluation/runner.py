@@ -11,11 +11,17 @@ retriever or dataset module. The host application wires
 its own hybrid retriever and curated dataset in a thin
 runner adapter.
 
-Supports two modes:
+Supports three modes:
   - **retrieval-only**: evaluates retrieval quality (Recall@K,
     Precision@K, MRR)
-  - **end-to-end**: evaluates both retrieval and answer quality
-    (faithfulness, relevance, completeness, conciseness)
+  - **context**: scores the joined retrieved context against
+    the gold answer (the legacy behavior under an honest
+    name -- it measures whether the retrieved chunks contain
+    the answer, not whether a model answers faithfully)
+  - **end-to-end**: evaluates both retrieval and answer
+    quality (faithfulness, relevance, completeness,
+    conciseness) on a real model output produced by an
+    injected answer generator
 
 Can be run as a CLI script or imported for use in tests and
 the eval API.
@@ -46,12 +52,15 @@ logger = logging.getLogger(__name__)
 RetrievalFunction = Callable[[str], Awaitable[list[dict[str, Any]]]]
 """Async retrieval function: ``(query: str) -> list[result dicts]``."""
 
+AnswerFunction = Callable[[str, str], Awaitable[str]]
+"""Async answer generator: ``(query: str, context: str) -> answer``."""
+
 
 @dataclass
 class EvalConfig:
     """Configuration for an evaluation run."""
 
-    mode: str = "end-to-end"  # "retrieval-only" or "end-to-end"
+    mode: str = "end-to-end"  # "retrieval-only", "context", or "end-to-end"
     judge: str = "heuristic"  # "heuristic" or "llm"
     n_results: int = 5
     category: str | None = None
@@ -169,18 +178,27 @@ async def _run_retrieval_eval(
 async def _run_answer_eval(
     dataset: list[EvalSample],
     per_sample_retrieval: list[dict[str, Any]],
+    answer_fn: AnswerFunction | None = None,
     judge: str = "heuristic",
     settings: RagSettings | None = None,
 ) -> tuple[AnswerMetrics, list[dict[str, Any]]]:
     """Run answer quality evaluation on the RAG pipeline output.
 
-    Evaluates the retrieved context from the retrieval phase against gold
-    answers. This avoids redundant retrieval calls and ensures the answer
-    metrics are computed on the exact context used for retrieval metrics.
+    In ``context`` mode (``answer_fn is None``) the joined
+    retrieved context is scored against the gold answer --
+    the legacy behavior under an honest name. In
+    ``end-to-end`` mode the injected ``answer_fn`` generates
+    a real answer from ``(query, context)`` and the judges
+    receive the actual generated answer and the actual
+    retrieved context as separate inputs.
 
     Args:
         dataset: The evaluation samples.
         per_sample_retrieval: Retrieval results for each sample (provides context).
+        answer_fn: Injected async answer generator
+            ``(query, context) -> answer``. When ``None``
+            (context mode) the retrieved context itself is
+            scored against the gold answer.
         judge: "heuristic" or "llm" evaluation strategy.
         settings: Host settings for the LLM judge (only used when
             ``judge == "llm"``).
@@ -194,18 +212,22 @@ async def _run_answer_eval(
     for i, sample in enumerate(dataset):
         try:
             retrieval_data = per_sample_retrieval[i] if i < len(per_sample_retrieval) else {}
-            generated_answer = retrieval_data.get("context", "")
+            context = retrieval_data.get("context", "")
             chunks_found = retrieval_data.get("chunks_found", 0)
 
-            if not generated_answer:
-                generated_answer = "(no context retrieved)"
+            if answer_fn is not None:
+                generated_answer = await answer_fn(sample.query, context)
+            else:
+                generated_answer = context
+                if not generated_answer:
+                    generated_answer = "(no context retrieved)"
 
             if judge == "llm":
                 score = await evaluate_answer_llm(
                     query=sample.query,
                     answer=generated_answer,
                     gold_answer=sample.gold_answer,
-                    retrieved_context=generated_answer,
+                    retrieved_context=context,
                     settings=settings,
                 )
             else:
@@ -213,7 +235,7 @@ async def _run_answer_eval(
                     query=sample.query,
                     answer=generated_answer,
                     gold_answer=sample.gold_answer,
-                    retrieved_context=generated_answer,
+                    retrieved_context=context,
                 )
 
             metrics.avg_faithfulness += score.faithfulness
@@ -270,6 +292,7 @@ async def run_evaluation(
     retrieval_fn: RetrievalFunction | None = None,
     dataset: list[EvalSample] | None = None,
     settings: RagSettings | None = None,
+    answer_fn: AnswerFunction | None = None,
 ) -> EvalResult:
     """Run a complete RAG evaluation.
 
@@ -283,9 +306,18 @@ async def run_evaluation(
             the config's category/difficulty.
         settings: Host settings, read by the LLM judge when
             ``config.judge == "llm"``.
+        answer_fn: Injected async answer generator
+            ``(query, context) -> generated answer``. Required
+            when ``config.mode == "end-to-end"``; the host
+            application supplies its answer model here.
 
     Returns:
         EvalResult with all metrics and per-sample details.
+
+    Raises:
+        ValueError: If the retrieval function or dataset is
+            missing, the mode is unknown, or the mode is
+            ``end-to-end`` without an ``answer_fn``.
     """
     if config is None:
         config = EvalConfig()
@@ -293,6 +325,18 @@ async def run_evaluation(
         raise ValueError(
             "run_evaluation requires an injected retrieval_fn and dataset; "
             "the host application wires its retriever and dataset in"
+        )
+    if config.mode not in ("retrieval-only", "context", "end-to-end"):
+        raise ValueError(
+            f"invalid evaluation mode {config.mode!r}; valid modes are "
+            "'retrieval-only', 'context', and 'end-to-end'"
+        )
+    if config.mode == "end-to-end" and answer_fn is None:
+        raise ValueError(
+            "mode='end-to-end' requires an answer generator; pass "
+            "answer_fn=... (an async (query, context) -> answer "
+            "callable) or use one of the other modes: 'retrieval-only', "
+            "'context', 'end-to-end'"
         )
 
     start_time = time.monotonic()
@@ -325,11 +369,12 @@ async def run_evaluation(
     )
     result.retrieval_metrics = asdict(retrieval_metrics)
 
-    # Step 2: Answer quality evaluation (if end-to-end mode)
-    if config.mode == "end-to-end":
+    # Step 2: Answer quality evaluation (context and end-to-end modes)
+    if config.mode in ("context", "end-to-end"):
         answer_metrics, answer_details = await _run_answer_eval(
             dataset=dataset,
             per_sample_retrieval=per_sample_retrieval,
+            answer_fn=answer_fn,
             judge=config.judge,
             settings=settings,
         )
@@ -337,15 +382,28 @@ async def run_evaluation(
             k: v for k, v in asdict(answer_metrics).items() if k != "per_sample"
         }
 
-        # Merge per-sample results
+        # Merge per-sample results: the retrieved context, the
+        # generated answer, and the gold answer stay under their
+        # own names so each sample carries the full triple; the
+        # metric scores keep the answer_ prefix.
         for i, retrieval_data in enumerate(per_sample_retrieval):
             merged = {**retrieval_data}
             if i < len(answer_details):
+                detail = answer_details[i]
+                merged["generated_answer"] = detail.get("generated_answer", "")
+                merged["gold_answer"] = detail.get("gold_answer", "")
                 merged.update(
                     {
                         f"answer_{k}": v
-                        for k, v in answer_details[i].items()
-                        if k not in ("query", "context")
+                        for k, v in detail.items()
+                        if k
+                        not in (
+                            "query",
+                            "context",
+                            "generated_answer",
+                            "gold_answer",
+                            "chunks_found",
+                        )
                     }
                 )
             result.per_sample_results.append(merged)
@@ -368,7 +426,7 @@ async def run_evaluation(
         f"  Errors: {retrieval_metrics.errors}",
     ]
 
-    if config.mode == "end-to-end":
+    if config.mode in ("context", "end-to-end"):
         lines.extend(
             [
                 "",
@@ -410,14 +468,26 @@ def main(
             ``runner(config, retrieval_fn, dataset, settings)``.
             Defaults to :func:`run_evaluation`; a host
             application passes its own runner to inject
-            domain dependencies behind the CLI flags.
+            domain dependencies behind the CLI flags --
+            including the ``answer_fn`` answer generator
+            that ``mode="end-to-end"`` requires::
+
+                async def host_runner(config, retrieval_fn,
+                                    dataset, settings):
+                    return await run_evaluation(
+                        config, retrieval_fn, dataset, settings,
+                        answer_fn=host_answer_fn,
+                    )
+
+                main(retrieval_fn, dataset, settings,
+                     runner=host_runner)
     """
     import argparse  # noqa: PLC0415
 
     parser = argparse.ArgumentParser(description="Run RAG evaluation")
     parser.add_argument(
         "--mode",
-        choices=["retrieval-only", "end-to-end"],
+        choices=["retrieval-only", "context", "end-to-end"],
         default="end-to-end",
         help="Evaluation mode (default: end-to-end)",
     )

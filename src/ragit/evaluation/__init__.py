@@ -22,6 +22,7 @@ from ragit.evaluation.retrieval import (
     RetrievalMetrics,
 )
 from ragit.evaluation.runner import (
+    AnswerFunction,
     EvalConfig,
     EvalResult,
     RetrievalFunction,
@@ -29,6 +30,7 @@ from ragit.evaluation.runner import (
 )
 
 __all__ = [
+    "AnswerFunction",
     "AnswerMetrics",
     "AnswerScore",
     "Difficulty",

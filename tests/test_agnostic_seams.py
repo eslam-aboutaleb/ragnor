@@ -840,11 +840,18 @@ async def test_evaluation_seam_retrieval_metrics_per_domain(config: DomainConfig
 @pytest.mark.parametrize("config", DOMAINS, ids=_config_ids)
 async def test_evaluation_seam_end_to_end_per_domain(config: DomainConfig) -> None:
     """``run_evaluation`` computes answer metrics for each domain's dataset."""
+    gold = {query: gold_answer for query, _, gold_answer in config.eval_queries}
+
+    async def answer_fn(query: str, context: str) -> str:
+        """Simulate a faithful answer generator."""
+        return gold.get(query, context)
+
     result = await run_evaluation(
         EvalConfig(mode="end-to-end", judge="heuristic", n_results=5),
         retrieval_fn=_make_retrieval_fn(config),
         dataset=_eval_dataset(config),
         settings=DomainSettings(config),
+        answer_fn=answer_fn,
     )
     assert result.retrieval_metrics["errors"] == 0
     assert result.answer_metrics["total_evaluated"] == len(config.eval_queries)

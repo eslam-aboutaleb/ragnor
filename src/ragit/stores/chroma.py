@@ -2,15 +2,25 @@
 
 Provides hybrid search (vector similarity + token-overlap
 keyword matching with Reciprocal Rank Fusion), document
-counting, and upsert operations against a Chroma collection.
+counting, lifecycle operations, and upsert operations against
+a Chroma collection.
 
-The vector stage uses Chroma's native nearest-neighbor
-search; the keyword stage scores token overlap in process
-over the collection's documents (the same approximation
-the in-memory store uses), because Chroma has no built-in
-full-text rank. Both stages are ranked independently and
-merged with RRF, so the result shape matches the other
-backends.
+The store subclasses :class:`ragit.stores.base.HybridVectorStore`:
+the vector stage lives in :meth:`vector_search` (Chroma's
+native nearest-neighbor search) and the keyword stage in
+:meth:`keyword_search` (an in-process token-overlap scan over
+the collection's documents, because Chroma has no built-in
+full-text rank). The inherited composite ``hybrid_search``
+runs both stages and fuses them with RRF, so the result shape
+matches the other backends.
+
+Keyword-search performance notice: the keyword stage is an
+in-process fallback that fetches every document in the
+collection and scores token overlap. It is intended for local
+development, small corpora, and testing -- not for
+production-scale keyword retrieval. Hosts at scale combine a
+pgvector :class:`VectorIndex` with an external lexical engine
+adapted to :class:`ragit.stores.base.LexicalIndex`.
 
 The store talks to Chroma's synchronous client API and
 wraps every call in ``asyncio.to_thread`` so the event
@@ -33,8 +43,11 @@ import logging
 from typing import Any
 
 from ragit.config import RagSettings
-from ragit.stores._scoring import rrf_merge, token_overlap, tokenize
-from ragit.stores.base import EmbeddingFunction, VectorStore
+from ragit.stores._scoring import token_overlap, tokenize
+from ragit.stores.base import (
+    EmbeddingFunction,
+    HybridVectorStore,
+)
 from ragit.stores.registry import vector_store_registry
 from ragit.types import RetrievalError
 from ragit.validation import validate_embedding, validate_identifier
@@ -50,7 +63,7 @@ def _where_filter(filters: dict[str, Any]) -> dict[str, Any] | None:
 
 
 @vector_store_registry.register("chroma")
-class ChromaStore(VectorStore):
+class ChromaStore(HybridVectorStore):
     """Chroma vector store.
 
     Hybrid search combines Chroma's native vector search
@@ -99,17 +112,20 @@ class ChromaStore(VectorStore):
             ValueError: If ``table_name`` contains unsafe
                 characters, or ``embedding_dim`` is omitted.
         """
-        validate_identifier(table_name, "table_name")
+        super().__init__(
+            table_name=table_name,
+            id_field=id_field,
+            embedding_dim=embedding_dim,
+            settings=settings,
+            embedding_fn=embedding_fn,
+            session_factory=session_factory,
+        )
         if embedding_dim is None:
             raise ValueError(
                 "embedding_dim is required; pass the dimension configured "
                 "for the active embedding model"
             )
-        self.table_name = table_name
-        self.id_field = id_field
-        self.embedding_dim = embedding_dim
         self._settings = settings
-        self._embedding_fn = embedding_fn
         self._client = client
         self._path = path
         self._collection: Any | None = None
@@ -134,40 +150,26 @@ class ChromaStore(VectorStore):
             )
         return self._collection
 
-    async def hybrid_search(  # noqa: PLR0913, PLR0917
+    async def vector_search(  # noqa: PLR0913, PLR0917
         self,
-        query: str,
         embedding: list[float],
         n_results: int,
         threshold: float,
         text_field: str = "text",
         metadata_fields: list[str] | None = None,
         session: Any = None,
-        strict: bool = False,
         **filters: Any,
     ) -> list[dict[str, Any]]:
-        """Hybrid search with vector similarity and keyword RRF.
+        """Native nearest-neighbor search over the collection.
 
-        Executes a two-stage retrieval:
-          1. Vector search using Chroma's native
-             nearest-neighbor search (L2 distance), with
-             the distance threshold applied in process.
-          2. Keyword search scoring token overlap over the
-             collection's documents.
-
-        Results from both stages are merged using Reciprocal
-        Rank Fusion (RRF), which combines the ranks from each
-        retrieval method to produce a unified ranking.
+        Chroma returns L2 distances; the threshold is applied
+        in process, matching the other backends' semantics.
 
         Args:
-            query: Natural language search query.
-            embedding: Query embedding vector. If empty, the
-                query is embedded automatically using the
-                injected ``embedding_fn``.
+            embedding: Query embedding vector (required; the
+                method does not auto-embed).
             n_results: Maximum number of results to return.
-            threshold: Maximum L2 distance for the vector
-                search part. Smaller values enforce stricter
-                matching.
+            threshold: Maximum L2 distance.
             text_field: Accepted for interface compatibility;
                 Chroma stores document text as the record's
                 document.
@@ -175,24 +177,103 @@ class ChromaStore(VectorStore):
                 result metadata dict.
             session: Accepted for interface compatibility;
                 ignored (Chroma has no SQL session concept).
-            strict: When ``True``, a failed search raises
-                :class:`ragit.types.RetrievalError`. The
-                default ``False`` preserves the behavior of
-                logging the error and returning an empty list.
-            **filters: Equality filters applied to both
-                search stages (e.g., ``tenant_id="..."``).
+            **filters: Equality filters applied to the search
+                (e.g., ``tenant_id="..."``).
 
         Returns:
-            list[dict]: A list of result dicts sorted by RRF
-            score, each containing ``id``, ``document``,
-            ``metadata``, ``distance`` (L2 distance, or
-            ``None`` for keyword-only hits),
-            ``keyword_score`` (token-overlap ratio, or
-            ``None`` for vector-only hits), and ``_rrf_score``.
+            list[dict]: Result dicts ordered by distance ascending,
+            each carrying ``id``, ``document``, ``metadata``,
+            ``distance``, and ``keyword_score`` (``None``).
 
         Raises:
-            ragit.types.RetrievalError: If the search fails
-                and ``strict=True``.
+            ValueError: If identifiers are unsafe or the embedding
+                has the wrong dimension.
+            Exception: Re-raises Chroma errors.
+        """
+        for key in filters:
+            validate_identifier(key, "filter key")
+        metadata_fields = metadata_fields or []
+        for field in metadata_fields:
+            validate_identifier(field, "metadata_field")
+        validate_embedding(embedding, self.embedding_dim, label="query embedding")
+
+        collection = self._resolve_collection()
+        where = _where_filter(filters)
+
+        response = await asyncio.to_thread(
+            collection.query,
+            query_embeddings=[embedding],
+            n_results=n_results,
+            where=where,
+        )
+        results = []
+        for raw_id, document, distance, metadata in zip(
+            (response.get("ids") or [[]])[0],
+            (response.get("documents") or [[]])[0],
+            (response.get("distances") or [[]])[0],
+            (response.get("metadatas") or [[]])[0],
+            strict=False,
+        ):
+            if distance is not None and distance >= threshold:
+                continue
+            doc_id = str(raw_id)
+            record_metadata = dict(metadata or {})
+            results.append(
+                {
+                    "id": doc_id,
+                    "document": document,
+                    "metadata": {
+                        field: record_metadata[field]
+                        for field in metadata_fields
+                        if field in record_metadata
+                        and record_metadata[field] is not None
+                    },
+                    "distance": float(distance),
+                    "keyword_score": None,
+                }
+            )
+        return results
+
+    async def keyword_search(  # noqa: PLR0913, PLR0917
+        self,
+        query: str,
+        n_results: int,
+        text_field: str = "text",
+        metadata_fields: list[str] | None = None,
+        session: Any = None,
+        **filters: Any,
+    ) -> list[dict[str, Any]]:
+        """Token-overlap keyword search over the collection's documents.
+
+        Chroma has no native full-text rank, so the keyword
+        stage fetches every document in the collection and
+        scores token overlap in process -- an in-process
+        fallback intended for local development, small
+        corpora, and testing, not production-scale keyword
+        retrieval.
+
+        Args:
+            query: Natural language search query.
+            n_results: Maximum number of results to return.
+            text_field: Accepted for interface compatibility;
+                Chroma stores document text as the record's
+                document.
+            metadata_fields: Metadata keys to include in the
+                result metadata dict.
+            session: Accepted for interface compatibility;
+                ignored (Chroma has no SQL session concept).
+            **filters: Equality filters applied to the search
+                (e.g., ``tenant_id="..."``).
+
+        Returns:
+            list[dict]: Result dicts ordered by keyword score
+            descending (tie-broken by id), each carrying ``id``,
+            ``document``, ``metadata``, ``distance`` (``None``),
+            and ``keyword_score``.
+
+        Raises:
+            ValueError: If identifiers are unsafe.
+            Exception: Re-raises Chroma errors.
         """
         for key in filters:
             validate_identifier(key, "filter key")
@@ -200,107 +281,49 @@ class ChromaStore(VectorStore):
         for field in metadata_fields:
             validate_identifier(field, "metadata_field")
 
-        if n_results < 1:
-            raise ValueError(f"n_results must be a positive integer; got {n_results}")
+        collection = self._resolve_collection()
+        where = _where_filter(filters)
+        query_tokens = set(tokenize(query))
 
-        if not embedding:
-            if self._embedding_fn is None:
-                raise ValueError(
-                    "embedding_fn is required to auto-embed the query; "
-                    "pass an embedding or construct the store with embedding_fn"
-                )
-            embedding_list = await self._embedding_fn([query])
-            embedding = embedding_list[0]
+        all_records = await asyncio.to_thread(collection.get, where=where)
+        keyword_scores: dict[str, float] = {}
+        documents: dict[str, str] = {}
+        metadatas: dict[str, dict[str, Any]] = {}
+        for raw_id, document, metadata in zip(
+            all_records.get("ids") or [],
+            all_records.get("documents") or [],
+            all_records.get("metadatas") or [],
+            strict=False,
+        ):
+            doc_id = str(raw_id)
+            documents[doc_id] = document
+            metadatas[doc_id] = dict(metadata or {})
+            score = token_overlap(query_tokens, tokenize(str(document)))
+            if score > 0.0:
+                keyword_scores[doc_id] = score
 
-        validate_embedding(embedding, self.embedding_dim, label="query embedding")
+        keyword_ranked = sorted(
+            keyword_scores, key=lambda doc_id: (-keyword_scores[doc_id], doc_id)
+        )[:n_results]
 
-        try:
-            collection = self._resolve_collection()
-            where = _where_filter(filters)
-
-            # Vector stage: native nearest-neighbor search.
-            # Chroma returns L2 distances; the threshold is
-            # applied in process, matching the other
-            # backends' semantics.
-            response = await asyncio.to_thread(
-                collection.query,
-                query_embeddings=[embedding],
-                n_results=n_results,
-                where=where,
-            )
-            vector_ranked: list[str] = []
-            distances: dict[str, float] = {}
-            documents: dict[str, str] = {}
-            metadatas: dict[str, dict[str, Any]] = {}
-            for raw_id, document, distance, metadata in zip(
-                (response.get("ids") or [[]])[0],
-                (response.get("documents") or [[]])[0],
-                (response.get("distances") or [[]])[0],
-                (response.get("metadatas") or [[]])[0],
-                strict=False,
-            ):
-                if distance is not None and distance >= threshold:
-                    continue
-                doc_id = str(raw_id)
-                vector_ranked.append(doc_id)
-                distances[doc_id] = float(distance)
-                documents[doc_id] = document
-                metadatas[doc_id] = dict(metadata or {})
-
-            # Keyword stage: token-overlap scoring over every
-            # document in the collection (Chroma has no
-            # native full-text rank).
-            keyword_scores: dict[str, float] = {}
-            query_tokens = set(tokenize(query))
-            all_records = await asyncio.to_thread(collection.get, where=where)
-            for raw_id, document in zip(
-                all_records.get("ids") or [],
-                all_records.get("documents") or [],
-                strict=False,
-            ):
-                doc_id = str(raw_id)
-                documents.setdefault(doc_id, document)
-                score = token_overlap(query_tokens, tokenize(str(document)))
-                if score > 0.0:
-                    keyword_scores[doc_id] = score
-
-            keyword_ranked = sorted(
-                keyword_scores, key=lambda doc_id: (-keyword_scores[doc_id], doc_id)
-            )
-
-            results = []
-            for doc_id, rrf_score in rrf_merge(
-                vector_ranked, keyword_ranked, n_results
-            ):
-                metadata = {
-                    field: metadatas.get(doc_id, {}).get(field)
-                    for field in metadata_fields
-                    if metadatas.get(doc_id, {}).get(field) is not None
+        results = []
+        for doc_id in keyword_ranked:
+            record_metadata = metadatas.get(doc_id, {})
+            results.append(
+                {
+                    "id": doc_id,
+                    "document": documents.get(doc_id),
+                    "metadata": {
+                        field: record_metadata[field]
+                        for field in metadata_fields
+                        if field in record_metadata
+                        and record_metadata[field] is not None
+                    },
+                    "distance": None,
+                    "keyword_score": keyword_scores[doc_id],
                 }
-                results.append(
-                    {
-                        "id": doc_id,
-                        "document": documents.get(doc_id),
-                        "metadata": metadata,
-                        "distance": distances.get(doc_id),
-                        "keyword_score": keyword_scores.get(doc_id),
-                        "_rrf_score": rrf_score,
-                    }
-                )
-            logger.debug(
-                "hybrid_search('%s') on %s: found %d results.",
-                query,
-                self.table_name,
-                len(results),
             )
-            return results
-        except Exception as exc:
-            logger.error("Hybrid search failed on %s: %s", self.table_name, exc)
-            if strict:
-                raise RetrievalError(
-                    f"Hybrid search failed on {self.table_name}: {exc}"
-                ) from exc
-            return []
+        return results
 
     async def count(
         self,
@@ -322,6 +345,7 @@ class ChromaStore(VectorStore):
             int: Number of matching documents, or 0 on error.
 
         Raises:
+            ValueError: If a filter key is unsafe.
             ragit.types.RetrievalError: If the count fails
                 and ``strict=True``.
         """
@@ -343,6 +367,130 @@ class ChromaStore(VectorStore):
                     f"Count failed on {self.table_name}: {exc}"
                 ) from exc
             return 0
+
+    async def delete(
+        self,
+        ids: list[Any] | None = None,
+        filters: dict[str, Any] | None = None,
+        session: Any = None,
+    ) -> int:
+        """Delete documents selected by ``ids`` and/or ``filters``.
+
+        At least one selector must be supplied; an empty ``ids``
+        list is rejected. When both are supplied, both
+        restrictions apply (conjunction): the matching records
+        are resolved first, then exactly those ids are deleted,
+        so the returned count is the number of documents that
+        existed and matched.
+
+        Args:
+            ids: Document ids to delete.
+            filters: Equality filters (e.g.,
+                ``tenant_id="..."``).
+            session: Accepted for interface compatibility;
+                ignored (Chroma manages its own connections).
+
+        Returns:
+            int: Number of deleted documents.
+
+        Raises:
+            ValueError: If no selector is supplied, ``ids`` is
+                empty, or a filter key is unsafe.
+            Exception: Re-raises Chroma errors.
+        """
+        if ids is None and filters is None:
+            raise ValueError(
+                "delete requires at least one of ids or filters"
+            )
+        if ids is not None and len(ids) == 0:
+            raise ValueError(
+                "ids must not be empty; an empty id list never "
+                "means delete everything"
+            )
+        if filters is not None:
+            for key in filters:
+                validate_identifier(key, "filter key")
+
+        collection = self._resolve_collection()
+        where = _where_filter(filters) if filters else None
+        records = await asyncio.to_thread(
+            collection.get,
+            ids=[str(doc_id) for doc_id in ids] if ids is not None else None,
+            where=where,
+        )
+        matching_ids = [str(doc_id) for doc_id in (records.get("ids") or [])]
+        if matching_ids:
+            await asyncio.to_thread(collection.delete, ids=matching_ids)
+        return len(matching_ids)
+
+    async def get(  # noqa: PLR0913, PLR0917
+        self,
+        ids: list[Any] | None = None,
+        filters: dict[str, Any] | None = None,
+        session: Any = None,
+        text_field: str = "text",
+        metadata_fields: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fetch documents selected by ``ids`` and/or ``filters``.
+
+        The selection is resolved by Chroma's ``get`` (by record
+        ids and/or ``where`` equality filters). With no selector,
+        every document is returned.
+
+        Args:
+            ids: Document ids to fetch.
+            filters: Equality filters (e.g.,
+                ``tenant_id="..."``).
+            session: Accepted for interface compatibility;
+                ignored (Chroma has no SQL session concept).
+            text_field: Accepted for interface compatibility;
+                Chroma stores document text as the record's
+                document.
+            metadata_fields: Metadata keys to include in the
+                result metadata dict.
+
+        Returns:
+            list[dict]: ``id``/``document``/``metadata`` dicts
+            (score keys are meaningless for direct fetches).
+
+        Raises:
+            ValueError: If any identifier is unsafe.
+            Exception: Re-raises Chroma errors.
+        """
+        for key in (filters or {}):
+            validate_identifier(key, "filter key")
+        metadata_fields = metadata_fields or []
+        for field in metadata_fields:
+            validate_identifier(field, "metadata_field")
+
+        collection = self._resolve_collection()
+        where = _where_filter(filters) if filters else None
+        records = await asyncio.to_thread(
+            collection.get,
+            ids=[str(doc_id) for doc_id in ids] if ids is not None else None,
+            where=where,
+        )
+        results = []
+        for raw_id, document, metadata in zip(
+            records.get("ids") or [],
+            records.get("documents") or [],
+            records.get("metadatas") or [],
+            strict=False,
+        ):
+            record_metadata = dict(metadata or {})
+            results.append(
+                {
+                    "id": str(raw_id),
+                    "document": document,
+                    "metadata": {
+                        field: record_metadata[field]
+                        for field in metadata_fields
+                        if field in record_metadata
+                        and record_metadata[field] is not None
+                    },
+                }
+            )
+        return results
 
     async def upsert(  # noqa: PLR0913, PLR0917
         self,

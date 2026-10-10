@@ -2,14 +2,25 @@
 
 Provides hybrid search (vector similarity + token-overlap
 keyword matching with Reciprocal Rank Fusion), document
-counting, and upsert operations against a Qdrant collection.
+counting, lifecycle operations, and upsert operations
+against a Qdrant collection.
 
-The vector stage uses Qdrant's native nearest-neighbor search;
-the keyword stage scores token overlap in process over the
-collection's payloads (the same approximation the in-memory
-store uses), because Qdrant has no built-in full-text rank.
-Both stages are ranked independently and merged with RRF, so
-the result shape matches the other backends.
+The store subclasses :class:`ragit.stores.base.HybridVectorStore`:
+the vector stage lives in :meth:`vector_search` (Qdrant's
+native nearest-neighbor search) and the keyword stage in
+:meth:`keyword_search` (an in-process token-overlap scan over
+the collection's payloads, because Qdrant has no built-in
+full-text rank). The inherited composite ``hybrid_search``
+runs both stages and fuses them with RRF, so the result
+shape matches the other backends.
+
+Keyword-search performance notice: the keyword stage is an
+in-process fallback that scrolls every document in the
+collection and scores token overlap. It is intended for
+local development, small corpora, and testing -- not for
+production-scale keyword retrieval. Hosts at scale combine a
+pgvector :class:`VectorIndex` with an external lexical
+engine adapted to :class:`ragit.stores.base.LexicalIndex`.
 
 Point ids: Qdrant identifies points by unsigned integers or
 UUIDs, so string document ids are mapped deterministically to
@@ -30,8 +41,11 @@ import uuid
 from typing import Any
 
 from ragit.config import RagSettings
-from ragit.stores._scoring import l2_distance, rrf_merge, token_overlap, tokenize
-from ragit.stores.base import EmbeddingFunction, VectorStore
+from ragit.stores._scoring import l2_distance, token_overlap, tokenize
+from ragit.stores.base import (
+    EmbeddingFunction,
+    HybridVectorStore,
+)
 from ragit.stores.registry import vector_store_registry
 from ragit.types import RetrievalError
 from ragit.validation import validate_embedding, validate_identifier
@@ -70,8 +84,33 @@ def _equality_filter(filters: dict[str, Any]) -> Any | None:
     )
 
 
+def _selector_filter(
+    ids: list[Any] | None,
+    filters: dict[str, Any] | None,
+    id_field: str,
+) -> Any | None:
+    """Build a Qdrant ``Filter`` selecting by ids and/or equality filters.
+
+    The id restriction is a ``MatchAny`` on the payload's
+    ``id_field``; equality filters become ``MatchValue``
+    conditions. Both restrictions apply (conjunction) when
+    both are supplied. Returns ``None`` when neither is
+    supplied (matching every point).
+    """
+    from qdrant_client import FieldCondition, Filter, MatchAny, MatchValue  # noqa: PLC0415
+
+    must: list[Any] = []
+    if ids is not None:
+        must.append(
+            FieldCondition(key=id_field, match=MatchAny(any=list(ids)))
+        )
+    for key, value in (filters or {}).items():
+        must.append(FieldCondition(key=key, match=MatchValue(value=value)))
+    return Filter(must=must) if must else None
+
+
 @vector_store_registry.register("qdrant")
-class QdrantStore(VectorStore):
+class QdrantStore(HybridVectorStore):
     """Qdrant vector store.
 
     Hybrid search combines Qdrant's native vector search with
@@ -117,20 +156,21 @@ class QdrantStore(VectorStore):
             ValueError: If ``table_name`` or ``id_field`` contain
                 unsafe characters, or ``embedding_dim`` is omitted.
         """
-        validate_identifier(table_name, "table_name")
-        validate_identifier(id_field, "id_field")
+        super().__init__(
+            table_name=table_name,
+            id_field=id_field,
+            embedding_dim=embedding_dim,
+            session_factory=session_factory,
+            settings=settings,
+            embedding_fn=embedding_fn,
+        )
         if embedding_dim is None:
             raise ValueError(
                 "embedding_dim is required; pass the dimension configured "
                 "for the active embedding model"
             )
-        self.table_name = table_name
-        self.id_field = id_field
-        self.embedding_dim = embedding_dim
         self._url = url
         self._api_key = api_key
-        self._settings = settings
-        self._embedding_fn = embedding_fn
         self._client = client
         self._collection_ready = False
 
@@ -210,61 +250,135 @@ class QdrantStore(VectorStore):
                 break
         return keyword_scores, payloads
 
-    async def hybrid_search(  # noqa: PLR0913, PLR0917
+    async def vector_search(  # noqa: PLR0913, PLR0917
         self,
-        query: str,
         embedding: list[float],
         n_results: int,
         threshold: float,
         text_field: str = "text",
         metadata_fields: list[str] | None = None,
         session: Any = None,
-        strict: bool = False,
         **filters: Any,
     ) -> list[dict[str, Any]]:
-        """Hybrid search with vector similarity and keyword RRF.
+        """Native nearest-neighbor search over the collection.
 
-        Executes a two-stage retrieval:
-          1. Vector search using Qdrant's native nearest-neighbor
-             search (Euclid distance), with the distance threshold
-             applied in process.
-          2. Keyword search scoring token overlap over the
-             collection's payloads.
+        The ``n_results`` nearest points are fetched with their
+        vectors so the L2 distance threshold is applied in
+        process, matching the pgvector backend's semantics.
 
-        Results from both stages are merged using Reciprocal Rank
-        Fusion (RRF), which combines the ranks from each retrieval
-        method to produce a unified ranking.
+        Args:
+            embedding: Query embedding vector (required; the
+                method does not auto-embed).
+            n_results: Maximum number of results to return.
+            threshold: Maximum L2 distance.
+            text_field: Payload field containing the document text.
+            metadata_fields: Payload fields to include in the
+                result metadata dict.
+            session: Accepted for interface compatibility; ignored
+                (Qdrant has no SQL session concept).
+            **filters: Equality filters applied to the search
+                (e.g., ``tenant_id="..."``).
+
+        Returns:
+            list[dict]: Result dicts ordered by distance ascending,
+            each carrying ``id``, ``document``, ``metadata``,
+            ``distance``, and ``keyword_score`` (``None``).
+
+        Raises:
+            ValueError: If identifiers are unsafe or the embedding
+                has the wrong dimension.
+            Exception: Re-raises Qdrant errors.
+        """
+        validate_identifier(text_field, "text_field")
+        for key in filters:
+            validate_identifier(key, "filter key")
+        metadata_fields = metadata_fields or []
+        for field in metadata_fields:
+            validate_identifier(field, "metadata_field")
+        validate_embedding(embedding, self.embedding_dim, label="query embedding")
+
+        await self._ensure_collection()
+        client = self._resolve_client()
+        query_filter = _equality_filter(filters)
+
+        response = await client.query_points(
+            collection_name=self.table_name,
+            query=embedding,
+            limit=n_results,
+            with_payload=True,
+            with_vectors=True,
+            query_filter=query_filter,
+        )
+        vector_ranked: list[str] = []
+        distances: dict[str, float] = {}
+        payloads: dict[str, dict[str, Any]] = {}
+        for point in response.points:
+            point_vector = list(point.vector or [])
+            distance = l2_distance(embedding, point_vector)
+            if distance >= threshold:
+                continue
+            doc_id = str(point.payload.get(self.id_field, point.id))
+            vector_ranked.append(doc_id)
+            distances[doc_id] = distance
+            payloads[doc_id] = dict(point.payload or {})
+
+        results = []
+        for doc_id in vector_ranked:
+            payload = payloads[doc_id]
+            metadata = {
+                field: payload[field]
+                for field in metadata_fields
+                if field in payload and payload[field] is not None
+            }
+            results.append(
+                {
+                    "id": doc_id,
+                    "document": payload.get(text_field),
+                    "metadata": metadata,
+                    "distance": distances[doc_id],
+                    "keyword_score": None,
+                }
+            )
+        return results
+
+    async def keyword_search(  # noqa: PLR0913, PLR0917
+        self,
+        query: str,
+        n_results: int,
+        text_field: str = "text",
+        metadata_fields: list[str] | None = None,
+        session: Any = None,
+        **filters: Any,
+    ) -> list[dict[str, Any]]:
+        """Token-overlap keyword search over the collection's payloads.
+
+        Qdrant has no native full-text rank, so the keyword
+        stage scrolls every document in the collection and
+        scores token overlap in process -- an in-process
+        fallback intended for local development, small
+        corpora, and testing, not production-scale keyword
+        retrieval.
 
         Args:
             query: Natural language search query.
-            embedding: Query embedding vector. If empty, the query
-                is embedded automatically using the injected
-                ``embedding_fn``.
             n_results: Maximum number of results to return.
-            threshold: Maximum L2 distance for the vector search
-                part. Smaller values enforce stricter matching.
             text_field: Payload field containing the document text.
-            metadata_fields: Payload fields to include in the result
-                metadata dict.
+            metadata_fields: Payload fields to include in the
+                result metadata dict.
             session: Accepted for interface compatibility; ignored
                 (Qdrant has no SQL session concept).
-            strict: When ``True``, a failed search raises
-                :class:`ragit.types.RetrievalError`. The default
-                ``False`` preserves the behavior of logging the
-                error and returning an empty list.
-            **filters: Equality filters applied to both search
-                stages (e.g., ``tenant_id="..."``).
+            **filters: Equality filters applied to the search
+                (e.g., ``tenant_id="..."``).
 
         Returns:
-            list[dict]: A list of result dicts sorted by RRF score,
-            each containing ``id``, ``document``, ``metadata``,
-            ``distance`` (L2 distance, or ``None`` for keyword-only
-            hits), ``keyword_score`` (token-overlap ratio, or
-            ``None`` for vector-only hits), and ``_rrf_score``.
+            list[dict]: Result dicts ordered by keyword score
+            descending (tie-broken by id), each carrying ``id``,
+            ``document``, ``metadata``, ``distance`` (``None``),
+            and ``keyword_score``.
 
         Raises:
-            ragit.types.RetrievalError: If the search fails and
-                ``strict=True``.
+            ValueError: If identifiers are unsafe.
+            Exception: Re-raises Qdrant errors.
         """
         validate_identifier(text_field, "text_field")
         for key in filters:
@@ -273,97 +387,35 @@ class QdrantStore(VectorStore):
         for field in metadata_fields:
             validate_identifier(field, "metadata_field")
 
-        if n_results < 1:
-            raise ValueError(f"n_results must be a positive integer; got {n_results}")
+        await self._ensure_collection()
+        client = self._resolve_client()
+        query_filter = _equality_filter(filters)
 
-        if not embedding:
-            if self._embedding_fn is None:
-                raise ValueError(
-                    "embedding_fn is required to auto-embed the query; "
-                    "pass an embedding or construct the store with embedding_fn"
-                )
-            embedding_list = await self._embedding_fn([query])
-            embedding = embedding_list[0]
+        keyword_scores, payloads = await self._keyword_stage(
+            client, query, text_field, query_filter
+        )
+        keyword_ranked = sorted(
+            keyword_scores, key=lambda doc_id: (-keyword_scores[doc_id], doc_id)
+        )[:n_results]
 
-        validate_embedding(embedding, self.embedding_dim, label="query embedding")
-
-        try:
-            await self._ensure_collection()
-            client = self._resolve_client()
-            query_filter = _equality_filter(filters)
-
-            # Vector stage: native nearest-neighbor search. The
-            # n_results nearest points are fetched with their
-            # vectors so the L2 distance threshold is applied in
-            # process, matching the pgvector backend's semantics.
-            response = await client.query_points(
-                collection_name=self.table_name,
-                query=embedding,
-                limit=n_results,
-                with_payload=True,
-                with_vectors=True,
-                query_filter=query_filter,
-            )
-            vector_ranked: list[str] = []
-            distances: dict[str, float] = {}
-            payloads: dict[str, dict[str, Any]] = {}
-            for point in response.points:
-                point_vector = list(point.vector or [])
-                distance = l2_distance(embedding, point_vector)
-                if distance >= threshold:
-                    continue
-                doc_id = str(point.payload.get(self.id_field, point.id))
-                vector_ranked.append(doc_id)
-                distances[doc_id] = distance
-                payloads[doc_id] = dict(point.payload or {})
-
-            # Keyword stage: token-overlap scoring over every
-            # document in the collection (Qdrant has no native
-            # full-text rank).
-            keyword_scores, keyword_payloads = await self._keyword_stage(
-                client, query, text_field, query_filter
-            )
-            for doc_id, payload in keyword_payloads.items():
-                payloads.setdefault(doc_id, payload)
-
-            keyword_ranked = sorted(
-                keyword_scores, key=lambda doc_id: (-keyword_scores[doc_id], doc_id)
-            )
-
-            results = []
-            for doc_id, rrf_score in rrf_merge(
-                vector_ranked, keyword_ranked, n_results
-            ):
-                payload = payloads.get(doc_id, {})
-                metadata = {
-                    field: payload[field]
-                    for field in metadata_fields
-                    if field in payload and payload[field] is not None
+        results = []
+        for doc_id in keyword_ranked:
+            payload = payloads.get(doc_id, {})
+            metadata = {
+                field: payload[field]
+                for field in metadata_fields
+                if field in payload and payload[field] is not None
+            }
+            results.append(
+                {
+                    "id": doc_id,
+                    "document": payload.get(text_field),
+                    "metadata": metadata,
+                    "distance": None,
+                    "keyword_score": keyword_scores[doc_id],
                 }
-                results.append(
-                    {
-                        "id": doc_id,
-                        "document": payload.get(text_field),
-                        "metadata": metadata,
-                        "distance": distances.get(doc_id),
-                        "keyword_score": keyword_scores.get(doc_id),
-                        "_rrf_score": rrf_score,
-                    }
-                )
-            logger.debug(
-                "hybrid_search('%s') on %s: found %d results.",
-                query,
-                self.table_name,
-                len(results),
             )
-            return results
-        except Exception as exc:
-            logger.error("Hybrid search failed on %s: %s", self.table_name, exc)
-            if strict:
-                raise RetrievalError(
-                    f"Hybrid search failed on {self.table_name}: {exc}"
-                ) from exc
-            return []
+        return results
 
     async def count(
         self,
@@ -376,15 +428,19 @@ class QdrantStore(VectorStore):
         Args:
             session: Accepted for interface compatibility; ignored.
             strict: When ``True``, a failed count raises
-                :class:`ragit.types.RetrievalError`.
+                :class:`ragit.types.RetrievalError`. The default
+                ``False`` preserves the behavior of logging the
+                error and returning ``0``.
             **filters: Equality filters (e.g., ``tenant_id="..."``).
 
         Returns:
             int: Number of matching documents, or 0 on error.
 
         Raises:
+            ValueError: If a filter key is unsafe.
             ragit.types.RetrievalError: If the count fails and
                 ``strict=True``.
+            Exception: Re-raises Qdrant errors when ``strict=True``.
         """
         for key in filters:
             validate_identifier(key, "filter key")
@@ -404,6 +460,161 @@ class QdrantStore(VectorStore):
                     f"Count failed on {self.table_name}: {exc}"
                 ) from exc
             return 0
+
+    async def delete(
+        self,
+        ids: list[Any] | None = None,
+        filters: dict[str, Any] | None = None,
+        session: Any = None,
+    ) -> int:
+        """Delete points selected by ``ids`` and/or ``filters``.
+
+        At least one selector must be supplied; an empty ``ids``
+        list is rejected. When both are supplied, both
+        restrictions apply (conjunction). Qdrant's ``delete``
+        does not report how many points it removed, so the
+        deletion count is the collection count before the
+        delete minus the count after it.
+
+        Args:
+            ids: Document ids to delete (mapped to Qdrant point
+                ids with the store's ``_point_id`` mapping).
+            filters: Equality filters (e.g., ``tenant_id="..."``).
+            session: Accepted for interface compatibility; ignored
+                (Qdrant manages its own connections).
+
+        Returns:
+            int: Number of deleted documents.
+
+        Raises:
+            ValueError: If no selector is supplied, ``ids`` is
+                empty, or a filter key is unsafe.
+            Exception: Re-raises Qdrant errors.
+        """
+        if ids is None and filters is None:
+            raise ValueError(
+                "delete requires at least one of ids or filters"
+            )
+        if ids is not None and len(ids) == 0:
+            raise ValueError(
+                "ids must not be empty; an empty id list never "
+                "means delete everything"
+            )
+        if filters is not None:
+            for key in filters:
+                validate_identifier(key, "filter key")
+
+        await self._ensure_collection()
+        client = self._resolve_client()
+
+        if ids is not None and not filters:
+            # A point-ids selector carries the id restriction alone, so
+            # the deletion count is the whole-collection count delta.
+            before_response = await client.count(collection_name=self.table_name)
+            before = int(before_response.count)
+            from qdrant_client import PointIdsList  # noqa: PLC0415
+
+            selector: Any = PointIdsList(
+                points=[_point_id(doc_id) for doc_id in ids]
+            )
+            await client.delete(
+                collection_name=self.table_name, points_selector=selector
+            )
+            after_response = await client.count(collection_name=self.table_name)
+            after = int(after_response.count)
+        else:
+            # A filter selector carries the id restriction (a MatchAny on
+            # the payload's id_field) and/or the equality filters, so both
+            # restrictions apply when both are supplied.
+            query_filter = _selector_filter(ids, filters, self.id_field)
+            before_response = await client.count(
+                collection_name=self.table_name, count_filter=query_filter
+            )
+            before = int(before_response.count)
+            from qdrant_client import FilterSelector  # noqa: PLC0415
+
+            selector = FilterSelector(filter=query_filter)
+            await client.delete(
+                collection_name=self.table_name, points_selector=selector
+            )
+            after_response = await client.count(
+                collection_name=self.table_name, count_filter=query_filter
+            )
+            after = int(after_response.count)
+        return before - after
+
+    async def get(  # noqa: PLR0913, PLR0917
+        self,
+        ids: list[Any] | None = None,
+        filters: dict[str, Any] | None = None,
+        session: Any = None,
+        text_field: str = "text",
+        metadata_fields: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fetch documents selected by ``ids`` and/or ``filters``.
+
+        The selection scrolls the collection with a ``MatchAny``
+        filter on the payload's ``id_field`` (for ``ids``) and/or
+        equality filters. With no selector, every document is
+        returned.
+
+        Args:
+            ids: Document ids to fetch.
+            filters: Equality filters (e.g., ``tenant_id="..."``).
+            session: Accepted for interface compatibility; ignored
+                (Qdrant has no SQL session concept).
+            text_field: Payload field containing the document text.
+            metadata_fields: Payload fields to include in the
+                result metadata dict.
+
+        Returns:
+            list[dict]: ``id``/``document``/``metadata`` dicts
+            (score keys are meaningless for direct fetches).
+
+        Raises:
+            ValueError: If any identifier is unsafe.
+            Exception: Re-raises Qdrant errors.
+        """
+        validate_identifier(text_field, "text_field")
+        metadata_fields = metadata_fields or []
+        for field in metadata_fields:
+            validate_identifier(field, "metadata_field")
+        if filters is not None:
+            for key in filters:
+                validate_identifier(key, "filter key")
+
+        await self._ensure_collection()
+        client = self._resolve_client()
+        query_filter = _selector_filter(ids, filters, self.id_field)
+
+        results: list[dict[str, Any]] = []
+        offset: Any = None
+        while True:
+            points, offset = await client.scroll(
+                collection_name=self.table_name,
+                scroll_filter=query_filter,
+                limit=_SCROLL_BATCH,
+                offset=offset,
+                with_payload=True,
+            )
+            for point in points:
+                payload = dict(point.payload or {})
+                doc_id = str(payload.get(self.id_field, point.id))
+                metadata = {
+                    field: payload[field]
+                    for field in metadata_fields
+                    if field in payload and payload[field] is not None
+                }
+                results.append(
+                    {
+                        "id": doc_id,
+                        "document": payload.get(text_field),
+                        "metadata": metadata,
+                    }
+                )
+            if offset is None:
+                break
+        return results
 
     async def upsert(  # noqa: PLR0913, PLR0917
         self,

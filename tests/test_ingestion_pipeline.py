@@ -5,18 +5,22 @@ Covers the ingestion orchestration extracted from
 source is unchanged), version retirement, chunk
 stamping, embedding validation, metadata ownership
 stamping, and session ownership (the pipeline
-commits only the session it owns).
+commits only the session it owns), plus the
+two-phase structure (embedding outside the
+transaction and lock), the manifest source hash,
+and ``purge_on_empty`` semantics.
 """
 
 from __future__ import annotations
 
-import hashlib
+from contextlib import asynccontextmanager
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
 from ragit.chunking.base import Chunker
+from ragit.db.sql_factory import SQLFactory
 from ragit.embeddings.base import EmbeddingFunction
 from ragit.embeddings.dimensions import register_dimension
 from ragit.ingestion import (
@@ -26,6 +30,7 @@ from ragit.ingestion import (
     build_snapshot,
 )
 from ragit.ingestion.sources import RawDocument
+from ragit.ingestion.versioning import compute_source_hash
 from ragit.stores.base import VectorStore
 from ragit.types import Chunk
 
@@ -240,6 +245,162 @@ class _FakeSessionFactory:
         return _SessionContext(session)
 
 
+class _MutableStore:
+    """Vector store keeping documents, with delete-by-filter.
+
+    Models a host search index that supports the
+    portable ``delete`` capability: chunks are
+    removed by metadata filter, so a purge can drop
+    a retired version's chunks and the count drops.
+    """
+
+    def __init__(self) -> None:
+        self.documents: list[dict[str, Any]] = []
+        self.upsert_sessions: list[Any] = []
+        self.count_sessions: list[Any] = []
+
+    async def hybrid_search(self, *args: Any, **kwargs: Any) -> list[Any]:
+        return []
+
+    async def count(self, session: Any = None, **kwargs: Any) -> int:
+        self.count_sessions.append(session)
+        return len(self.documents)
+
+    async def upsert(
+        self,
+        documents: list[dict[str, Any]],
+        session: Any = None,
+        **kwargs: Any,
+    ) -> None:
+        self.documents.extend(documents)
+        self.upsert_sessions.append(session)
+
+    async def delete(
+        self,
+        ids: list[Any] | None = None,
+        filters: dict[str, Any] | None = None,
+        session: Any = None,
+    ) -> int:
+        selected = dict(filters or {})
+        before = len(self.documents)
+
+        def _matches(document: dict[str, Any]) -> bool:
+            metadata = document.get("metadata") or {}
+            return all(metadata.get(key) == value for key, value in selected.items())
+
+        self.documents = [doc for doc in self.documents if not _matches(doc)]
+        return before - len(self.documents)
+
+
+class _HostVersionStore(_FakeVersionStore):
+    """Version store tracking state like a host version table.
+
+    ``create_version`` makes the new version active,
+    ``close_active`` retires it, and ``delete_chunks``
+    removes the version's chunks from the search index
+    through the portable delete capability -- the way
+    an external-store host implements the hook.
+    """
+
+    def __init__(self, store: _MutableStore, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._store = store
+        self._next_version_id = 0
+
+    async def create_version(self, session: Any, snapshot: IngestionSnapshot) -> VersionRecord:
+        self.created.append(snapshot)
+        self._next_version_id += 1
+        self.active = VersionRecord(
+            version_id=f"version-{self._next_version_id}",
+            snapshot=snapshot,
+            source_id="source-1",
+        )
+        return self.active
+
+    async def close_active(self, session: Any) -> None:
+        self.closed.append(session)
+        self.active = None
+
+    async def delete_chunks(self, session: Any, version_id: str) -> None:
+        self.deleted.append(version_id)
+        await self._store.delete(filters={"version_id": version_id})
+
+
+class _RecordingLockFactory(SQLFactory):
+    """SQL factory whose advisory lock records ordering."""
+
+    def __init__(self, events: list[str]) -> None:
+        self._events = events
+
+    def create_session_factory(self, database_url: str) -> Any:
+        raise NotImplementedError
+
+    async def fetch_all(
+        self,
+        session: Any,
+        statement: str,
+        params: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        return []
+
+    async def fetch_scalar(
+        self,
+        session: Any,
+        statement: str,
+        params: dict[str, Any] | None = None,
+    ) -> Any:
+        return None
+
+    async def execute(
+        self,
+        session: Any,
+        statement: str,
+        params: dict[str, Any] | None = None,
+    ) -> None:
+        pass
+
+    @asynccontextmanager
+    async def advisory_lock(self, session: Any, key: str) -> Any:
+        self._events.append("lock")
+        yield
+
+
+class _OrderingEmbedder(_DeterministicEmbedder):
+    """Embedder recording when the embedding request runs."""
+
+    def __init__(self, events: list[str]) -> None:
+        super().__init__()
+        self._events = events
+
+    async def __call__(self, texts: list[str]) -> list[list[float]]:
+        self._events.append("embed")
+        return await super().__call__(texts)
+
+
+class _RacingVersionStore(_FakeVersionStore):
+    """Version store whose snapshot changes between the two checks.
+
+    The prepare-phase check sees the stale snapshot (so
+    the pipeline embeds); by the time the critical
+    section re-checks under the lock, a concurrent
+    process has ingested the source and the snapshot
+    matches.
+    """
+
+    def __init__(self, stale: IngestionSnapshot, fresh: IngestionSnapshot) -> None:
+        super().__init__(
+            active=VersionRecord(version_id="version-0", snapshot=stale, source_id="source-1")
+        )
+        self._fresh = fresh
+        self._checks = 0
+
+    async def find_active(self, session: Any) -> VersionRecord | None:
+        self._checks += 1
+        if self._checks == 1:
+            return self.active
+        return VersionRecord(version_id="version-1", snapshot=self._fresh, source_id="source-1")
+
+
 def _source(content: str = "policy content") -> _StubSource:
     return _StubSource(RawDocument(source_name="policy.md", content=content))
 
@@ -281,7 +442,9 @@ async def test_run_ingests_and_returns_chunk_count() -> None:
     assert document["metadata"]["chunk_index"] == 0
     assert document["metadata"]["version_id"] == "version-1"
     assert document["metadata"]["source_id"] == "source-1"
-    assert version_store.created[0].source_hash == hashlib.sha256(b"policy content").hexdigest()
+    assert version_store.created[0].source_hash == compute_source_hash(
+        [RawDocument(source_name="policy.md", content="policy content")]
+    )
 
 
 @pytest.mark.asyncio
@@ -305,7 +468,9 @@ async def test_run_stamps_multiple_chunks() -> None:
 @pytest.mark.asyncio
 async def test_run_skips_when_snapshot_matches() -> None:
     content = "policy content"
-    source_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    source_hash = compute_source_hash(
+        [RawDocument(source_name="policy.md", content=content)]
+    )
     settings = _FakeSettings()
     chunker = _RecordingChunker()
     stored_snapshot = build_snapshot(source_hash, settings, chunker)
@@ -347,7 +512,10 @@ async def test_run_reingests_when_source_hash_changes() -> None:
     count = await pipeline.run(_source(), version_store)
 
     assert count == 1
-    assert version_store.closed == [session_factory.sessions[0]]
+    # The critical section (version retirement) runs on
+    # the second session the pipeline opens: the first
+    # is the lock-free read-only snapshot check.
+    assert version_store.closed == [session_factory.sessions[1]]
     assert version_store.deleted == ["version-0"]
     assert len(version_store.created) == 1
     assert len(store.upserted) == 1
@@ -405,8 +573,10 @@ async def test_run_with_lock_key_commits_its_owned_session() -> None:
     count = await pipeline.run(_source(), version_store, lock_key="policy.md")
 
     assert count == 1
-    assert len(session_factory.sessions) == 1
-    session = session_factory.sessions[0]
+    # Two sessions: the lock-free read-only snapshot
+    # check, then the locked critical section.
+    assert len(session_factory.sessions) == 2
+    session = session_factory.sessions[1]
     assert session.committed
     assert not session.rolled_back
     assert any("pg_advisory_lock" in sql for sql in session.executed)
@@ -416,23 +586,29 @@ async def test_run_with_lock_key_commits_its_owned_session() -> None:
 
 @pytest.mark.asyncio
 async def test_run_with_lock_key_rolls_back_on_failure() -> None:
-    store = _FakeStore()
     version_store = _FakeVersionStore()
     session_factory = _FakeSessionFactory()
 
-    class _FailingEmbedder(_DeterministicEmbedder):
-        async def __call__(self, texts: list[str]) -> list[list[float]]:
-            raise RuntimeError("embed failed")
+    class _FailingStore(_FakeStore):
+        async def upsert(
+            self,
+            documents: list[dict[str, Any]],
+            session: Any = None,
+            **kwargs: Any,
+        ) -> None:
+            raise RuntimeError("upsert failed")
 
-    pipeline = _pipeline(store, version_store, session_factory, embedder=_FailingEmbedder())
+    pipeline = _pipeline(_FailingStore(), version_store, session_factory)
 
-    with pytest.raises(RuntimeError, match="embed failed"):
+    with pytest.raises(RuntimeError, match="upsert failed"):
         await pipeline.run(_source(), version_store, lock_key="policy.md")
 
-    session = session_factory.sessions[0]
+    # The failure happens inside the critical section:
+    # the transaction is rolled back and the lock is
+    # released even though the ingestion failed.
+    session = session_factory.sessions[1]
     assert session.rolled_back
     assert not session.committed
-    # The lock is released even though the ingestion failed.
     assert any("pg_advisory_unlock" in sql for sql in session.executed)
 
 
@@ -480,7 +656,9 @@ async def test_run_without_lock_key_still_commits_its_owned_session() -> None:
 
     await pipeline.run(_source(), version_store)
 
-    assert session_factory.sessions[0].committed
+    # The critical section runs on the second session
+    # (the first is the read-only snapshot check).
+    assert session_factory.sessions[1].committed
 
 
 @pytest.mark.asyncio
@@ -512,6 +690,216 @@ async def test_run_without_chunks_aborts_ingestion() -> None:
     # No version row may be created when chunking aborts: a
     # version carrying the current snapshot would make every
     # later run skip the source forever.
+    assert version_store.created == []
+
+
+# ---------------------------------------------------------------------------
+# Two-phase structure: embedding outside the transaction and lock
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_unchanged_source_skips_without_embedding() -> None:
+    content = "policy content"
+    source_hash = compute_source_hash(
+        [RawDocument(source_name="policy.md", content=content)]
+    )
+    settings = _FakeSettings()
+    chunker = _RecordingChunker()
+    stored_snapshot = build_snapshot(source_hash, settings, chunker)
+    active = VersionRecord(
+        version_id="version-0", snapshot=stored_snapshot, source_id="source-1"
+    )
+
+    store = _FakeStore(count=7)
+    version_store = _FakeVersionStore(active=active)
+    session_factory = _FakeSessionFactory()
+    embedder = _DeterministicEmbedder()
+    pipeline = _pipeline(store, version_store, session_factory, embedder=embedder)
+
+    count = await pipeline.run(_source(content), version_store)
+
+    assert count == 7
+    # The lock-free snapshot check happens in the prepare
+    # phase: an unchanged source skips before any
+    # embedding request is made.
+    assert embedder.calls == []
+    assert store.upserted == []
+    assert version_store.created == []
+
+
+@pytest.mark.asyncio
+async def test_embedder_runs_before_the_advisory_lock() -> None:
+    events: list[str] = []
+    store = _FakeStore()
+    version_store = _FakeVersionStore()
+    session_factory = _FakeSessionFactory()
+    pipeline = IngestionPipeline(
+        store=store,  # type: ignore[arg-type]
+        embedder=_OrderingEmbedder(events),
+        chunker=_RecordingChunker(),
+        session_factory=session_factory,
+        settings=_FakeSettings(),
+        version_id_key="version_id",
+        source_id_key="source_id",
+        sql_factory=_RecordingLockFactory(events),
+    )
+
+    await pipeline.run(_source(), version_store, lock_key="policy.md")
+
+    # The embedding request runs in the prepare phase,
+    # before the critical section takes the advisory
+    # lock: a slow remote call never holds the lock (or
+    # a transaction) open.
+    assert events == ["embed", "lock"]
+
+
+@pytest.mark.asyncio
+async def test_critical_section_skips_when_a_concurrent_run_ingested() -> None:
+    content = "policy content"
+    settings = _FakeSettings()
+    chunker = _RecordingChunker()
+    current_snapshot = build_snapshot(
+        compute_source_hash(
+            [RawDocument(source_name="policy.md", content=content)]
+        ),
+        settings,
+        chunker,
+    )
+    stale_snapshot = IngestionSnapshot(
+        source_hash="stale-hash",
+        embedding_model=current_snapshot.embedding_model,
+        embedding_dim=current_snapshot.embedding_dim,
+        chunker_version=current_snapshot.chunker_version,
+        chunk_size=current_snapshot.chunk_size,
+        overlap=current_snapshot.overlap,
+        retrieval_schema_version=current_snapshot.retrieval_schema_version,
+    )
+
+    store = _FakeStore(count=5)
+    version_store = _RacingVersionStore(stale_snapshot, current_snapshot)
+    session_factory = _FakeSessionFactory()
+    embedder = _DeterministicEmbedder()
+    pipeline = _pipeline(store, version_store, session_factory, embedder=embedder)
+
+    count = await pipeline.run(_source(content), version_store)
+
+    # The prepare phase saw a stale snapshot and embedded;
+    # under the lock the snapshot now matches (a concurrent
+    # process ingested meanwhile), so the critical section
+    # skips without touching the version table or the index.
+    assert count == 5
+    assert embedder.calls == [["policy content part 0"]]
+    assert store.upserted == []
+    assert version_store.created == []
+    assert version_store.closed == []
+    assert version_store.deleted == []
+
+
+# ---------------------------------------------------------------------------
+# purge_on_empty: authoritative empty datasets
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_purge_on_empty_retires_the_active_version() -> None:
+    store = _MutableStore()
+    version_store = _HostVersionStore(store)
+    session_factory = _FakeSessionFactory()
+    pipeline = _pipeline(store, version_store, session_factory)
+
+    # Ingest once so the source has an active version.
+    await pipeline.run(_source(), version_store)
+    assert await store.count() == 1
+
+    # The source now loads nothing: an authoritative
+    # empty dataset retires the active version and
+    # deletes its chunks from the search index.
+    count = await pipeline.run(_StubSource(), version_store, purge_on_empty=True)
+
+    assert count == 0
+    assert await store.count() == 0
+    assert version_store.deleted == ["version-1"]
+    # The retirement runs on the purge session (the third
+    # session: two for the ingest run, one for the purge).
+    assert version_store.closed == [session_factory.sessions[2]]
+    assert len(version_store.created) == 1
+
+
+@pytest.mark.asyncio
+async def test_purge_on_empty_false_is_a_historical_noop() -> None:
+    store = _MutableStore()
+    version_store = _HostVersionStore(store)
+    session_factory = _FakeSessionFactory()
+    pipeline = _pipeline(store, version_store, session_factory)
+
+    await pipeline.run(_source(), version_store)
+    count = await pipeline.run(_StubSource(), version_store)
+
+    assert count == 0
+    # The index is untouched: the empty load is a no-op
+    # and deleted content would stay searchable.
+    assert await store.count() == 1
+    assert version_store.closed == []
+    assert version_store.deleted == []
+    # No session is opened for a skipped empty source.
+    assert len(session_factory.sessions) == 2
+
+
+@pytest.mark.asyncio
+async def test_purge_on_empty_with_lock_key_locks_and_commits() -> None:
+    store = _MutableStore()
+    version_store = _HostVersionStore(store)
+    session_factory = _FakeSessionFactory()
+    pipeline = _pipeline(store, version_store, session_factory)
+
+    await pipeline.run(_source(), version_store)
+    count = await pipeline.run(
+        _StubSource(), version_store, lock_key="policy.md", purge_on_empty=True
+    )
+
+    assert count == 0
+    assert await store.count() == 0
+    session = session_factory.sessions[2]
+    assert session.committed
+    assert any("pg_advisory_lock" in sql for sql in session.executed)
+    assert any("pg_advisory_unlock" in sql for sql in session.executed)
+
+
+@pytest.mark.asyncio
+async def test_purge_on_empty_with_caller_session_never_commits_it() -> None:
+    store = _MutableStore()
+    version_store = _HostVersionStore(store)
+    session_factory = _FakeSessionFactory()
+    caller_session = _FakeSession()
+    pipeline = _pipeline(store, version_store, session_factory)
+
+    await pipeline.run(_source(), version_store)
+    count = await pipeline.run(
+        _StubSource(), version_store, session=caller_session, purge_on_empty=True
+    )
+
+    assert count == 0
+    assert await store.count() == 0
+    # The caller owns the session: the pipeline retires
+    # the version on it without committing.
+    assert not caller_session.committed
+    assert len(session_factory.sessions) == 2
+
+
+@pytest.mark.asyncio
+async def test_purge_on_empty_without_active_version_is_a_noop() -> None:
+    store = _MutableStore()
+    version_store = _HostVersionStore(store)
+    session_factory = _FakeSessionFactory()
+    pipeline = _pipeline(store, version_store, session_factory)
+
+    count = await pipeline.run(_StubSource(), version_store, purge_on_empty=True)
+
+    assert count == 0
+    assert await store.count() == 0
+    assert version_store.closed == []
+    assert version_store.deleted == []
     assert version_store.created == []
 
 

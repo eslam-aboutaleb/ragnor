@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Sequence
+from typing import Any
 
 _TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
 
@@ -78,3 +79,63 @@ def rrf_merge(  # noqa: PLR0913
         key=lambda doc_id: (-_rrf(doc_id), doc_id),
     )
     return [(doc_id, _rrf(doc_id)) for doc_id in merged[:n_results]]
+
+
+def fuse_hybrid(  # noqa: PLR0913
+    vector_results: Sequence[dict[str, Any]],
+    keyword_results: Sequence[dict[str, Any]],
+    n_results: int,
+) -> list[dict[str, Any]]:
+    """Merge the two truncated stage results into hybrid results.
+
+    Both stages are already ranked and truncated to
+    ``n_results`` by their capability methods; this function
+    merges the two result lists by document id via
+    :func:`rrf_merge`, preserving ``distance`` from the
+    vector row and ``keyword_score`` from the keyword row.
+    A document found by both stages outranks a single-stage
+    hit; ties break by document id.
+
+    Args:
+        vector_results: The vector stage's result dicts
+            (``id``, ``document``, ``metadata``,
+            ``distance``, ``keyword_score``), best first.
+        keyword_results: The keyword stage's result dicts
+            (same keys), best first.
+        n_results: Maximum number of merged results to
+            return.
+
+    Returns:
+        At most ``n_results`` result dicts sorted by RRF
+        score, each carrying ``id``, ``document``,
+        ``metadata``, ``distance`` (``None`` for
+        keyword-only hits), ``keyword_score`` (``None`` for
+        vector-only hits), and ``_rrf_score``.
+    """
+    vector_ranked = [row["id"] for row in vector_results]
+    keyword_ranked = [row["id"] for row in keyword_results]
+    vector_by_id = {row["id"]: row for row in vector_results}
+    keyword_by_id = {row["id"]: row for row in keyword_results}
+
+    results: list[dict[str, Any]] = []
+    for doc_id, rrf_score in rrf_merge(vector_ranked, keyword_ranked, n_results):
+        vector_row = vector_by_id.get(doc_id)
+        keyword_row = keyword_by_id.get(doc_id)
+        source = vector_row if vector_row is not None else keyword_row
+        results.append(
+            {
+                "id": doc_id,
+                "document": source.get("document"),
+                "metadata": source.get("metadata") or {},
+                "distance": (
+                    vector_row.get("distance") if vector_row is not None else None
+                ),
+                "keyword_score": (
+                    keyword_row.get("keyword_score")
+                    if keyword_row is not None
+                    else None
+                ),
+                "_rrf_score": rrf_score,
+            }
+        )
+    return results

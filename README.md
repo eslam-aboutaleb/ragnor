@@ -11,6 +11,7 @@ ragit is a RAG _subsystem_, not an application. It grew out of a production fina
 - [Features](#features)
 - [Architecture](#architecture)
 - [Installation](#installation)
+- [Quick start](#quick-start)
 - [Your first index](#your-first-index)
 - [Configuration](#configuration)
 - [Chunking](#chunking)
@@ -99,7 +100,7 @@ ragit is a RAG _subsystem_, not an application. It grew out of a production fina
 
 ## Installation
 
-ragit requires **Python ≥ 3.11**.
+ragit requires **Python ≥ 3.11**. The core install has **zero third-party dependencies** — every capability (LiteLLM embeddings, vector backends) is an optional extra, imported lazily only when used.
 
 The package is **not yet published to PyPI** — install it from GitHub:
 
@@ -124,8 +125,11 @@ ragit[pgvector] @ git+https://github.com/eslam-aboutaleb/ragit.git
 Local development install from a checkout:
 
 ```bash
-# From the repository root
+# From the repository root — the core install has ZERO third-party dependencies
 pip install -e .
+
+# With the LiteLLM integration (embeddings provider and LLM judge)
+pip install -e ".[litellm]"  # litellm>=1.84
 
 # With a specific vector backend (each driver is optional)
 pip install -e ".[pgvector]"   # PostgreSQL: sqlalchemy[asyncio]
@@ -143,7 +147,37 @@ pip install -e ".[test]"
 pip install -e . fastapi uvicorn
 ```
 
-Dependencies: the core dependencies are only `litellm>=1.84` (embeddings and the LLM judge) and `pydantic-settings>=2.7` (host settings, type-only) — ragit's core imports with no database driver installed. Every vector backend ships as an optional extra: `pgvector` adds `sqlalchemy[asyncio]>=2.0.30` (the pgvector store and the advisory lock), `qdrant` adds `qdrant-client>=1.9`, `chroma` adds `chromadb>=0.5`, and `faiss` adds `faiss-cpu>=1.8`; the `all` extra installs every backend (`ragit[pgvector,qdrant,chroma,faiss]`). The `test` extra adds `pytest`, `pytest-asyncio`, `aiosqlite`, and `sqlalchemy[asyncio]`.
+`pip install ragit` installs **zero third-party packages** — `import ragit.*` never requires litellm, a database driver, or a vector-DB client. Every capability ships as an optional extra and is imported lazily, only when actually used:
+
+| Extra              | Adds                                          | Notes                                                              |
+| ------------------ | --------------------------------------------- | ------------------------------------------------------------------ |
+| `litellm`          | `litellm>=1.84`                               | LiteLLM embeddings provider and the LLM judge                      |
+| `pgvector`         | `sqlalchemy[asyncio]>=2.0.30`                 | PostgreSQL pgvector store and the advisory lock                    |
+| `qdrant`           | `qdrant-client>=1.9`                          | Qdrant vector store                                                |
+| `chroma`           | `chromadb>=0.5`                               | Chroma vector store                                                |
+| `faiss`            | `faiss-cpu>=1.8`                              | FAISS vector store                                                 |
+| `local-embeddings` | *(reserved — currently empty)*                | Future local-model embedding backend (e.g. sentence-transformers) |
+| `test`             | `pytest`, `pytest-asyncio`, `aiosqlite`, `sqlalchemy[asyncio]` | Test dependencies                                  |
+| `all`              | `ragit[litellm,pgvector,qdrant,chroma,faiss]` | Every shipped capability at once                           |
+
+The extra names `pdf` and `web` are reserved for future loader/serving integrations.
+
+---
+
+## Quick start
+
+The high-level API needs three lines: build a `Ragit` with `RagitBuilder.local` (fully offline defaults — in-memory store, no database, no API key), ingest documents, and search. ragit ships no local embedder in core, so you inject one; the example below uses a deterministic fake (the runnable version lives in `examples/local_quickstart.py`).
+
+```python
+from ragit.builder import RagitBuilder
+from ragit.types import Document
+
+rag = await RagitBuilder.local(embedder=my_embedder).build()
+await rag.ingest([Document(id="policy", text="The refund policy covers water damage.")])
+results = await rag.search("refund policy")
+```
+
+Every component is overridable (`with_store` / `with_embedder` / `with_chunker` / `with_version_store` / `with_settings`), and the low-level seams stay reachable through `rag.store`, `rag.pipeline`, and `rag.retriever`. The builder wires the existing `IngestionPipeline` and `HybridRetriever` unchanged — idempotent ingestion, snapshot comparison, and version replacement (retired chunks deleted through the store's `delete` capability) all behave exactly as in the low-level API.
 
 ---
 
@@ -296,22 +330,22 @@ register_dimension("my-model", 768)                # custom models
 
 ## Vector stores
 
-ragit is vector-database agnostic: it ships no required database. Every backend — built-in or your own — implements the same `VectorStore` ABC with three methods: `hybrid_search`, `count`, and `upsert` (full signatures in `src/ragit/stores/base.py`; the ABC itself has no database dependency). Five backends ship in the box — `memory`, `pgvector`, `qdrant`, `chroma`, and `faiss` — each in its own module, imported lazily by the factory so its driver dependency stays optional until the backend is selected. Any other vector database plugs in through the registry.
+ragit is vector-database agnostic: it ships no required database. Every backend — built-in or your own — implements the same `VectorStore` ABC with three methods: `hybrid_search`, `count`, and `upsert` (full signatures in `src/ragit/stores/base.py`; the ABC itself has no database dependency). Storage is split from retrieval strategy: three `@runtime_checkable` capability Protocols describe what a backend can do — `VectorIndex` (`vector_search`), `LexicalIndex` (`keyword_search`), and `DocumentStore` (`upsert`/`count`/`delete`/`get`) — and a host adapts an existing search engine to a Protocol by implementing its methods, with no ragit inheritance. Five backends ship in the box — `memory`, `pgvector`, `qdrant`, `chroma`, and `faiss` — each in its own module, imported lazily by the factory so its driver dependency stays optional until the backend is selected. Any other vector database plugs in through the registry.
 
 **Session ownership rule:** when the caller supplies a `session`, the caller owns the transaction (commit/rollback). When omitted, the store opens its own session and commits where the operation is transactional.
 
 ### Choosing a store
 
-| Need                                        | Choose                             | Why                                                                                                                       |
-| ------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Tests, zero-dependency dev                  | `InMemoryVectorStore` (`"memory"`) | Brute-force L2 + token-overlap keyword approximation; same RRF merge; nothing persisted                                   |
-| Production on PostgreSQL                    | `PgVectorStore` (`"pgvector"`)     | Real pgvector L2 distance + `ts_rank` full-text search                                                                    |
-| Production vector search on a Qdrant server | `QdrantStore` (`"qdrant"`)         | Qdrant's native nearest-neighbor search + in-process token-overlap keyword stage, merged with RRF                         |
-| Embedded or server Chroma                   | `ChromaStore` (`"chroma"`)         | Chroma's native vector search + in-process token-overlap keyword stage; ephemeral or persistent                           |
-| In-process exact L2 index                   | `FaissStore` (`"faiss"`)           | Exact `IndexFlatL2` search over an in-process `IndexIDMap`; no server, nothing persisted                                  |
-| Production on another vector DB             | Your own `VectorStore` subclass    | Register it and select via `settings.vector_store_provider` — see [Extending ragit](#extending-ragit-provider-registries) |
+| Need                                        | Choose                             | Lexical capability                          | Why                                                                                                                       |
+| ------------------------------------------- | ---------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Tests, zero-dependency dev                  | `InMemoryVectorStore` (`"memory"`) | in-process fallback (token overlap)       | Brute-force L2 + token-overlap keyword approximation; same RRF merge; nothing persisted                                   |
+| Production on PostgreSQL                    | `PgVectorStore` (`"pgvector"`)     | **native FTS** (`ts_rank`, production-scale) | Real pgvector L2 distance + `ts_rank` full-text search                                                                    |
+| Production vector search on a Qdrant server | `QdrantStore` (`"qdrant"`)         | in-process fallback (token overlap)       | Qdrant's native nearest-neighbor search + in-process token-overlap keyword stage, merged with RRF                         |
+| Embedded or server Chroma                   | `ChromaStore` (`"chroma"`)         | in-process fallback (token overlap)       | Chroma's native vector search + in-process token-overlap keyword stage; ephemeral or persistent                           |
+| In-process exact L2 index                   | `FaissStore` (`"faiss"`)           | in-process fallback (token overlap)       | Exact `IndexFlatL2` search over an in-process `IndexIDMap`; no server, nothing persisted                                  |
+| Production on another vector DB             | Your own `VectorStore` subclass    | —                                           | Register it and select via `settings.vector_store_provider` — see [Extending ragit](#extending-ragit-provider-registries) |
 
-The in-memory, Qdrant, Chroma, and FAISS stores' keyword score is a **token-overlap ratio, not a real `ts_rank`** — expect ranking differences versus the pgvector backend, so never tune production thresholds against it.
+The in-memory, Qdrant, Chroma, and FAISS stores' keyword score is a **token-overlap ratio, not a real `ts_rank`** — expect ranking differences versus the pgvector backend, so never tune production thresholds against it. Their `LexicalIndex` implementation is an **in-process fallback** (a full-corpus token-overlap scan) intended for local development, small corpora, and testing; implementing `LexicalIndex` does not guarantee production-scale keyword performance. pgvector is the only built-in **native lexical index** (PostgreSQL full-text search). Hosts at scale combine a pgvector `VectorIndex` with an external lexical engine adapted to `LexicalIndex` — a first-class composition the retrieval strategies (`ragit.retrieval.strategies`) support out of the box.
 
 ### In-memory store
 
@@ -331,6 +365,8 @@ store = PgVectorStore(
     embedding_fn=embedder,              # auto-embed queries
 )
 ```
+
+The pgvector store keeps its optimized single-query `hybrid_search` (one round-trip, two SQL CTEs fused in the database). It also exposes the capability methods standalone: `vector_search` (vector CTE ordered by `embedding <-> :embedding` with the distance threshold and equality filters as bound parameters), `keyword_search` (FTS CTE ordered by `ts_rank`), plus `delete` (`DELETE ... WHERE id = ANY(:ids)` and/or equality-filter predicates) and `get` (`SELECT ... WHERE id = ANY(:ids)`).
 
 ### Qdrant store (built-in)
 
@@ -388,9 +424,11 @@ FAISS identifies vectors by 64-bit integers, so string document ids are mapped t
 
 All backends return result dicts with the same keys: `id`, `document`, `metadata`, `distance` (vector hits only), `keyword_score` (keyword hits only), and `_rrf_score`. They also share the same behaviors: `strict=True` raises `RetrievalError` instead of swallowing failures, an `embedding_fn` auto-embeds queries when `hybrid_search` is called with an empty embedding, and `**filters` applies equality filters to both search stages.
 
+Every backend also implements the `DocumentStore` lifecycle: `delete(ids=None, filters=None, session=None) -> int` and `get(ids=None, filters=None, session=None, text_field="text", metadata_fields=None) -> list[dict]`. `delete` requires at least one selector (an empty `ids` list is rejected — an empty id list never means "delete everything"), applies both restrictions as a conjunction when both are supplied, and returns the number of deleted documents. `get` returns `id`/`document`/`metadata` dicts (score keys are meaningless for direct fetches) and returns every document when no selector is supplied.
+
 ### Strict mode
 
-By default, store failures are logged and swallowed into an empty result list (or `0` for `count`) — the historical behavior. Pass `strict=True` to raise `ragit.types.RetrievalError` instead, which you want for fail-fast pipelines and tests.
+By default, store failures are logged and swallowed into an empty result list (or `0` for `count`) — the historical behavior. Pass `strict=True` to raise `ragit.types.RetrievalError` instead, which you want for fail-fast pipelines and tests. The opt-in swallow contract lives only in the legacy `hybrid_search`/`count` and in the retrieval strategies: the capability methods (`vector_search`, `keyword_search`) and the lifecycle operations (`delete`, `get`) have no `strict` parameter and always raise on failure.
 
 Stores are selected through `vector_store_registry` via `get_vector_store(...)`, which reads `settings.vector_store_provider` (default `"memory"`) and instantiates the provider with the remaining kwargs. To use another vector database, register your backend under a name and set `vector_store_provider` to it — no ragit code changes.
 
@@ -428,7 +466,9 @@ rows = as_dicts(results)      # back to dicts for legacy consumers
 
 ### The pipeline
 
-The pipeline orchestrates: **load source → hash content → compare snapshot → retire old version → chunk → embed → validate → upsert**. Pass a `lock_key` to serialize concurrent ingestion of the same source inside one transaction (a PostgreSQL advisory lock — see below); omit it and serialize ingestion in your own infrastructure.
+The pipeline runs in two phases. The **prepare phase** opens no transaction and takes no lock: **load source → hash the source manifest → compare snapshot → chunk → embed → validate**. The **critical section** is short: **re-check snapshot → retire old version → create version → upsert**, inside one transaction, serialized by an advisory lock when a `lock_key` is supplied (a PostgreSQL advisory lock — see below); omit it and serialize ingestion in your own infrastructure.
+
+The split keeps a slow remote embedding request from holding a transaction and an advisory lock open, and it lets an unchanged source skip before any embedding request is made.
 
 ```python
 pipeline = IngestionPipeline(
@@ -449,20 +489,27 @@ The constructor also accepts `version_id_key` and `source_id_key` (defaults `"ve
 
 ### Idempotency and snapshots
 
-The pipeline builds an `IngestionSnapshot` from the source hash, the embedding model and dimension, and the chunker version and tunables. When it matches the active version's stored snapshot, ingestion is skipped and the stored chunk count is returned — re-running ingestion on an unchanged document is a no-op, never re-embedding it.
+The source hash is a **manifest hash**: the pipeline records every document's `source_name`, `external_id`, and content hash in a canonical JSON manifest and hashes that. Document boundaries, source names, external ids, content, and document order all feed the hash — concatenating `"ab"` + `"c"` no longer hashes like `"a"` + `"bc"`, so a changed document identity or metadata forces a re-ingest.
+
+**Upgrade note:** the manifest hash replaced the raw content-concatenation hash, so every stored snapshot mismatches once after upgrading — run ingestion once per source to re-ingest (a one-time cost).
+
+The pipeline builds an `IngestionSnapshot` from the source hash, the embedding model and dimension, and the chunker version and tunables. When it matches the active version's stored snapshot, ingestion is skipped and the stored chunk count is returned — re-running ingestion on an unchanged document is a no-op, never re-embedding it. The comparison runs in the lock-free prepare phase, so an unchanged source never triggers an embedding request; the critical section re-checks the snapshot under the lock (double-checked locking), so a concurrent process that ingested the source meanwhile still wins.
 
 **Abort safety.** If chunking yields no chunks, the pipeline aborts _before_ touching the version table — otherwise a version row carrying the current snapshot would make every later run skip the source forever.
 
 **Version lifecycle.** On a changed source the pipeline:
 
-1. Closes the active version (sets its end timestamp)
-2. Deletes the retired version's chunks (chunk ids are position-based, so they would violate the unique constraint)
-3. Creates a new version row carrying the current snapshot
-4. Embeds and upserts the new chunks, stamped with the version id
+1. Chunks, embeds, and validates outside any transaction
+2. Closes the active version (sets its end timestamp)
+3. Deletes the retired version's chunks (chunk ids are position-based, so they would violate the unique constraint)
+4. Creates a new version row carrying the current snapshot
+5. Upserts the new chunks, stamped with the version id
 
 ### Document sources
 
 `FileDocumentSource` reads a single file (a missing file is a no-op with a warning). For anything else — S3, databases, APIs — implement the `DocumentSource` protocol (`async load() -> list[RawDocument]`).
+
+**Source contract.** Implementations should **raise** on load failure (network error, permission denied, malformed response) and return `[]` **only** for an authoritative empty dataset — a source that genuinely has no documents. The pipeline treats an empty load as a no-op by default; pass `purge_on_empty=True` to `run` to treat it as authoritative: the active version is retired and its chunks deleted from the search index, so deleted content stops being searchable. This gives sync processes explicit deletion semantics — a source that empties out purges its index entries instead of leaving stale content searchable indefinitely.
 
 ### Advisory locking
 
@@ -471,6 +518,10 @@ The pipeline builds an `IngestionSnapshot` from the source hash, the embedding m
 ### Version storage (host-implemented)
 
 The host implements the `VersionStore` protocol — `find_active`, `close_active`, `create_version`, `delete_chunks` — against its version tables. All methods receive the pipeline's session, so every mutation joins the ingestion transaction.
+
+**External stores.** `delete_chunks` is the single host hook for retiring a version's chunks. Implement it with the portable delete capability: `await store.delete(filters={version_id_key: version_id})`. The delete-before-upsert order is load-bearing: chunk ids are position-based, so the new version's chunks would violate the unique constraint if the retired version's chunks stayed.
+
+Hosts whose search index cannot share the version-table transaction should use the **staged-generation pattern**: write index mutations through the job outbox (`ragit.jobs`) when they cannot join the ingestion transaction, and let the version-table transition (`close_active` + `create_version`) be the atomic active-version switch. A legacy backend wrapped in `LegacyHybridStoreAdapter` deliberately exposes no capabilities — hosts using legacy backends must retire chunks through their own mechanism (their version tables, or a native delete the backend provides outside the adapter). The pipeline itself only ever calls `version_store.delete_chunks`, so it stays agnostic to whether the underlying store implements the capability.
 
 ---
 
@@ -555,7 +606,7 @@ The heuristic judge is domain-neutral by default: key facts are numbers, plus an
 
 ### The runner
 
-`run_evaluation(config, retrieval_fn, dataset, settings=None)` orchestrates a full run. It **requires** an injected `retrieval_fn` and `dataset` (it raises `ValueError` otherwise) — ragit never imports a host retriever or dataset.
+`run_evaluation(config, retrieval_fn, dataset, settings=None, answer_fn=None)` orchestrates a full run. It **requires** an injected `retrieval_fn` and `dataset` (it raises `ValueError` otherwise) — ragit never imports a host retriever or dataset.
 
 ```python
 result = await run_evaluation(
@@ -563,15 +614,20 @@ result = await run_evaluation(
     retrieval_fn,      # async (query: str) -> list[result dicts]
     dataset,           # list[EvalSample], pre-filtered
     settings=settings,
+    answer_fn=answer_fn,  # async (query: str, context: str) -> answer
 )
 print(result.retrieval_metrics)   # recall@K, precision@K, MRR, latency
 print(result.answer_metrics)      # avg faithfulness/relevance/...
 print(result.summary)             # human-readable report
 ```
 
-**Modes.** `retrieval-only` measures retrieval quality alone. `end-to-end` also scores answer quality — with an important nuance: it scores the **joined retrieved context** against the gold answer. The runner does _not_ generate answers with an LLM; the "answer" it judges is the retrieved context itself, so answer metrics reuse the exact context computed for retrieval and never re-retrieve.
+**Modes.** Three modes, each measuring something different:
 
-`EvalSample.category` is a free-form string (hosts define their own taxonomy); `difficulty` is an `easy`/`medium`/`hard` enum. The CLI entry point (`ragit.evaluation.runner:main`) exposes `--mode`, `--judge`, `--n-results`, `--category`, `--difficulty`, and `--output`; hosts pass their own `retrieval_fn`, `dataset`, and optional `runner` callable to inject domain dependencies behind the flags.
+- `retrieval-only` — retrieval quality alone (Recall@K, Precision@K, MRR, latency).
+- `context` — scores the **joined retrieved context** against the gold answer. This is the legacy behavior under an honest name: it measures whether the retrieved chunks *contain* the answer, not whether a model answers faithfully. A cheap upper-bound proxy when no answer generator is wired.
+- `end-to-end` — also scores answer quality, but on a **real model output**: the injected `answer_fn` (an async `(query, context) -> answer` callable) generates the answer, and the judges receive the actual answer and the actual retrieved context as separate inputs. `end-to-end` **requires** `answer_fn` and raises `ValueError` naming the three modes otherwise — a silently wrong metric is worse than a loud failure. Per-sample results carry the retrieved `context`, the `generated_answer`, the `gold_answer`, and `chunks_found` separately.
+
+`EvalSample.category` is a free-form string (hosts define their own taxonomy); `difficulty` is an `easy`/`medium`/`hard` enum. The CLI entry point (`ragit.evaluation.runner:main`) exposes `--mode` (all three choices), `--judge`, `--n-results`, `--category`, `--difficulty`, and `--output`; hosts pass their own `retrieval_fn`, `dataset`, and optional `runner` callable to inject domain dependencies — including the `answer_fn` answer generator that `end-to-end` mode requires — behind the flags.
 
 ---
 

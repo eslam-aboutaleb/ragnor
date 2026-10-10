@@ -8,18 +8,29 @@ snapshot against the stored one makes ingestion
 idempotent -- an unchanged source is skipped instead
 of re-embedded and re-upserted.
 
+The source hash is a *manifest* hash: every
+document's source name, external id, and content
+hash are recorded in a canonical JSON manifest, so
+document boundaries, source names, external ids, and
+content all feed the hash. Concatenating document
+content (``"ab" + "c"`` vs ``"a" + "bc"``) is not
+enough to change it -- the manifest is.
+
 Version *storage* is application-side; this module
 defines the value type and the comparison only.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Any
 
 from ragit.chunking.base import Chunker
 from ragit.config import RagSettings
 from ragit.embeddings import get_embedding_dimension
+from ragit.ingestion.sources import RawDocument
 
 RETRIEVAL_SCHEMA_VERSION = "v1"
 """Version of the retrieval schema the snapshots carry."""
@@ -67,6 +78,39 @@ def snapshot_matches(
     if stored is None:
         return False
     return current == stored
+
+
+def compute_source_hash(documents: list[RawDocument]) -> str:
+    """Compute the manifest hash of a loaded document set.
+
+    The hash covers the whole manifest -- every
+    document's source name, external id, and content
+    hash -- serialized as canonical JSON (sorted
+    keys, no whitespace) before hashing. Document
+    boundaries, source names, external ids, and
+    content all feed the result, so a changed
+    document identity or metadata produces a
+    different hash even when the concatenated
+    content is unchanged.
+
+    Args:
+        documents: Loaded documents in source order.
+
+    Returns:
+        SHA-256 hex digest of the canonical manifest.
+    """
+    manifest = {
+        "documents": [
+            {
+                "source_name": doc.source_name,
+                "external_id": doc.external_id,
+                "content_hash": hashlib.sha256(doc.content.encode("utf-8")).hexdigest(),
+            }
+            for doc in documents
+        ],
+    }
+    canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def build_snapshot(

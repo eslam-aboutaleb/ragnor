@@ -5,6 +5,12 @@ memory: brute-force L2 vector search, a token-overlap approximation
 of full-text search, and the shared Reciprocal Rank Fusion merge
 (:mod:`ragit.stores._scoring`).
 
+The store subclasses :class:`ragit.stores.base.HybridVectorStore`:
+the vector stage lives in :meth:`vector_search` and the keyword
+stage in :meth:`keyword_search` (both capability methods that
+always raise on failure), and the inherited composite
+``hybrid_search`` runs both stages and fuses them with RRF.
+
 Approximation notice: the keyword score is a token-overlap ratio,
 not a real ``ts_rank`` over a ``tsvector``. It is intended for
 tests and development, not as a production search backend.
@@ -13,22 +19,18 @@ tests and development, not as a production search backend.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from ragit.config import RagSettings
-from ragit.stores._scoring import l2_distance, rrf_merge, token_overlap, tokenize
-from ragit.stores.base import EmbeddingFunction, VectorStore
+from ragit.stores._scoring import l2_distance, token_overlap, tokenize
+from ragit.stores.base import EmbeddingFunction, HybridVectorStore
 from ragit.stores.registry import vector_store_registry
 from ragit.validation import validate_embedding, validate_identifier
-
-if TYPE_CHECKING:
-    from ragit.db.session import SessionProvider
 
 logger = logging.getLogger(__name__)
 
 
 @vector_store_registry.register("memory")
-class InMemoryVectorStore(VectorStore):
+class InMemoryVectorStore(HybridVectorStore):
     """In-memory vector store.
 
     Brute-force L2 vector search with token-overlap keyword matching,
@@ -45,8 +47,8 @@ class InMemoryVectorStore(VectorStore):
         table_name: str = "documents",
         id_field: str = "id",
         embedding_dim: int | None = None,
-        session_factory: SessionProvider | None = None,
-        settings: RagSettings | None = None,
+        session_factory: Any = None,
+        settings: Any = None,
         embedding_fn: EmbeddingFunction | None = None,
     ):
         """Initialize the in-memory store.
@@ -66,12 +68,14 @@ class InMemoryVectorStore(VectorStore):
                 Used only when ``hybrid_search`` is called with an
                 empty embedding.
         """
-        validate_identifier(table_name, "table_name")
-        validate_identifier(id_field, "id_field")
-        self.table_name = table_name
-        self.id_field = id_field
-        self.embedding_dim = embedding_dim
-        self._embedding_fn = embedding_fn
+        super().__init__(
+            table_name=table_name,
+            id_field=id_field,
+            embedding_dim=embedding_dim,
+            session_factory=session_factory,
+            settings=settings,
+            embedding_fn=embedding_fn,
+        )
         self._records: dict[str, dict[str, Any]] = {}
         self._embeddings: dict[str, list[float]] = {}
 
@@ -79,69 +83,62 @@ class InMemoryVectorStore(VectorStore):
         """Return whether ``record`` satisfies every equality filter."""
         return all(record.get(key) == value for key, value in filters.items())
 
-    async def hybrid_search(  # noqa: PLR0913, PLR0917
+    def _metadata_projection(
         self,
-        query: str,
+        record: dict[str, Any],
+        metadata_fields: list[str],
+    ) -> dict[str, Any]:
+        """Project ``metadata_fields`` out of ``record``."""
+        return {
+            field: record[field]
+            for field in metadata_fields
+            if field in record and record[field] is not None
+        }
+
+    async def vector_search(  # noqa: PLR0913, PLR0917
+        self,
         embedding: list[float],
         n_results: int,
         threshold: float,
         text_field: str = "text",
         metadata_fields: list[str] | None = None,
         session: Any = None,
-        strict: bool = False,
         **filters: Any,
     ) -> list[dict[str, Any]]:
-        """Hybrid search: brute-force L2 plus token-overlap keyword match.
-
-        The two stages are ranked independently (distance ascending,
-        overlap ratio descending, each tie-broken by id), truncated to
-        ``n_results``, and merged with Reciprocal Rank Fusion — the
-        same shape as the other backends' two-stage search.
+        """Brute-force L2 search over the record map.
 
         Args:
-            query: Natural language search query.
-            embedding: Query embedding vector. If empty, the query is
-                embedded automatically using the injected
-                ``embedding_fn``.
+            embedding: Query embedding vector (required; the method
+                does not auto-embed).
             n_results: Maximum number of results to return.
-            threshold: Maximum L2 distance for the vector search part.
+            threshold: Maximum L2 distance.
             text_field: Name of the field containing the document text.
             metadata_fields: Fields to include in the result metadata.
             session: Accepted for interface compatibility; ignored
                 (no database).
-            strict: Accepted for interface compatibility; this store
-                has no database failures to surface.
             **filters: Equality filters matched against document
                 fields (metadata and extra fields).
 
-            Returns:
-                list[dict]: Result dicts sorted by RRF score, with the
-                same keys as the other backends' hybrid search.
-            """
+        Returns:
+            list[dict]: Result dicts ordered by distance ascending
+            (tie-broken by id), each carrying ``id``, ``document``,
+            ``metadata``, ``distance``, and ``keyword_score``
+            (``None``).
+
+        Raises:
+            ValueError: If identifiers are unsafe or the embedding
+                has the wrong dimension.
+        """
         validate_identifier(text_field, "text_field")
         for key in filters:
             validate_identifier(key, "filter key")
         metadata_fields = metadata_fields or []
         for field in metadata_fields:
             validate_identifier(field, "metadata_field")
-
-        if not embedding:
-            if self._embedding_fn is None:
-                raise ValueError(
-                    "embedding_fn is required to auto-embed the query; "
-                    "pass an embedding or construct the store with "
-                    "embedding_fn"
-                )
-            embedding_list = await self._embedding_fn([query])
-            embedding = embedding_list[0]
-
         if self.embedding_dim is not None:
             validate_embedding(embedding, self.embedding_dim, label="query embedding")
 
-        query_tokens = set(tokenize(query))
-
         vector_distances: dict[str, float] = {}
-        keyword_scores: dict[str, float] = {}
         for doc_id, record in self._records.items():
             if not self._matches_filters(record, filters):
                 continue
@@ -150,9 +147,6 @@ class InMemoryVectorStore(VectorStore):
                 distance = l2_distance(embedding, doc_embedding)
                 if distance < threshold:
                     vector_distances[doc_id] = distance
-            score = token_overlap(query_tokens, tokenize(str(record.get(text_field, ""))))
-            if score > 0.0:
-                keyword_scores[doc_id] = score
 
         vector_ranked = [
             doc_id
@@ -160,33 +154,86 @@ class InMemoryVectorStore(VectorStore):
                 vector_distances.items(), key=lambda item: (item[1], item[0])
             )[:n_results]
         ]
+        results = []
+        for doc_id in vector_ranked:
+            record = self._records[doc_id]
+            results.append(
+                {
+                    "id": str(doc_id) if doc_id is not None else None,
+                    "document": record.get(text_field),
+                    "metadata": self._metadata_projection(record, metadata_fields),
+                    "distance": float(vector_distances[doc_id]),
+                    "keyword_score": None,
+                }
+            )
+        return results
+
+    async def keyword_search(  # noqa: PLR0913, PLR0917
+        self,
+        query: str,
+        n_results: int,
+        text_field: str = "text",
+        metadata_fields: list[str] | None = None,
+        session: Any = None,
+        **filters: Any,
+    ) -> list[dict[str, Any]]:
+        """Token-overlap keyword search over the record map.
+
+        The keyword score is a token-overlap ratio, not a real
+        full-text rank -- an approximation intended for tests and
+        development.
+
+        Args:
+            query: Natural language search query.
+            n_results: Maximum number of results to return.
+            text_field: Name of the field containing the document text.
+            metadata_fields: Fields to include in the result metadata.
+            session: Accepted for interface compatibility; ignored
+                (no database).
+            **filters: Equality filters matched against document
+                fields (metadata and extra fields).
+
+        Returns:
+            list[dict]: Result dicts ordered by overlap ratio
+            descending (tie-broken by id), each carrying ``id``,
+            ``document``, ``metadata``, ``distance`` (``None``), and
+            ``keyword_score``.
+
+        Raises:
+            ValueError: If identifiers are unsafe.
+        """
+        validate_identifier(text_field, "text_field")
+        for key in filters:
+            validate_identifier(key, "filter key")
+        metadata_fields = metadata_fields or []
+        for field in metadata_fields:
+            validate_identifier(field, "metadata_field")
+
+        query_tokens = set(tokenize(query))
+        keyword_scores: dict[str, float] = {}
+        for doc_id, record in self._records.items():
+            if not self._matches_filters(record, filters):
+                continue
+            score = token_overlap(query_tokens, tokenize(str(record.get(text_field, ""))))
+            if score > 0.0:
+                keyword_scores[doc_id] = score
+
         keyword_ranked = [
             doc_id
             for doc_id, _ in sorted(
                 keyword_scores.items(), key=lambda item: (-item[1], item[0])
             )[:n_results]
         ]
-
         results = []
-        for doc_id, rrf_score in rrf_merge(vector_ranked, keyword_ranked, n_results):
+        for doc_id in keyword_ranked:
             record = self._records[doc_id]
-            metadata = {
-                field: record[field]
-                for field in metadata_fields
-                if field in record and record[field] is not None
-            }
             results.append(
                 {
                     "id": str(doc_id) if doc_id is not None else None,
                     "document": record.get(text_field),
-                    "metadata": metadata,
-                    "distance": (
-                        float(vector_distances[doc_id]) if doc_id in vector_distances else None
-                    ),
-                    "keyword_score": (
-                        float(keyword_scores[doc_id]) if doc_id in keyword_scores else None
-                    ),
-                    "_rrf_score": rrf_score,
+                    "metadata": self._metadata_projection(record, metadata_fields),
+                    "distance": None,
+                    "keyword_score": float(keyword_scores[doc_id]),
                 }
             )
         return results
@@ -280,3 +327,112 @@ class InMemoryVectorStore(VectorStore):
             self._records[doc_id] = record
             self._embeddings[doc_id] = doc[embedding_field]
         logger.info("Upserted %d documents to in-memory store %s.", len(documents), self.table_name)
+
+    async def delete(
+        self,
+        ids: list[Any] | None = None,
+        filters: dict[str, Any] | None = None,
+        session: Any = None,
+    ) -> int:
+        """Delete documents selected by ``ids`` and/or ``filters``.
+
+        At least one selector must be supplied; an empty ``ids``
+        list is rejected (an empty id list never means "delete
+        everything"). When both are supplied, both restrictions
+        apply (conjunction).
+
+        Args:
+            ids: Document ids to delete.
+            filters: Equality filters matched against document
+                fields (metadata and extra fields).
+            session: Accepted for interface compatibility; ignored
+                (no database).
+
+        Returns:
+            int: Number of deleted documents.
+
+        Raises:
+            ValueError: If no selector is supplied, ``ids`` is
+                empty, or a filter key is unsafe.
+        """
+        if ids is None and filters is None:
+            raise ValueError(
+                "delete requires at least one of ids or filters"
+            )
+        if ids is not None and len(ids) == 0:
+            raise ValueError(
+                "ids must not be empty; an empty id list never "
+                "means delete everything"
+            )
+        if filters is not None:
+            for key in filters:
+                validate_identifier(key, "filter key")
+
+        deleted = 0
+        for doc_id in list(self._records):
+            if ids is not None and doc_id not in set(ids):
+                continue
+            if filters is not None and not self._matches_filters(
+                self._records[doc_id], filters
+            ):
+                continue
+            del self._records[doc_id]
+            self._embeddings.pop(doc_id, None)
+            deleted += 1
+        logger.info("Deleted %d documents from in-memory store %s.", deleted, self.table_name)
+        return deleted
+
+    async def get(  # noqa: PLR0913, PLR0917
+        self,
+        ids: list[Any] | None = None,
+        filters: dict[str, Any] | None = None,
+        session: Any = None,
+        text_field: str = "text",
+        metadata_fields: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fetch documents selected by ``ids`` and/or ``filters``.
+
+        With no selector, every document is returned. When both
+        selectors are supplied, both restrictions apply
+        (conjunction).
+
+        Args:
+            ids: Document ids to fetch.
+            filters: Equality filters matched against document
+                fields (metadata and extra fields).
+            session: Accepted for interface compatibility; ignored
+                (no database).
+            text_field: Name of the field containing the document
+                text. Defaults to "text".
+            metadata_fields: Fields to include in the result
+                metadata dict.
+
+        Returns:
+            list[dict]: ``id``/``document``/``metadata`` dicts
+            (score keys are meaningless for direct fetches).
+
+        Raises:
+            ValueError: If any identifier is unsafe.
+        """
+        validate_identifier(text_field, "text_field")
+        metadata_fields = metadata_fields or []
+        for field in metadata_fields:
+            validate_identifier(field, "metadata_field")
+        if filters is not None:
+            for key in filters:
+                validate_identifier(key, "filter key")
+
+        results = []
+        for doc_id, record in self._records.items():
+            if ids is not None and doc_id not in set(ids):
+                continue
+            if filters is not None and not self._matches_filters(record, filters):
+                continue
+            results.append(
+                {
+                    "id": str(doc_id) if doc_id is not None else None,
+                    "document": record.get(text_field),
+                    "metadata": self._metadata_projection(record, metadata_fields),
+                }
+            )
+        return results

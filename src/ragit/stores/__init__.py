@@ -1,10 +1,16 @@
 """Vector store abstractions and providers for ragit.
 
 The package is vector-database agnostic: the
-:class:`VectorStore` ABC defines the contract, and each
-backend lives in its own module that registers itself with
-the provider registry on import. Backend modules are loaded
-lazily (by :class:`ragit.stores.store_factory.RegistryVectorStoreFactory`
+:class:`VectorStore` ABC defines the legacy fused
+contract, the capability Protocols
+(:class:`VectorIndex`, :class:`LexicalIndex`,
+:class:`DocumentStore`) describe what a backend can
+do structurally, and :class:`HybridVectorStore`
+composes the two search capabilities into the fused
+contract. Each backend lives in its own module that
+registers itself with the provider registry on
+import. Backend modules are loaded lazily (by
+:class:`ragit.stores.store_factory.RegistryVectorStoreFactory`
 or the ``__getattr__`` below) so every backend's driver
 dependency stays optional.
 """
@@ -14,7 +20,15 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
-from ragit.stores.base import EmbeddingFunction, VectorStore
+from ragit.stores.base import (
+    DocumentStore,
+    EmbeddingFunction,
+    HybridVectorStore,
+    LegacyHybridStoreAdapter,
+    LexicalIndex,
+    VectorIndex,
+    VectorStore,
+)
 from ragit.stores.memory import InMemoryVectorStore
 from ragit.stores.registry import get_vector_store, vector_store_registry
 from ragit.stores.store_factory import RegistryVectorStoreFactory, VectorStoreFactory
@@ -45,12 +59,17 @@ def __getattr__(name: str) -> Any:
 
 __all__ = [
     "ChromaStore",
+    "DocumentStore",
     "EmbeddingFunction",
     "FaissStore",
+    "HybridVectorStore",
     "InMemoryVectorStore",
+    "LegacyHybridStoreAdapter",
+    "LexicalIndex",
     "PgVectorStore",
     "QdrantStore",
     "RegistryVectorStoreFactory",
+    "VectorIndex",
     "VectorStore",
     "VectorStoreFactory",
     "get_vector_store",

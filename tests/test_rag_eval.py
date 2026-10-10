@@ -298,7 +298,7 @@ async def test_run_evaluation_retrieval_only():
 
 
 @pytest.mark.asyncio
-async def test_run_evaluation_end_to_end_heuristic():
+async def test_run_evaluation_context_mode_heuristic():
     async def retrieval_fn(query: str) -> list[dict]:
         if "water" in query:
             return _hybrid_results(
@@ -311,7 +311,7 @@ async def test_run_evaluation_end_to_end_heuristic():
         )
 
     config = EvalConfig(
-        mode="end-to-end",
+        mode="context",
         judge="heuristic",
         category="coverage",
     )
@@ -329,7 +329,7 @@ async def test_run_evaluation_answer_metrics_reuse_retrieval_context():
     """Answer metrics are computed from the retrieval phase's context.
 
     The runner must not re-retrieve: the retrieval function counts
-    its invocations, and an end-to-end run over N samples calls it
+    its invocations, and a context-mode run over N samples calls it
     exactly N times (once per sample, in the retrieval phase only).
     """
     calls: list[str] = []
@@ -343,7 +343,7 @@ async def test_run_evaluation_answer_metrics_reuse_retrieval_context():
 
     dataset = _dataset()
     await run_evaluation(
-        EvalConfig(mode="end-to-end", judge="heuristic"),
+        EvalConfig(mode="context", judge="heuristic"),
         retrieval_fn,
         dataset,
     )

@@ -68,7 +68,7 @@ class TestEvalRunner:
     @pytest.mark.asyncio
     async def test_run_evaluation_no_dataset_returns_early(self):
         result = await run_evaluation(
-            EvalConfig(),
+            EvalConfig(mode="context"),
             retrieval_fn=lambda q: [],
             dataset=[],
         )
@@ -84,10 +84,14 @@ class TestEvalRunner:
         async def retrieval_fn(query: str) -> list[dict]:
             return []
 
+        async def answer_fn(query: str, context: str) -> str:
+            return "generated answer"
+
         result = await run_evaluation(
             config=None,
             retrieval_fn=retrieval_fn,
             dataset=[_sample()],
+            answer_fn=answer_fn,
         )
 
         assert result.config["mode"] == "end-to-end"

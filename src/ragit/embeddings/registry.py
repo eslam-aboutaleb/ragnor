@@ -30,7 +30,6 @@ from __future__ import annotations
 
 from ragit.config import RagSettings
 from ragit.embeddings.base import EmbeddingFunction
-from ragit.embeddings.litellm import LitellmEmbeddingFunction
 from ragit.registry import Registry
 
 embedding_registry: Registry[EmbeddingFunction] = Registry()
@@ -43,8 +42,17 @@ class LiteLLMEmbeddingProvider:
     def __init__(self, settings: RagSettings) -> None:
         self._settings = settings
 
-    def create(self) -> LitellmEmbeddingFunction:
+    def create(self) -> EmbeddingFunction:
         """Return a LiteLLM embedding function configured from settings."""
+        try:
+            from ragit.embeddings.litellm import (  # noqa: PLC0415
+                LitellmEmbeddingFunction,
+            )
+        except ImportError as exc:
+            raise ImportError(
+                "The LiteLLM integration requires the 'litellm' extra: "
+                "pip install 'ragit[litellm]'"
+            ) from exc
         return LitellmEmbeddingFunction(
             api_key=self._settings.openai_api_key,
             model_name=self._settings.embedding_model,
