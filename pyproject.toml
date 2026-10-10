@@ -3,8 +3,8 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ragit"
-version = "0.3.0"
+name = "ragit-toolkit"
+version = "0.3.1"
 description = "Domain-agnostic RAG toolkit: embeddings, chunking, vector stores, retrieval, ingestion, evaluation, and jobs."
 requires-python = ">=3.11"
 dependencies = []
@@ -37,7 +37,7 @@ faiss = [
 # The extra names "pdf" and "web" are reserved for
 # future loader/serving integrations.
 all = [
-    "ragit[litellm,pgvector,qdrant,chroma,faiss]",
+    "ragit-toolkit[litellm,pgvector,qdrant,chroma,faiss]",
 ]
 
 [tool.setuptools.packages.find]

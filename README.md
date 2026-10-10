@@ -102,25 +102,25 @@ ragit is a RAG _subsystem_, not an application. It grew out of a production fina
 
 ragit requires **Python ≥ 3.11**. The core install has **zero third-party dependencies** — every capability (LiteLLM embeddings, vector backends) is an optional extra, imported lazily only when used.
 
-The package is **not on PyPI** — the name `ragit` is taken by an unrelated third-party package (see "About the names" below) — install it from GitHub:
+The distribution is published on PyPI as **`ragit-toolkit`** (the PyPI name `ragit` is taken by an unrelated third-party package — see "About the names" below):
 
 ```bash
-# Install from GitHub (the PyPI name "ragit" is taken by an unrelated package)
-pip install git+https://github.com/eslam-aboutaleb/ragit.git
+# Install from PyPI
+pip install ragit-toolkit
 
 # With a backend extra
-pip install "ragit[pgvector] @ git+https://github.com/eslam-aboutaleb/ragit.git"
+pip install "ragit-toolkit[pgvector]"
 ```
 
 As a uv/poetry dependency in `pyproject.toml`:
 
 ```toml
-ragit @ git+https://github.com/eslam-aboutaleb/ragit.git
+ragit-toolkit
 # or with an extra:
-ragit[pgvector] @ git+https://github.com/eslam-aboutaleb/ragit.git
+ragit-toolkit[pgvector]
 ```
 
-> **About the names.** The PyPI name `ragit` is **taken** by an unrelated third-party package — RODMENA LIMITED's "Automatic RAG Pattern Optimization Engine" (currently v0.12.2; github.com/rodmena-limited/ragit) — so this project **cannot be published to PyPI under the name `ragit`**; a different distribution name would be required. The PyPI package `raglib` (an openai-agents-based Spanish RAG library by Harrison Chacon) is another unrelated third-party project. The GitHub repository is `eslam-aboutaleb/ragit` and the Python package inside is also `ragit`.
+> **About the names.** The PyPI name `ragit` is **taken** by an unrelated third-party package — RODMENA LIMITED's "Automatic RAG Pattern Optimization Engine" (currently v0.12.2; github.com/rodmena-limited/ragit) — so this project is published on PyPI under the distribution name **`ragit-toolkit`**. The PyPI package `raglib` (an openai-agents-based Spanish RAG library by Harrison Chacon) is another unrelated third-party project. The GitHub repository is `eslam-aboutaleb/ragit` and the Python package (import name) inside is `ragit`.
 
 Local development install from a checkout:
 
@@ -147,7 +147,7 @@ pip install -e ".[test]"
 pip install -e . fastapi uvicorn
 ```
 
-The core install (from GitHub) has **zero third-party packages** — `import ragit.*` never requires litellm, a database driver, or a vector-DB client. Every capability ships as an optional extra and is imported lazily, only when actually used:
+The core install has **zero third-party packages** — `import ragit.*` never requires litellm, a database driver, or a vector-DB client. Every capability ships as an optional extra and is imported lazily, only when actually used:
 
 | Extra              | Adds                                          | Notes                                                              |
 | ------------------ | --------------------------------------------- | ------------------------------------------------------------------ |

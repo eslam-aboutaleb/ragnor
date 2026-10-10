@@ -14,7 +14,7 @@ ragit is a RAG _subsystem_, not an application: chunking, embeddings, vector sto
 
 ## Quick start
 
-The high-level convenience API (`ragit.builder`) needs three lines — `RagitBuilder.local(embedder=...).build()` → `await rag.ingest([Document(...)])` → `await rag.search("...")` — with fully offline defaults: the in-memory vector store, the sliding-window chunker, the built-in `InMemoryVersionStore`, and a null session provider (no database, no driver, no API key). ragit ships no local embedder in core, so the builder requires an injected embedder; `examples/local_quickstart.py` defines a deterministic fake and runs with the core install only (`pip install git+https://github.com/eslam-aboutaleb/ragit.git`).
+The high-level convenience API (`ragit.builder`) needs three lines — `RagitBuilder.local(embedder=...).build()` → `await rag.ingest([Document(...)])` → `await rag.search("...")` — with fully offline defaults: the in-memory vector store, the sliding-window chunker, the built-in `InMemoryVersionStore`, and a null session provider (no database, no driver, no API key). ragit ships no local embedder in core, so the builder requires an injected embedder; `examples/local_quickstart.py` defines a deterministic fake and runs with the core install only (`pip install ragit-toolkit`).
 
 ```python
 from ragit.builder import RagitBuilder
@@ -29,19 +29,19 @@ The builder sits **on the low-level seams**: it wires the existing `IngestionPip
 
 ## 1. Install
 
-**The PyPI name `ragit` is TAKEN** by an unrelated third-party package — RODMENA LIMITED's "Automatic RAG Pattern Optimization Engine" (currently v0.12.2, github.com/rodmena-limited/ragit) — so this project **cannot be published to PyPI under that name**; a different distribution name would be required. Install from GitHub, and never run a bare `pip install ragit` — that would install the unrelated PyPI package. The PyPI package `raglib` (an openai-agents-based Spanish RAG library by Harrison Chacon) is also an unrelated third-party project. The GitHub repository is `eslam-aboutaleb/ragit` and the Python package inside is `ragit`.
+Published on PyPI as **`ragit-toolkit`** — the PyPI name `ragit` is TAKEN by an unrelated third-party package (RODMENA LIMITED's "Automatic RAG Pattern Optimization Engine", currently v0.12.2, github.com/rodmena-limited/ragit), so this project ships under the distribution name `ragit-toolkit`. Never run a bare `pip install ragit` — that installs the unrelated PyPI package. The PyPI package `raglib` (an openai-agents-based Spanish RAG library by Harrison Chacon) is also an unrelated third-party project. The GitHub repository is `eslam-aboutaleb/ragit` and the Python package (import name) inside is `ragit`.
 
 ```bash
-pip install git+https://github.com/eslam-aboutaleb/ragit.git
+pip install ragit-toolkit
 
 # With an extra
-pip install "ragit[pgvector] @ git+https://github.com/eslam-aboutaleb/ragit.git"
+pip install "ragit-toolkit[pgvector]"
 ```
 
-As a uv/poetry git dependency in `pyproject.toml`:
+As a uv/poetry dependency in `pyproject.toml`:
 
 ```toml
-ragit @ git+https://github.com/eslam-aboutaleb/ragit.git
+ragit-toolkit
 ```
 
 Extras: `[litellm]` (litellm>=1.84 — LiteLLM embeddings provider and LLM judge), `[pgvector]` (sqlalchemy[asyncio]), `[qdrant]` (qdrant-client), `[chroma]` (chromadb), `[faiss]` (faiss-cpu), `[local-embeddings]` (reserved, currently empty — future local-model backend), `[all]`, `[test]` (pytest, pytest-asyncio, aiosqlite, sqlalchemy[asyncio]). Requires **Python >= 3.11**. Core has no third-party dependencies — no database driver is imported until a backend is selected, and litellm is imported only when the LiteLLM integration is used.
