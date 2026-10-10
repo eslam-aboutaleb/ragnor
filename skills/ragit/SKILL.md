@@ -14,7 +14,7 @@ ragit is a RAG _subsystem_, not an application: chunking, embeddings, vector sto
 
 ## Quick start
 
-The high-level convenience API (`ragit.builder`) needs three lines — `RagitBuilder.local(embedder=...).build()` → `await rag.ingest([Document(...)])` → `await rag.search("...")` — with fully offline defaults: the in-memory vector store, the sliding-window chunker, the built-in `InMemoryVersionStore`, and a null session provider (no database, no driver, no API key). ragit ships no local embedder in core, so the builder requires an injected embedder; `examples/local_quickstart.py` defines a deterministic fake and runs with `pip install ragit` only.
+The high-level convenience API (`ragit.builder`) needs three lines — `RagitBuilder.local(embedder=...).build()` → `await rag.ingest([Document(...)])` → `await rag.search("...")` — with fully offline defaults: the in-memory vector store, the sliding-window chunker, the built-in `InMemoryVersionStore`, and a null session provider (no database, no driver, no API key). ragit ships no local embedder in core, so the builder requires an injected embedder; `examples/local_quickstart.py` defines a deterministic fake and runs with the core install only (`pip install git+https://github.com/eslam-aboutaleb/ragit.git`).
 
 ```python
 from ragit.builder import RagitBuilder
@@ -29,7 +29,7 @@ The builder sits **on the low-level seams**: it wires the existing `IngestionPip
 
 ## 1. Install
 
-**The PyPI name `ragit` is FREE** (no distribution exists) but the package is **not yet published there** — install from GitHub, never from PyPI. The PyPI names `ragit` (an ingest4llm-based kit by HSPK) and `raglib` (an openai-agents-based Spanish RAG library by Harrison Chacon) are taken by unrelated third-party packages, and the GitHub repository is still named `ragit` while the Python package is `ragit`.
+**The PyPI name `ragit` is TAKEN** by an unrelated third-party package — RODMENA LIMITED's "Automatic RAG Pattern Optimization Engine" (currently v0.12.2, github.com/rodmena-limited/ragit) — so this project **cannot be published to PyPI under that name**; a different distribution name would be required. Install from GitHub, and never run a bare `pip install ragit` — that would install the unrelated PyPI package. The PyPI package `raglib` (an openai-agents-based Spanish RAG library by Harrison Chacon) is also an unrelated third-party project. The GitHub repository is `eslam-aboutaleb/ragit` and the Python package inside is `ragit`.
 
 ```bash
 pip install git+https://github.com/eslam-aboutaleb/ragit.git

@@ -102,10 +102,10 @@ ragit is a RAG _subsystem_, not an application. It grew out of a production fina
 
 ragit requires **Python ≥ 3.11**. The core install has **zero third-party dependencies** — every capability (LiteLLM embeddings, vector backends) is an optional extra, imported lazily only when used.
 
-The package is **not yet published to PyPI** — install it from GitHub:
+The package is **not on PyPI** — the name `ragit` is taken by an unrelated third-party package (see "About the names" below) — install it from GitHub:
 
 ```bash
-# Install from GitHub (not yet published to PyPI)
+# Install from GitHub (the PyPI name "ragit" is taken by an unrelated package)
 pip install git+https://github.com/eslam-aboutaleb/ragit.git
 
 # With a backend extra
@@ -120,7 +120,7 @@ ragit @ git+https://github.com/eslam-aboutaleb/ragit.git
 ragit[pgvector] @ git+https://github.com/eslam-aboutaleb/ragit.git
 ```
 
-> **About the names.** The PyPI name `ragit` is free (no distribution exists) and reserved for this project's future publication. The PyPI packages `ragit` (an ingest4llm-based kit by HSPK) and `raglib` (an openai-agents-based Spanish RAG library by Harrison Chacon) are unrelated third-party projects. The GitHub repository is still named `ragit` while the Python package inside is `ragit` — repo and package names don't need to match.
+> **About the names.** The PyPI name `ragit` is **taken** by an unrelated third-party package — RODMENA LIMITED's "Automatic RAG Pattern Optimization Engine" (currently v0.12.2; github.com/rodmena-limited/ragit) — so this project **cannot be published to PyPI under the name `ragit`**; a different distribution name would be required. The PyPI package `raglib` (an openai-agents-based Spanish RAG library by Harrison Chacon) is another unrelated third-party project. The GitHub repository is `eslam-aboutaleb/ragit` and the Python package inside is also `ragit`.
 
 Local development install from a checkout:
 
@@ -147,7 +147,7 @@ pip install -e ".[test]"
 pip install -e . fastapi uvicorn
 ```
 
-`pip install ragit` installs **zero third-party packages** — `import ragit.*` never requires litellm, a database driver, or a vector-DB client. Every capability ships as an optional extra and is imported lazily, only when actually used:
+The core install (from GitHub) has **zero third-party packages** — `import ragit.*` never requires litellm, a database driver, or a vector-DB client. Every capability ships as an optional extra and is imported lazily, only when actually used:
 
 | Extra              | Adds                                          | Notes                                                              |
 | ------------------ | --------------------------------------------- | ------------------------------------------------------------------ |
@@ -178,6 +178,8 @@ results = await rag.search("refund policy")
 ```
 
 Every component is overridable (`with_store` / `with_embedder` / `with_chunker` / `with_version_store` / `with_settings`), and the low-level seams stay reachable through `rag.store`, `rag.pipeline`, and `rag.retriever`. The builder wires the existing `IngestionPipeline` and `HybridRetriever` unchanged — idempotent ingestion, snapshot comparison, and version replacement (retired chunks deleted through the store's `delete` capability) all behave exactly as in the low-level API.
+
+Details the three lines hide: `build()` raises `ValueError` without an embedder (ragit ships no local embedder in core); `embedding_dim=` is auto-registered for the embedding model via `register_dimension`; `rag.ingest(..., purge_on_empty=True)` treats an empty document list as authoritative — the active version is retired and its chunks deleted from the search index; `rag.count(**filters)` counts documents through the store; and `rag.search` defaults to `n_results=5`. The defaults are `SlidingWindowChunker(chunk_size=600, overlap=100)`, `BuilderSettings(embedding_model="local", rag_distance_threshold=1.3)` (a plain dataclass satisfying the `RagSettings` protocol — no pydantic-settings in core), and `InMemoryVersionStore` wired to the store; `BuilderSettings` and `InMemoryVersionStore` are public names, so hosts can construct or subclass them directly.
 
 ---
 
@@ -459,6 +461,10 @@ rows = as_dicts(results)      # back to dicts for legacy consumers
 `RetrieverSpec` validates every SQL identifier at construction time; `embedding_dim` is optional and defaults to the dimension registered for `settings.embedding_model`.
 
 **How the fusion works.** The store runs two independent stages — a dense vector search under the distance threshold and a sparse keyword search — ranks each, truncates both to `n_results`, and merges them with Reciprocal Rank Fusion: `score = 1/(60 + vector_rank) + 1/(60 + keyword_rank)`. A document found by both stages outranks one found by only one, and a query that fails one stage still returns results from the other. The pgvector backend implements the stages as SQL CTEs (`embedding <-> query` L2 distance and `tsvector @@ plainto_tsquery`); a custom backend implements the same contract with its native similarity and keyword search.
+
+### Retrieval strategies
+
+`ragit.retrieval.strategies` composes the capability Protocols instead of the fused store: `DenseRetrieval(vector_index, embedder)`, `KeywordRetrieval(lexical_index)` (keyword-only, **no embedding dependency** — a keyword-only application needs no embedding-provider configuration at all), and `HybridRetrieval(vector_index, lexical_index, embedder, reranker=None)` — the two stages may be different objects (e.g. a pgvector `VectorIndex` plus an external lexical engine adapted to `LexicalIndex`). `reranker` is an optional `Reranker` protocol (`async rerank(query, results) -> list[dict]`; no built-in implementation ships — hosts inject a cross-encoder, an LLM reranker, ...). Dense and hybrid retrieval **require** a `threshold` kwarg (the distance cutoff) and raise `ValueError` without it. Every strategy applies the legacy swallow/raise contract: `strict=False` (the default) swallows failures into `[]`, `strict=True` raises `ragit.types.RetrievalError`. Inject a strategy into `HybridRetriever(spec, settings, strategy=...)` to bypass the retriever's eager embedder/store construction — the builder wires its `HybridRetrieval` strategy this way, so the facade searches the same store instance the pipeline writes to.
 
 ---
 
@@ -756,6 +762,12 @@ The built-in pgvector store builds raw SQL (the hybrid query needs CTEs, window 
 
 ## Examples
 
+`examples/local_quickstart.py` is the offline three-line quickstart for the high-level builder API — build, ingest, search with a deterministic fake embedder, fully in process (no network, no database, no API key):
+
+```bash
+python examples/local_quickstart.py
+```
+
 `examples/minimal_app.py` is a complete FastAPI app using ragit with zero host code — in-memory store, fake embedder (unless `OPENAI_API_KEY` is set), no database:
 
 ```bash
@@ -787,27 +799,29 @@ python -m pytest -q
 python -m pytest tests/test_chunking.py -q
 ```
 
-The suite is **377 passed, 3 skipped** with **100% coverage**. It covers:
+The suite is **512 passed, 7 skipped**. It covers:
 
 | Module                                      | Test file(s)                                                                                                                                                                 |
 | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `chunking`                                  | `test_chunking.py`                                                                                                                                                           |
 | `embeddings`                                | `test_embeddings.py`                                                                                                                                                         |
+| `builder`                                   | `test_builder.py`                                                                                                                                                         |
 | `stores` (memory)                           | `test_memory_store.py`, `test_vector_store_coverage.py`                                                                                                                      |
 | `stores` (pgvector)                         | `test_pgvector_store.py`, `test_pgvector_store_coverage.py`, `test_pgvector_strict_mode.py`, `test_hybrid_search_projection.py`, `test_hybrid_search_session_injection.py`   |
-| `stores` (qdrant, chroma, faiss)            | `test_vector_backends.py`, `test_qdrant_coverage.py`, `test_faiss_coverage.py`                                                                                               |
-| `retrieval`                                 | `test_retriever.py`                                                                                                                                                          |
+| `stores` (qdrant, chroma, faiss)            | `test_vector_backends.py`, `test_qdrant_coverage.py`, `test_faiss_coverage.py`                                                                                                                                                    |
+| `stores` (capability Protocols)             | `test_store_capabilities.py`                                                                                               |
+| `retrieval`                                 | `test_retriever.py`, `test_retriever_strict.py`                                                                                                                                                          |
 | `ingestion`                                 | `test_ingestion_pipeline.py`, `test_ingestion_sources.py`, `test_ingestion_versioning.py`, `test_ingestion_locking.py`                                                       |
 | `jobs`                                      | `test_embedding_jobs.py`, `test_embedding_jobs_coverage.py`, `test_embedding_drain.py`, `test_job_reclaim.py`                                                                |
-| `evaluation`                                | `test_rag_eval.py`, `test_evaluation_coverage.py`, `test_eval_runner_coverage.py`, `test_eval_dataset_coverage.py`, `test_answer_evaluator_coverage.py`                      |
+| `evaluation`                                | `test_rag_eval.py`, `test_evaluation_coverage.py`, `test_eval_runner_coverage.py`, `test_eval_runner_modes.py`, `test_eval_dataset_coverage.py`, `test_answer_evaluator_coverage.py`                      |
 | `examples/host_integration.py`              | `test_host_integration.py`                                                                                                                                                   |
 | domain-agnostic seams                       | `test_agnostic_seams.py` (parametrized over two synthetic domains: settings, providers, dimensions, chunkers, stores, retrieval, ingestion, evaluation, pgvector validation) |
 | `registry`, `validation`, `types`, `config` | `test_registry.py`, `test_validation.py`, `test_types.py`, `test_config.py`                                                                                                  |
 | `db`                                        | `test_session_provider.py`                                                                                                                                                   |
 | factories (`db`, `stores`)                  | `test_factories.py`, `test_factory_coverage.py`                                                                                                                              |
-| invariants                                  | `test_no_app_imports.py` (ragit must never import the host `app` package)                                                                                                    |
+| invariants                                  | `test_no_app_imports.py` (ragit must never import the host `app` package), `test_dependency_hygiene.py` (zero-dependency invariant: subprocess-based litellm import blocking)                                                                                                    |
 
-**Database-dependent tests** (pgvector strict mode, session injection) skip automatically unless `RAGIT_TEST_DATABASE_URL` points at a PostgreSQL instance with pgvector installed — that is the 3 skipped tests in a default run:
+**Database-dependent tests** (pgvector strict mode, session injection) skip automatically unless `RAGIT_TEST_DATABASE_URL` points at a PostgreSQL instance with pgvector installed — that is 3 of the 7 skipped tests in a default run (the other 4 need the `chroma` extra):
 
 ```bash
 RAGIT_TEST_DATABASE_URL="postgresql+asyncpg://user:pass@localhost/ragit_test" \
@@ -825,6 +839,7 @@ ragit/
 ├── pyproject.toml            # packaging, pytest, ruff config
 ├── README.md                 # this file
 ├── examples/
+│   ├── local_quickstart.py   # offline three-line quickstart (builder API)
 │   ├── minimal_app.py        # zero-dependency FastAPI example
 │   ├── host_integration.py   # host integration template (any domain)
 │   └── sample_document.md    # bundled example document
@@ -833,6 +848,7 @@ ragit/
 │   ├── config.py             # RagSettings, SettingsProvider protocols
 │   ├── registry.py           # generic case-insensitive Registry[T]
 │   ├── validation.py         # validate_identifier, validate_embedding
+│   ├── builder.py            # RagitBuilder, Ragit facade, BuilderSettings, InMemoryVersionStore
 │   ├── chunking/             # sliding-window + Markdown section chunkers
 │   ├── embeddings/           # LiteLLM function, dimension registry
 │   ├── stores/               # VectorStore ABC, five built-in backends
@@ -845,12 +861,13 @@ ragit/
 │   │   ├── registry.py       # vector_store_registry, get_vector_store
 │   │   └── store_factory.py  # VectorStoreFactory ABC + registry factory
 │   ├── retrieval/            # HybridRetriever, RetrieverSpec
+│   │   └── strategies.py     # DenseRetrieval, KeywordRetrieval, HybridRetrieval, Reranker
 │   ├── ingestion/            # pipeline, versioning, locking, sources
 │   ├── jobs/                 # outbox, drainer
 │   ├── evaluation/           # metrics, judges, runner
 │   └── db/                   # SessionProvider protocol, session factory
 │       └── sql_factory.py    # SQLFactory ABC + SQLAlchemyFactory
-└── tests/                    # 377 tests, no host dependencies
+└── tests/                    # 512 tests, no host dependencies
 ```
 
 ---

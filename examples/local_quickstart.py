@@ -11,8 +11,8 @@ Run it with::
     python examples/local_quickstart.py
 
 Everything runs in process: no network, no database, no API keys,
-no external services -- only the core install (``pip install
-ragit``) is required.
+no external services -- only the core install is required
+(``pip install git+https://github.com/eslam-aboutaleb/ragit.git``).
 """
 
 from __future__ import annotations
