@@ -125,10 +125,7 @@ class DenseRetrieval:
         strict = kwargs.pop("strict", False)
         threshold = kwargs.pop("threshold", None)
         if threshold is None:
-            raise ValueError(
-                "dense retrieval requires a distance threshold; "
-                "pass threshold=..."
-            )
+            raise ValueError("dense retrieval requires a distance threshold; pass threshold=...")
         try:
             embeddings = await self._embedder([query])
             return await self._vector_index.vector_search(
@@ -196,9 +193,7 @@ class KeywordRetrieval:
         except Exception as exc:
             logger.error("Keyword retrieval failed: %s", exc)
             if strict:
-                raise RetrievalError(
-                    f"Keyword retrieval failed: {exc}"
-                ) from exc
+                raise RetrievalError(f"Keyword retrieval failed: {exc}") from exc
             return []
 
 
@@ -267,10 +262,7 @@ class HybridRetrieval:
         strict = kwargs.pop("strict", False)
         threshold = kwargs.pop("threshold", None)
         if threshold is None:
-            raise ValueError(
-                "hybrid retrieval requires a distance threshold; "
-                "pass threshold=..."
-            )
+            raise ValueError("hybrid retrieval requires a distance threshold; pass threshold=...")
         try:
             embeddings = await self._embedder([query])
             vector_results = await self._vector_index.vector_search(
@@ -291,7 +283,5 @@ class HybridRetrieval:
         except Exception as exc:
             logger.error("Hybrid retrieval failed: %s", exc)
             if strict:
-                raise RetrievalError(
-                    f"Hybrid retrieval failed: {exc}"
-                ) from exc
+                raise RetrievalError(f"Hybrid retrieval failed: {exc}") from exc
             return []

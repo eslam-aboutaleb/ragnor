@@ -42,8 +42,7 @@ def __getattr__(name: str) -> Any:
             module = importlib.import_module(module_name)
         except ImportError as exc:
             raise ImportError(
-                "The LiteLLM integration requires the 'litellm' extra: "
-                "pip install 'ragit[litellm]'"
+                "The LiteLLM integration requires the 'litellm' extra: pip install 'ragit[litellm]'"
             ) from exc
         return getattr(module, attribute)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -123,8 +123,7 @@ MEDICAL_CONFIG = DomainConfig(
         "The diagnosis is pneumonia. The treatment is antibiotics and rest.",
         "Common symptoms of dehydration include dry mouth and fatigue. "
         "The treatment is fluid replacement.",
-        "A headache can be a symptom of tension. "
-        "The diagnosis requires a neurological exam.",
+        "A headache can be a symptom of tension. The diagnosis requires a neurological exam.",
     ),
     store_query="what is the treatment for pneumonia",
     store_expected_keyword="pneumonia",
@@ -978,6 +977,4 @@ def test_public_api_surface_has_no_domain_specific_symbols() -> None:
     for name in _public_api_names():
         lowered = name.lower()
         for term in banned_terms:
-            assert term not in lowered, (
-                f"domain-specific symbol {name!r} leaks into the public API"
-            )
+            assert term not in lowered, f"domain-specific symbol {name!r} leaks into the public API"

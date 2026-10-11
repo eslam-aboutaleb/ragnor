@@ -90,8 +90,7 @@ class _MarkerChunker:
 
     def chunk(self, text: str) -> list[Chunk]:
         return [
-            Chunk(id=f"marker-{index}", text=part)
-            for index, part in enumerate(text.split("||"))
+            Chunk(id=f"marker-{index}", text=part) for index, part in enumerate(text.split("||"))
         ]
 
     @property
@@ -117,21 +116,15 @@ async def test_list_document_source_maps_documents() -> None:
     source = ListDocumentSource(
         [
             Document(id="doc-1", text="alpha content"),
-            RawDocument(
-                source_name="raw", content="beta content", external_id="raw-1"
-            ),
+            RawDocument(source_name="raw", content="beta content", external_id="raw-1"),
         ]
     )
     assert isinstance(source, DocumentSource)
 
     loaded = await source.load()
     assert loaded == [
-        RawDocument(
-            source_name="doc-1", content="alpha content", external_id="doc-1"
-        ),
-        RawDocument(
-            source_name="raw", content="beta content", external_id="raw-1"
-        ),
+        RawDocument(source_name="doc-1", content="alpha content", external_id="doc-1"),
+        RawDocument(source_name="raw", content="beta content", external_id="raw-1"),
     ]
 
 
@@ -232,9 +225,7 @@ async def test_changed_content_reingests_and_deletes_retired_chunks() -> None:
 @pytest.mark.asyncio
 async def test_component_overrides_are_honored() -> None:
     embedder = _RecordingEmbedder(_HashingEmbedder(dim=8))
-    store = InMemoryVectorStore(
-        table_name="custom_table", embedding_dim=8, embedding_fn=embedder
-    )
+    store = InMemoryVectorStore(table_name="custom_table", embedding_dim=8, embedding_fn=embedder)
     chunker = _MarkerChunker()
     rag = await RagitBuilder.local(
         embedder,
@@ -307,9 +298,7 @@ async def test_purge_on_empty_removes_all_chunks() -> None:
 
 @pytest.mark.asyncio
 async def test_facade_exposes_low_level_seams() -> None:
-    rag = await RagitBuilder.local(
-        _HashingEmbedder(dim=8), embedding_dim=8
-    ).build()
+    rag = await RagitBuilder.local(_HashingEmbedder(dim=8), embedding_dim=8).build()
     assert isinstance(rag, Ragit)
     assert isinstance(rag.store, InMemoryVectorStore)
     assert isinstance(rag.pipeline, IngestionPipeline)

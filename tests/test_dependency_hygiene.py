@@ -31,9 +31,7 @@ def _run_without_litellm(script: str) -> subprocess.CompletedProcess[str]:
     """Run ``script`` in a subprocess where ``litellm`` cannot be imported."""
     env = os.environ.copy()
     existing = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = (
-        f"{SRC_DIR}{os.pathsep}{existing}" if existing else str(SRC_DIR)
-    )
+    env["PYTHONPATH"] = f"{SRC_DIR}{os.pathsep}{existing}" if existing else str(SRC_DIR)
     return subprocess.run(  # noqa: S603 - trusted constants only
         [sys.executable, "-c", f"{_BLOCK_LITELLM}\n{textwrap.dedent(script)}"],
         capture_output=True,

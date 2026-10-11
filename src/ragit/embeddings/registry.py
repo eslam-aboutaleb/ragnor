@@ -50,8 +50,7 @@ class LiteLLMEmbeddingProvider:
             )
         except ImportError as exc:
             raise ImportError(
-                "The LiteLLM integration requires the 'litellm' extra: "
-                "pip install 'ragit[litellm]'"
+                "The LiteLLM integration requires the 'litellm' extra: pip install 'ragit[litellm]'"
             ) from exc
         return LitellmEmbeddingFunction(
             api_key=self._settings.openai_api_key,

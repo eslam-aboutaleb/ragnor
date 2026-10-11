@@ -32,8 +32,7 @@ def _dataset() -> list[EvalSample]:
 
 
 CONTEXT = (
-    "Water damage caused by sudden pipe bursts is covered "
-    "up to $25,000 with a $500 deductible."
+    "Water damage caused by sudden pipe bursts is covered up to $25,000 with a $500 deductible."
 )
 
 
@@ -94,9 +93,7 @@ async def test_end_to_end_calls_answer_fn_with_query_and_context():
     assert calls == [(_dataset()[0].query, CONTEXT)]
 
     sample = result.per_sample_results[0]
-    assert sample["generated_answer"] == (
-        "Yes, sudden pipe bursts are covered up to $25,000."
-    )
+    assert sample["generated_answer"] == ("Yes, sudden pipe bursts are covered up to $25,000.")
     assert sample["context"] == CONTEXT
     assert sample["gold_answer"] == _dataset()[0].gold_answer
     assert sample["chunks_found"] == 1

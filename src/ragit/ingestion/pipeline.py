@@ -208,9 +208,7 @@ class IngestionPipeline:
             # An authoritative empty dataset: retire the
             # active version so deleted content stops being
             # searchable.
-            async with self._transacting_session(
-                lock_key, sql_factory, session
-            ) as purge_session:
+            async with self._transacting_session(lock_key, sql_factory, session) as purge_session:
                 await self._retire_active(purge_session, version_store)
             return 0
 
@@ -230,9 +228,7 @@ class IngestionPipeline:
         else:
             async with self._session_factory() as check_session:
                 active = await version_store.find_active(check_session)
-                if snapshot_matches(
-                    current_snapshot, active.snapshot if active else None
-                ):
+                if snapshot_matches(current_snapshot, active.snapshot if active else None):
                     return await self._skip_unchanged(check_session, current_snapshot)
 
         chunks = self._chunk(documents)
@@ -268,9 +264,7 @@ class IngestionPipeline:
         # under the lock -- a concurrent process may have
         # ingested this source while the embedding request
         # was in flight.
-        async with self._transacting_session(
-            lock_key, sql_factory, session
-        ) as critical_session:
+        async with self._transacting_session(lock_key, sql_factory, session) as critical_session:
             return await self._commit_ingestion(
                 critical_session, current_snapshot, documents_to_upsert, version_store
             )

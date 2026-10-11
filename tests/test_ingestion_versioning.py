@@ -172,6 +172,4 @@ def test_compute_source_hash_differs_from_raw_content_hash() -> None:
     # content: it covers document identity too.
     documents = [RawDocument(source_name="policy.md", content="policy content")]
 
-    assert compute_source_hash(documents) != hashlib.sha256(
-        b"policy content"
-    ).hexdigest()
+    assert compute_source_hash(documents) != hashlib.sha256(b"policy content").hexdigest()

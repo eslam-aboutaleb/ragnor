@@ -415,9 +415,7 @@ class RagitBuilder:
 
         chunker = self._chunker
         if chunker is None:
-            chunker = SlidingWindowChunker(
-                chunk_size=DEFAULT_CHUNK_SIZE, overlap=DEFAULT_OVERLAP
-            )
+            chunker = SlidingWindowChunker(chunk_size=DEFAULT_CHUNK_SIZE, overlap=DEFAULT_OVERLAP)
 
         version_store = self._version_store
         if version_store is None:
@@ -535,9 +533,7 @@ class Ragit:
         Returns:
             Search results sorted by RRF score.
         """
-        return await self.retriever.retrieve(
-            query, n_results=n_results, **filters
-        )
+        return await self.retriever.retrieve(query, n_results=n_results, **filters)
 
     async def count(self, **filters: Any) -> int:
         """Count documents in the store.

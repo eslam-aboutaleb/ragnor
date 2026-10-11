@@ -468,9 +468,7 @@ async def test_run_stamps_multiple_chunks() -> None:
 @pytest.mark.asyncio
 async def test_run_skips_when_snapshot_matches() -> None:
     content = "policy content"
-    source_hash = compute_source_hash(
-        [RawDocument(source_name="policy.md", content=content)]
-    )
+    source_hash = compute_source_hash([RawDocument(source_name="policy.md", content=content)])
     settings = _FakeSettings()
     chunker = _RecordingChunker()
     stored_snapshot = build_snapshot(source_hash, settings, chunker)
@@ -701,15 +699,11 @@ async def test_run_without_chunks_aborts_ingestion() -> None:
 @pytest.mark.asyncio
 async def test_unchanged_source_skips_without_embedding() -> None:
     content = "policy content"
-    source_hash = compute_source_hash(
-        [RawDocument(source_name="policy.md", content=content)]
-    )
+    source_hash = compute_source_hash([RawDocument(source_name="policy.md", content=content)])
     settings = _FakeSettings()
     chunker = _RecordingChunker()
     stored_snapshot = build_snapshot(source_hash, settings, chunker)
-    active = VersionRecord(
-        version_id="version-0", snapshot=stored_snapshot, source_id="source-1"
-    )
+    active = VersionRecord(version_id="version-0", snapshot=stored_snapshot, source_id="source-1")
 
     store = _FakeStore(count=7)
     version_store = _FakeVersionStore(active=active)
@@ -760,9 +754,7 @@ async def test_critical_section_skips_when_a_concurrent_run_ingested() -> None:
     settings = _FakeSettings()
     chunker = _RecordingChunker()
     current_snapshot = build_snapshot(
-        compute_source_hash(
-            [RawDocument(source_name="policy.md", content=content)]
-        ),
+        compute_source_hash([RawDocument(source_name="policy.md", content=content)]),
         settings,
         chunker,
     )
