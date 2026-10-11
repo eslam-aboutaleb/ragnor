@@ -126,9 +126,7 @@ class _FakeFilterSelector:
 
 
 class _FakePointStruct:
-    def __init__(
-        self, id: Any, vector: list[float], payload: dict[str, Any]
-    ) -> None:
+    def __init__(self, id: Any, vector: list[float], payload: dict[str, Any]) -> None:
         self.id = id
         self.vector = vector
         self.payload = payload
@@ -142,9 +140,7 @@ class _FakeAsyncQdrantClient:
         self.api_key = api_key
 
 
-def _qdrant_filter_matches(
-    payload: dict[str, Any], query_filter: Any
-) -> bool:
+def _qdrant_filter_matches(payload: dict[str, Any], query_filter: Any) -> bool:
     """Apply a fake Qdrant equality filter to a payload."""
     if query_filter is None:
         return True
@@ -168,18 +164,14 @@ class _FakeQdrantClient:
     async def collection_exists(self, collection_name: str) -> bool:
         return collection_name in self.collections
 
-    async def create_collection(
-        self, collection_name: str, vectors_config: Any = None
-    ) -> None:
+    async def create_collection(self, collection_name: str, vectors_config: Any = None) -> None:
         self.collections.add(collection_name)
 
-    async def upsert(
-        self, collection_name: str, points: list[_FakePointStruct]
-    ) -> None:
+    async def upsert(self, collection_name: str, points: list[_FakePointStruct]) -> None:
         for point in points:
             self.points[point.id] = point
 
-    async def query_points(  # noqa: PLR0913
+    async def query_points(  # noqa: PLR0913, PLR0917
         self,
         collection_name: str,
         query: list[float],
@@ -194,9 +186,7 @@ class _FakeQdrantClient:
             if _qdrant_filter_matches(point.payload, query_filter)
         ]
         scored.sort(key=lambda item: (item[0], str(item[1].id)))
-        return types.SimpleNamespace(
-            points=[point for _, point in scored[:limit]]
-        )
+        return types.SimpleNamespace(points=[point for _, point in scored[:limit]])
 
     async def scroll(
         self,
@@ -208,13 +198,9 @@ class _FakeQdrantClient:
     ) -> tuple[list[_FakePointStruct], Any]:
         ordered = sorted(self.points.values(), key=lambda point: str(point.id))
         if offset is not None:
-            ordered = [
-                point for point in ordered if str(point.id) > str(offset)
-            ]
+            ordered = [point for point in ordered if str(point.id) > str(offset)]
         batch = [
-            point
-            for point in ordered
-            if _qdrant_filter_matches(point.payload, scroll_filter)
+            point for point in ordered if _qdrant_filter_matches(point.payload, scroll_filter)
         ][:limit]
         next_offset = str(batch[-1].id) if len(batch) == limit else None
         return batch, next_offset
@@ -227,9 +213,7 @@ class _FakeQdrantClient:
         ]
         return types.SimpleNamespace(count=len(matching))
 
-    async def delete(
-        self, collection_name: str, points_selector: Any = None
-    ) -> None:
+    async def delete(self, collection_name: str, points_selector: Any = None) -> None:
         if isinstance(points_selector, _FakePointIdsList):
             for point_id in points_selector.points:
                 self.points.pop(point_id, None)
@@ -266,9 +250,7 @@ def qdrant_client() -> _FakeQdrantClient:
 
 
 def _qdrant_store(client: _FakeQdrantClient, **kwargs: Any) -> QdrantStore:
-    return QdrantStore(
-        table_name="docs", embedding_dim=DIM, client=client, **kwargs
-    )
+    return QdrantStore(table_name="docs", embedding_dim=DIM, client=client, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -280,10 +262,7 @@ def _chroma_matches(metadata: dict[str, Any], where: Any) -> bool:
     """Apply a Chroma ``where`` equality filter to metadata."""
     if not where:
         return True
-    return all(
-        metadata.get(key) == condition.get("$eq")
-        for key, condition in where.items()
-    )
+    return all(metadata.get(key) == condition.get("$eq") for key, condition in where.items())
 
 
 class _FakeChromaCollection:
@@ -318,13 +297,9 @@ class _FakeChromaCollection:
         batch = scored[:n_results]
         return {
             "ids": [[doc_id for _, doc_id in batch]],
-            "documents": [
-                [self.records[doc_id]["document"] for _, doc_id in batch]
-            ],
+            "documents": [[self.records[doc_id]["document"] for _, doc_id in batch]],
             "distances": [[distance for distance, _ in batch]],
-            "metadatas": [
-                [self.records[doc_id]["metadata"] for _, doc_id in batch]
-            ],
+            "metadatas": [[self.records[doc_id]["metadata"] for _, doc_id in batch]],
         }
 
     def get(self, ids: Any = None, where: Any = None) -> dict[str, Any]:
@@ -373,9 +348,7 @@ def chroma_client() -> _FakeChromaClient:
 
 
 def _chroma_store(client: _FakeChromaClient, **kwargs: Any) -> ChromaStore:
-    return ChromaStore(
-        table_name="docs", embedding_dim=DIM, client=client, **kwargs
-    )
+    return ChromaStore(table_name="docs", embedding_dim=DIM, client=client, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -432,9 +405,7 @@ def faiss_index() -> _FakeFaissIndex:
 
 
 def _faiss_store(index: _FakeFaissIndex, **kwargs: Any) -> FaissStore:
-    return FaissStore(
-        table_name="docs", embedding_dim=DIM, index=index, **kwargs
-    )
+    return FaissStore(table_name="docs", embedding_dim=DIM, index=index, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -468,12 +439,8 @@ class TestBackendSelection:
             ("chroma", LazyChromaStore),
             ("faiss", LazyFaissStore),
         ):
-            settings = types.SimpleNamespace(
-                vector_store_provider=provider
-            )
-            store = get_vector_store(
-                table_name="docs", embedding_dim=DIM, settings=settings
-            )
+            settings = types.SimpleNamespace(vector_store_provider=provider)
+            store = get_vector_store(table_name="docs", embedding_dim=DIM, settings=settings)
             assert isinstance(store, store_class), provider
 
 
@@ -494,9 +461,11 @@ class TestQdrantStore:
         assert len(qdrant_client.points) == 3
         # String document ids map to UUID point ids; the
         # original id is kept in the payload.
-        assert {
-            point.payload["id"] for point in qdrant_client.points.values()
-        } == {"doc-1", "doc-2", "doc-3"}
+        assert {point.payload["id"] for point in qdrant_client.points.values()} == {
+            "doc-1",
+            "doc-2",
+            "doc-3",
+        }
 
     async def test_hybrid_search_merges_vector_and_keyword_stages(
         self, qdrant_module: types.ModuleType, qdrant_client: _FakeQdrantClient
@@ -564,9 +533,7 @@ class TestQdrantStore:
         store = _qdrant_store(qdrant_client)
         await store.upsert(documents=DOCUMENTS)
 
-        results = await store.hybrid_search(
-            QUERY, QUERY_EMBEDDING, n_results=5, threshold=0.01
-        )
+        results = await store.hybrid_search(QUERY, QUERY_EMBEDDING, n_results=5, threshold=0.01)
 
         # doc-3's distance (~0.0173) exceeds the threshold;
         # doc-1 (distance 0) remains, doc-2 is a keyword hit.
@@ -588,9 +555,7 @@ class TestQdrantStore:
         store = _qdrant_store(qdrant_client, embedding_fn=_embed)
         await store.upsert(documents=DOCUMENTS)
 
-        results = await store.hybrid_search(
-            QUERY, [], n_results=5, threshold=THRESHOLD
-        )
+        results = await store.hybrid_search(QUERY, [], n_results=5, threshold=THRESHOLD)
 
         assert [r["id"] for r in results] == ["doc-1", "doc-2", "doc-3"]
 
@@ -600,9 +565,7 @@ class TestQdrantStore:
         store = _qdrant_store(qdrant_client)
 
         with pytest.raises(ValueError, match="embedding_fn is required"):
-            await store.hybrid_search(
-                QUERY, [], n_results=5, threshold=THRESHOLD
-            )
+            await store.hybrid_search(QUERY, [], n_results=5, threshold=THRESHOLD)
 
     async def test_strict_mode_raises_retrieval_error(
         self, qdrant_module: types.ModuleType
@@ -615,14 +578,15 @@ class TestQdrantStore:
 
         with pytest.raises(RetrievalError, match="qdrant down"):
             await store.hybrid_search(
-                QUERY, QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD,
+                QUERY,
+                QUERY_EMBEDDING,
+                n_results=5,
+                threshold=THRESHOLD,
                 strict=True,
             )
 
         assert (
-            await store.hybrid_search(
-                QUERY, QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD
-            )
+            await store.hybrid_search(QUERY, QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD)
             == []
         )
 
@@ -678,13 +642,9 @@ class TestQdrantStore:
         with pytest.raises(ValueError, match="embedding_dim is required"):
             QdrantStore(table_name="docs", client=qdrant_client)
         with pytest.raises(ValueError, match="Unsafe table_name"):
-            QdrantStore(
-                table_name="bad;name", embedding_dim=DIM, client=qdrant_client
-            )
+            QdrantStore(table_name="bad;name", embedding_dim=DIM, client=qdrant_client)
 
-    def test_client_created_lazily_from_settings(
-        self, qdrant_module: types.ModuleType
-    ) -> None:
+    def test_client_created_lazily_from_settings(self, qdrant_module: types.ModuleType) -> None:
         store = QdrantStore(
             table_name="docs",
             embedding_dim=DIM,
@@ -696,9 +656,7 @@ class TestQdrantStore:
         assert isinstance(client, _FakeAsyncQdrantClient)
         assert client.url == "http://qdrant:6333"
 
-    def test_client_resolution_without_url_raises(
-        self, qdrant_module: types.ModuleType
-    ) -> None:
+    def test_client_resolution_without_url_raises(self, qdrant_module: types.ModuleType) -> None:
         store = QdrantStore(table_name="docs", embedding_dim=DIM)
 
         with pytest.raises(RuntimeError, match="QdrantStore needs a url"):
@@ -757,9 +715,7 @@ class TestQdrantStoreCapabilities:
         store = _qdrant_store(qdrant_client)
         await store.upsert(documents=DOCUMENTS)
 
-        results = await store.vector_search(
-            QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD
-        )
+        results = await store.vector_search(QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD)
 
         # doc-1 (distance 0) and doc-3 (distance ~0.017) are within the
         # threshold; doc-2 is beyond it.
@@ -905,9 +861,7 @@ class TestQdrantStoreCapabilities:
 
         assert {row["id"] for row in rows} == {"doc-1", "doc-2", "doc-3"}
 
-    async def test_delete_and_get_failures_propagate(
-        self, qdrant_module: types.ModuleType
-    ) -> None:
+    async def test_delete_and_get_failures_propagate(self, qdrant_module: types.ModuleType) -> None:
         """Lifecycle operations have no strict parameter: failures raise."""
 
         class _FailingClient(_FakeQdrantClient):
@@ -931,9 +885,7 @@ class TestQdrantStoreCapabilities:
 
 
 class TestChromaStore:
-    async def test_upsert_and_hybrid_search(
-        self, chroma_client: _FakeChromaClient
-    ) -> None:
+    async def test_upsert_and_hybrid_search(self, chroma_client: _FakeChromaClient) -> None:
         store = _chroma_store(chroma_client)
         await store.upsert(documents=DOCUMENTS)
 
@@ -949,9 +901,7 @@ class TestChromaStore:
         assert by_id["doc-2"]["keyword_score"] == pytest.approx(0.5)
         assert by_id["doc-3"]["keyword_score"] is None
 
-    async def test_hybrid_search_applies_filters(
-        self, chroma_client: _FakeChromaClient
-    ) -> None:
+    async def test_hybrid_search_applies_filters(self, chroma_client: _FakeChromaClient) -> None:
         store = _chroma_store(chroma_client)
         await store.upsert(documents=DOCUMENTS)
 
@@ -965,24 +915,18 @@ class TestChromaStore:
 
         assert [r["id"] for r in results] == ["doc-1", "doc-2"]
 
-    async def test_count_with_and_without_filters(
-        self, chroma_client: _FakeChromaClient
-    ) -> None:
+    async def test_count_with_and_without_filters(self, chroma_client: _FakeChromaClient) -> None:
         store = _chroma_store(chroma_client)
         await store.upsert(documents=DOCUMENTS)
 
         assert await store.count() == 3
         assert await store.count(tenant="b") == 1
 
-    async def test_hybrid_search_auto_embeds_query(
-        self, chroma_client: _FakeChromaClient
-    ) -> None:
+    async def test_hybrid_search_auto_embeds_query(self, chroma_client: _FakeChromaClient) -> None:
         store = _chroma_store(chroma_client, embedding_fn=_embed)
         await store.upsert(documents=DOCUMENTS)
 
-        results = await store.hybrid_search(
-            QUERY, [], n_results=5, threshold=THRESHOLD
-        )
+        results = await store.hybrid_search(QUERY, [], n_results=5, threshold=THRESHOLD)
 
         assert [r["id"] for r in results] == ["doc-1", "doc-2", "doc-3"]
 
@@ -999,20 +943,19 @@ class TestChromaStore:
 
         with pytest.raises(RetrievalError, match="chroma down"):
             await store.hybrid_search(
-                QUERY, QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD,
+                QUERY,
+                QUERY_EMBEDDING,
+                n_results=5,
+                threshold=THRESHOLD,
                 strict=True,
             )
 
         assert (
-            await store.hybrid_search(
-                QUERY, QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD
-            )
+            await store.hybrid_search(QUERY, QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD)
             == []
         )
 
-    async def test_upsert_validates_embeddings(
-        self, chroma_client: _FakeChromaClient
-    ) -> None:
+    async def test_upsert_validates_embeddings(self, chroma_client: _FakeChromaClient) -> None:
         store = _chroma_store(chroma_client)
 
         with pytest.raises(ValueError, match="dimensions"):
@@ -1043,13 +986,9 @@ class TestChromaStore:
         assert results[0]["metadata"] == {"tenant": "a"}
 
         with pytest.raises(ValueError, match="n_results must be a positive"):
-            await store.hybrid_search(
-                QUERY, QUERY_EMBEDDING, n_results=0, threshold=THRESHOLD
-            )
+            await store.hybrid_search(QUERY, QUERY_EMBEDDING, n_results=0, threshold=THRESHOLD)
         with pytest.raises(ValueError, match="embedding_fn is required"):
-            await store.hybrid_search(
-                QUERY, [], n_results=5, threshold=THRESHOLD
-            )
+            await store.hybrid_search(QUERY, [], n_results=5, threshold=THRESHOLD)
         with pytest.raises(ValueError, match="Unsafe metadata_field"):
             await store.hybrid_search(
                 QUERY,
@@ -1132,23 +1071,17 @@ class TestChromaStore:
 
         assert collection is not None
 
-    def test_construction_validates_arguments(
-        self, chroma_client: _FakeChromaClient
-    ) -> None:
+    def test_construction_validates_arguments(self, chroma_client: _FakeChromaClient) -> None:
         with pytest.raises(ValueError, match="embedding_dim is required"):
             ChromaStore(table_name="docs", client=chroma_client)
         with pytest.raises(ValueError, match="Unsafe table_name"):
-            ChromaStore(
-                table_name="bad;name", embedding_dim=DIM, client=chroma_client
-            )
+            ChromaStore(table_name="bad;name", embedding_dim=DIM, client=chroma_client)
 
 
 class TestChromaStoreCapabilities:
     """Capability split: vector_search, keyword_search, delete, get."""
 
-    async def test_satisfies_capability_protocols(
-        self, chroma_client: _FakeChromaClient
-    ) -> None:
+    async def test_satisfies_capability_protocols(self, chroma_client: _FakeChromaClient) -> None:
         from ragit.stores.base import (
             DocumentStore,
             LexicalIndex,
@@ -1182,15 +1115,11 @@ class TestChromaStoreCapabilities:
         assert by_id["doc-3"]["keyword_score"] is None
         assert by_id["doc-3"]["_rrf_score"] == pytest.approx(1.0 / 62)
 
-    async def test_vector_search_only(
-        self, chroma_client: _FakeChromaClient
-    ) -> None:
+    async def test_vector_search_only(self, chroma_client: _FakeChromaClient) -> None:
         store = _chroma_store(chroma_client)
         await store.upsert(documents=DOCUMENTS)
 
-        results = await store.vector_search(
-            QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD
-        )
+        results = await store.vector_search(QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD)
 
         assert [r["id"] for r in results] == ["doc-1", "doc-3"]
         assert results[0]["distance"] == pytest.approx(0.0)
@@ -1200,9 +1129,7 @@ class TestChromaStoreCapabilities:
         )
         assert [r["id"] for r in scoped] == ["doc-3"]
 
-    async def test_keyword_search_only(
-        self, chroma_client: _FakeChromaClient
-    ) -> None:
+    async def test_keyword_search_only(self, chroma_client: _FakeChromaClient) -> None:
         store = _chroma_store(chroma_client)
         await store.upsert(documents=DOCUMENTS)
 
@@ -1235,9 +1162,7 @@ class TestChromaStoreCapabilities:
 
         assert [r["id"] for r in results] == ["doc-0", "doc-1"]
 
-    async def test_delete_by_ids(
-        self, chroma_client: _FakeChromaClient
-    ) -> None:
+    async def test_delete_by_ids(self, chroma_client: _FakeChromaClient) -> None:
         store = _chroma_store(chroma_client)
         await store.upsert(documents=DOCUMENTS)
 
@@ -1247,9 +1172,7 @@ class TestChromaStoreCapabilities:
         assert await store.count() == 1
         assert await store.delete(ids=["missing"]) == 0
 
-    async def test_delete_by_filters(
-        self, chroma_client: _FakeChromaClient
-    ) -> None:
+    async def test_delete_by_filters(self, chroma_client: _FakeChromaClient) -> None:
         store = _chroma_store(chroma_client)
         await store.upsert(documents=DOCUMENTS)
 
@@ -1270,25 +1193,19 @@ class TestChromaStoreCapabilities:
         assert deleted == 1
         assert await store.count() == 2
 
-    async def test_delete_rejects_empty_ids(
-        self, chroma_client: _FakeChromaClient
-    ) -> None:
+    async def test_delete_rejects_empty_ids(self, chroma_client: _FakeChromaClient) -> None:
         store = _chroma_store(chroma_client)
 
         with pytest.raises(ValueError, match="empty"):
             await store.delete(ids=[])
 
-    async def test_delete_rejects_missing_selector(
-        self, chroma_client: _FakeChromaClient
-    ) -> None:
+    async def test_delete_rejects_missing_selector(self, chroma_client: _FakeChromaClient) -> None:
         store = _chroma_store(chroma_client)
 
         with pytest.raises(ValueError, match="at least one"):
             await store.delete()
 
-    async def test_get_by_ids(
-        self, chroma_client: _FakeChromaClient
-    ) -> None:
+    async def test_get_by_ids(self, chroma_client: _FakeChromaClient) -> None:
         store = _chroma_store(chroma_client)
         await store.upsert(documents=DOCUMENTS)
 
@@ -1299,9 +1216,7 @@ class TestChromaStoreCapabilities:
         assert rows[0]["metadata"] == {"tenant": "a"}
         assert await store.get(ids=["missing"]) == []
 
-    async def test_get_by_filters(
-        self, chroma_client: _FakeChromaClient
-    ) -> None:
+    async def test_get_by_filters(self, chroma_client: _FakeChromaClient) -> None:
         store = _chroma_store(chroma_client)
         await store.upsert(documents=DOCUMENTS)
 
@@ -1339,9 +1254,7 @@ class TestChromaStoreRealClient:
     async def test_roundtrip(self) -> None:
         chromadb = pytest.importorskip("chromadb")
         client = chromadb.EphemeralClient()
-        store = ChromaStore(
-            table_name="real_docs", embedding_dim=DIM, client=client
-        )
+        store = ChromaStore(table_name="real_docs", embedding_dim=DIM, client=client)
 
         await store.upsert(documents=DOCUMENTS)
 
@@ -1359,9 +1272,7 @@ class TestChromaStoreRealClient:
     async def test_filters_and_count(self) -> None:
         chromadb = pytest.importorskip("chromadb")
         client = chromadb.EphemeralClient()
-        store = ChromaStore(
-            table_name="real_docs_filtered", embedding_dim=DIM, client=client
-        )
+        store = ChromaStore(table_name="real_docs_filtered", embedding_dim=DIM, client=client)
 
         await store.upsert(documents=DOCUMENTS)
 
@@ -1394,9 +1305,7 @@ class TestChromaStoreRealClient:
 
 
 class TestFaissStore:
-    async def test_upsert_and_hybrid_search(
-        self, faiss_index: _FakeFaissIndex
-    ) -> None:
+    async def test_upsert_and_hybrid_search(self, faiss_index: _FakeFaissIndex) -> None:
         store = _faiss_store(faiss_index)
         await store.upsert(documents=DOCUMENTS)
 
@@ -1412,9 +1321,7 @@ class TestFaissStore:
         assert by_id["doc-2"]["keyword_score"] == pytest.approx(0.5)
         assert by_id["doc-3"]["keyword_score"] is None
 
-    async def test_upsert_replaces_existing_document(
-        self, faiss_index: _FakeFaissIndex
-    ) -> None:
+    async def test_upsert_replaces_existing_document(self, faiss_index: _FakeFaissIndex) -> None:
         store = _faiss_store(faiss_index)
         await store.upsert(documents=[DOCUMENTS[0]])
         moved = {**DOCUMENTS[0], "embedding": [0.9, 0.9, 0.9]}
@@ -1430,9 +1337,7 @@ class TestFaissStore:
         assert results[0]["distance"] is None
         assert results[0]["keyword_score"] == pytest.approx(1.0)
 
-    async def test_hybrid_search_applies_filters(
-        self, faiss_index: _FakeFaissIndex
-    ) -> None:
+    async def test_hybrid_search_applies_filters(self, faiss_index: _FakeFaissIndex) -> None:
         store = _faiss_store(faiss_index)
         await store.upsert(documents=DOCUMENTS)
 
@@ -1446,9 +1351,7 @@ class TestFaissStore:
 
         assert [r["id"] for r in results] == ["doc-1", "doc-2"]
 
-    async def test_count_with_filters(
-        self, faiss_index: _FakeFaissIndex
-    ) -> None:
+    async def test_count_with_filters(self, faiss_index: _FakeFaissIndex) -> None:
         store = _faiss_store(faiss_index)
         await store.upsert(documents=DOCUMENTS)
 
@@ -1466,15 +1369,11 @@ class TestFaissStore:
 
         assert results == []
 
-    async def test_hybrid_search_auto_embeds_query(
-        self, faiss_index: _FakeFaissIndex
-    ) -> None:
+    async def test_hybrid_search_auto_embeds_query(self, faiss_index: _FakeFaissIndex) -> None:
         store = _faiss_store(faiss_index, embedding_fn=_embed)
         await store.upsert(documents=DOCUMENTS)
 
-        results = await store.hybrid_search(
-            QUERY, [], n_results=5, threshold=THRESHOLD
-        )
+        results = await store.hybrid_search(QUERY, [], n_results=5, threshold=THRESHOLD)
 
         assert [r["id"] for r in results] == ["doc-1", "doc-2", "doc-3"]
 
@@ -1487,20 +1386,19 @@ class TestFaissStore:
 
         with pytest.raises(RetrievalError, match="faiss down"):
             await store.hybrid_search(
-                QUERY, QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD,
+                QUERY,
+                QUERY_EMBEDDING,
+                n_results=5,
+                threshold=THRESHOLD,
                 strict=True,
             )
 
         assert (
-            await store.hybrid_search(
-                QUERY, QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD
-            )
+            await store.hybrid_search(QUERY, QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD)
             == []
         )
 
-    async def test_upsert_validates_embeddings(
-        self, faiss_index: _FakeFaissIndex
-    ) -> None:
+    async def test_upsert_validates_embeddings(self, faiss_index: _FakeFaissIndex) -> None:
         store = _faiss_store(faiss_index)
 
         with pytest.raises(ValueError, match="dimensions"):
@@ -1515,32 +1413,22 @@ class TestFaissStore:
                 ]
             )
 
-    async def test_validation_errors(
-        self, faiss_index: _FakeFaissIndex
-    ) -> None:
+    async def test_validation_errors(self, faiss_index: _FakeFaissIndex) -> None:
         with pytest.raises(ValueError, match="embedding_dim is required"):
             FaissStore(table_name="docs", index=faiss_index)
         with pytest.raises(ValueError, match="Unsafe table_name"):
-            FaissStore(
-                table_name="bad;name", embedding_dim=DIM, index=faiss_index
-            )
+            FaissStore(table_name="bad;name", embedding_dim=DIM, index=faiss_index)
         store = _faiss_store(faiss_index)
         with pytest.raises(ValueError, match="n_results must be a positive"):
-            await store.hybrid_search(
-                QUERY, QUERY_EMBEDDING, n_results=0, threshold=THRESHOLD
-            )
+            await store.hybrid_search(QUERY, QUERY_EMBEDDING, n_results=0, threshold=THRESHOLD)
         with pytest.raises(ValueError, match="embedding_fn is required"):
-            await store.hybrid_search(
-                QUERY, [], n_results=5, threshold=THRESHOLD
-            )
+            await store.hybrid_search(QUERY, [], n_results=5, threshold=THRESHOLD)
 
 
 class TestFaissStoreCapabilities:
     """Capability split: vector_search, keyword_search, delete, get."""
 
-    async def test_satisfies_capability_protocols(
-        self, faiss_index: _FakeFaissIndex
-    ) -> None:
+    async def test_satisfies_capability_protocols(self, faiss_index: _FakeFaissIndex) -> None:
         from ragit.stores.base import (
             DocumentStore,
             LexicalIndex,
@@ -1574,15 +1462,11 @@ class TestFaissStoreCapabilities:
         assert by_id["doc-3"]["keyword_score"] is None
         assert by_id["doc-3"]["_rrf_score"] == pytest.approx(1.0 / 62)
 
-    async def test_vector_search_only(
-        self, faiss_index: _FakeFaissIndex
-    ) -> None:
+    async def test_vector_search_only(self, faiss_index: _FakeFaissIndex) -> None:
         store = _faiss_store(faiss_index)
         await store.upsert(documents=DOCUMENTS)
 
-        results = await store.vector_search(
-            QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD
-        )
+        results = await store.vector_search(QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD)
 
         assert [r["id"] for r in results] == ["doc-1", "doc-3"]
         assert results[0]["distance"] == pytest.approx(0.0)
@@ -1592,9 +1476,7 @@ class TestFaissStoreCapabilities:
         )
         assert [r["id"] for r in scoped] == ["doc-3"]
 
-    async def test_keyword_search_only(
-        self, faiss_index: _FakeFaissIndex
-    ) -> None:
+    async def test_keyword_search_only(self, faiss_index: _FakeFaissIndex) -> None:
         store = _faiss_store(faiss_index)
         await store.upsert(documents=DOCUMENTS)
 
@@ -1627,9 +1509,7 @@ class TestFaissStoreCapabilities:
 
         assert [r["id"] for r in results] == ["doc-0", "doc-1"]
 
-    async def test_delete_by_ids(
-        self, faiss_index: _FakeFaissIndex
-    ) -> None:
+    async def test_delete_by_ids(self, faiss_index: _FakeFaissIndex) -> None:
         store = _faiss_store(faiss_index)
         await store.upsert(documents=DOCUMENTS)
 
@@ -1641,9 +1521,7 @@ class TestFaissStoreCapabilities:
         assert faiss_index.ntotal == 1
         assert await store.delete(ids=["missing"]) == 0
 
-    async def test_delete_by_filters(
-        self, faiss_index: _FakeFaissIndex
-    ) -> None:
+    async def test_delete_by_filters(self, faiss_index: _FakeFaissIndex) -> None:
         store = _faiss_store(faiss_index)
         await store.upsert(documents=DOCUMENTS)
 
@@ -1666,25 +1544,19 @@ class TestFaissStoreCapabilities:
         assert await store.count() == 2
         assert faiss_index.ntotal == 2
 
-    async def test_delete_rejects_empty_ids(
-        self, faiss_index: _FakeFaissIndex
-    ) -> None:
+    async def test_delete_rejects_empty_ids(self, faiss_index: _FakeFaissIndex) -> None:
         store = _faiss_store(faiss_index)
 
         with pytest.raises(ValueError, match="empty"):
             await store.delete(ids=[])
 
-    async def test_delete_rejects_missing_selector(
-        self, faiss_index: _FakeFaissIndex
-    ) -> None:
+    async def test_delete_rejects_missing_selector(self, faiss_index: _FakeFaissIndex) -> None:
         store = _faiss_store(faiss_index)
 
         with pytest.raises(ValueError, match="at least one"):
             await store.delete()
 
-    async def test_get_by_ids(
-        self, faiss_index: _FakeFaissIndex
-    ) -> None:
+    async def test_get_by_ids(self, faiss_index: _FakeFaissIndex) -> None:
         store = _faiss_store(faiss_index)
         await store.upsert(documents=DOCUMENTS)
 
@@ -1695,9 +1567,7 @@ class TestFaissStoreCapabilities:
         assert rows[0]["metadata"] == {"tenant": "a"}
         assert await store.get(ids=["missing"]) == []
 
-    async def test_get_by_filters(
-        self, faiss_index: _FakeFaissIndex
-    ) -> None:
+    async def test_get_by_filters(self, faiss_index: _FakeFaissIndex) -> None:
         store = _faiss_store(faiss_index)
         await store.upsert(documents=DOCUMENTS)
 

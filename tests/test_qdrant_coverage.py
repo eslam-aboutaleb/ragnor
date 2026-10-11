@@ -33,14 +33,10 @@ class _FakeQdrantClient:
     async def collection_exists(self, collection_name: str) -> bool:
         return collection_name in self.collections
 
-    async def create_collection(
-        self, collection_name: str, vectors_config: Any = None
-    ) -> None:
+    async def create_collection(self, collection_name: str, vectors_config: Any = None) -> None:
         self.collections.add(collection_name)
 
-    async def count(
-        self, collection_name: str, count_filter: Any = None
-    ) -> Any:
+    async def count(self, collection_name: str, count_filter: Any = None) -> Any:
         return types.SimpleNamespace(count=0)
 
 
@@ -51,9 +47,7 @@ class _FailingCountClient(_FakeQdrantClient):
         super().__init__()
         self.collections.add("docs")
 
-    async def count(
-        self, collection_name: str, count_filter: Any = None
-    ) -> Any:
+    async def count(self, collection_name: str, count_filter: Any = None) -> Any:
         raise RuntimeError("qdrant down")
 
 
@@ -76,21 +70,13 @@ class TestQdrantStore:
     async def test_hybrid_search_rejects_non_positive_n_results(
         self,
     ) -> None:
-        store = QdrantStore(
-            table_name="docs", embedding_dim=DIM, client=_FakeQdrantClient()
-        )
+        store = QdrantStore(table_name="docs", embedding_dim=DIM, client=_FakeQdrantClient())
 
-        with pytest.raises(
-            ValueError, match="n_results must be a positive integer"
-        ):
-            await store.hybrid_search(
-                "alpha beta", [0.1, 0.2, 0.3], n_results=0, threshold=1.0
-            )
+        with pytest.raises(ValueError, match="n_results must be a positive integer"):
+            await store.hybrid_search("alpha beta", [0.1, 0.2, 0.3], n_results=0, threshold=1.0)
 
     async def test_count_error_path(self) -> None:
-        store = QdrantStore(
-            table_name="docs", embedding_dim=DIM, client=_FailingCountClient()
-        )
+        store = QdrantStore(table_name="docs", embedding_dim=DIM, client=_FailingCountClient())
 
         with pytest.raises(RetrievalError, match="qdrant down"):
             await store.count(strict=True)

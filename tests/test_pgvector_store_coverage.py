@@ -158,9 +158,7 @@ class TestPgVectorStore:
             )
 
     def test_resolve_session_factory_raises_without_factory_or_settings(self):
-        store = PgVectorStore(
-            table_name="policy_chunks", id_field="id", embedding_dim=1536
-        )
+        store = PgVectorStore(table_name="policy_chunks", id_field="id", embedding_dim=1536)
         with pytest.raises(RuntimeError, match="session_factory or settings"):
             store._resolve_session_factory()
 

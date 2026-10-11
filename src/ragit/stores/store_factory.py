@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import inspect
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
@@ -37,6 +38,7 @@ class VectorStoreFactory(ABC):
     def create(
         self,
         settings: RagSettings | None = None,
+        metric: str | None = None,
         **kwargs: Any,
     ) -> VectorStore:
         """Create a vector store.
@@ -44,6 +46,14 @@ class VectorStoreFactory(ABC):
         Args:
             settings: Host settings; ``vector_store_provider``
                 selects the backend.
+            metric: Distance metric for the vector stage
+                (``"l2"`` by default, ``"cosine"`` opt-in).
+                Forwarded to the backend constructor only when it
+                is not ``None``, so custom backends whose
+                constructor does not accept the kwarg keep
+                working. ``settings`` is forwarded only to
+                backends that declare an explicit ``settings``
+                parameter.
             **kwargs: Backend constructor arguments
                 (``table_name``, ``id_field``, ``embedding_dim``,
                 ``session_factory``, ``settings``, ``embedding_fn``).
@@ -85,17 +95,51 @@ class RegistryVectorStoreFactory(VectorStoreFactory):
     def create(
         self,
         settings: RagSettings | None = None,
+        metric: str | None = None,
         **kwargs: Any,
     ) -> VectorStore:
-        """Create a vector store from the registry."""
+        """Create a vector store from the registry.
+
+        ``metric`` is forwarded to the selected backend only when
+        it is not ``None``, so a custom registered backend whose
+        constructor does not accept the kwarg keeps working.
+        ``settings`` is forwarded only to backends whose
+        constructor declares an explicit ``settings`` parameter,
+        so a backend can read its optional host fields (such as
+        ``rag_distance_metric`` or the pgvector
+        ``database_url``); a constructor that only accepts
+        ``**kwargs`` receives the documented registry kwargs
+        unchanged.
+        """
         provider = self._default_provider
         if settings is not None:
-            provider = getattr(
-                settings, "vector_store_provider", self._default_provider
-            )
+            provider = getattr(settings, "vector_store_provider", self._default_provider)
         self._load_builtin_provider(provider)
         store_class = self._registry.get(provider)
+        if metric is not None:
+            kwargs["metric"] = metric
+        if (
+            settings is not None
+            and "settings" not in kwargs
+            and self._accepts_settings(store_class)
+        ):
+            kwargs["settings"] = settings
         return store_class(**kwargs)
+
+    @staticmethod
+    def _accepts_settings(store_class: type) -> bool:
+        """Return whether ``store_class.__init__`` declares a ``settings`` parameter.
+
+        Only an explicit parameter counts: a constructor accepting
+        ``**kwargs`` is treated as not declaring it, so the
+        registry kwargs a custom backend receives stay exactly
+        the documented ones.
+        """
+        try:
+            signature = inspect.signature(store_class)
+        except (TypeError, ValueError):  # pragma: no cover - exotic builtins
+            return False
+        return "settings" in signature.parameters
 
     def _load_builtin_provider(self, name: str) -> None:
         """Import a backend module so its registration runs.

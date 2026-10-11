@@ -32,6 +32,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Protocol, runtime_checkable
 
+from ragit.metrics import DistanceMetric, resolve_distance_metric
 from ragit.stores._scoring import fuse_hybrid
 from ragit.types import RetrievalError
 from ragit.validation import validate_embedding, validate_identifier
@@ -306,9 +307,16 @@ class HybridVectorStore(VectorStore):
 
     The constructor accepts the uniform registry kwargs
     (``table_name``, ``id_field``, ``embedding_dim``,
-    ``session_factory``, ``settings``, ``embedding_fn``) so
-    subclasses stay drop-in compatible with
+    ``session_factory``, ``settings``, ``embedding_fn``,
+    ``metric``) so subclasses stay drop-in compatible with
     :func:`ragit.stores.get_vector_store`.
+
+    ``metric`` selects the vector stage's distance metric
+    (``"l2"`` by default, ``"cosine"`` opt-in); see
+    :mod:`ragit.metrics`. Distance thresholds are distances
+    under that metric: a threshold is never comparable across
+    two different metrics, so a host that switches metrics must
+    re-tune it.
     """
 
     def __init__(  # noqa: PLR0913, PLR0917
@@ -319,6 +327,7 @@ class HybridVectorStore(VectorStore):
         session_factory: Any = None,
         settings: Any = None,
         embedding_fn: EmbeddingFunction | None = None,
+        metric: str | None = None,
     ) -> None:
         """Initialize the composite store.
 
@@ -332,14 +341,19 @@ class HybridVectorStore(VectorStore):
                 method is called without a session (backends without
                 a database ignore it).
             settings: Host settings (backends without a database
-                ignore them).
+                ignore them). The optional ``rag_distance_metric``
+                field selects the metric when ``metric`` is omitted.
             embedding_fn: Async callable that embeds a list of texts,
                 used to auto-embed queries when ``hybrid_search`` is
                 called with an empty embedding.
+            metric: Distance metric for the vector stage (``"l2"``
+                by default, ``"cosine"`` opt-in; resolved
+                case-insensitively).
 
         Raises:
             ValueError: If ``table_name`` or ``id_field`` contain
-                unsafe characters.
+                unsafe characters, or ``metric`` is not a supported
+                distance metric.
         """
         validate_identifier(table_name, "table_name")
         validate_identifier(id_field, "id_field")
@@ -349,6 +363,7 @@ class HybridVectorStore(VectorStore):
         self._session_factory = session_factory
         self._settings = settings
         self._embedding_fn = embedding_fn
+        self.metric: DistanceMetric = resolve_distance_metric(metric, settings)
 
     @abstractmethod
     async def vector_search(  # noqa: PLR0913, PLR0917
@@ -473,9 +488,7 @@ class HybridVectorStore(VectorStore):
         except Exception as exc:
             logger.error("Hybrid search failed on %s: %s", self.table_name, exc)
             if strict:
-                raise RetrievalError(
-                    f"Hybrid search failed on {self.table_name}: {exc}"
-                ) from exc
+                raise RetrievalError(f"Hybrid search failed on {self.table_name}: {exc}") from exc
             return []
 
 

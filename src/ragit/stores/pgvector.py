@@ -21,6 +21,16 @@ constructor arguments — ``session_factory`` (a
 :class:`ragit.db.session.SessionProvider`), ``embedding_dim``, the host's
 ``RagSettings``, and an optional ``embedding_fn`` used to auto-embed queries
 when the caller passes an empty embedding.
+
+Distance metric: the vector stage ranks by the store's metric
+(:mod:`ragit.metrics`). The operator comes from an internal map — ``l2``
+maps to pgvector's ``<->`` (the default) and ``cosine`` to ``<=>`` — so it
+can never come from user input. pgvector's ``<=>`` is the exact cosine
+distance in ``[0, 2]`` and needs no pre-normalization. Thresholds are
+distances under that metric and are therefore metric-relative: never
+comparable across metrics, so a host that switches metrics must re-tune.
+The matching index opclass (``vector_l2_ops`` vs ``vector_cosine_ops``) is
+host-owned DDL — ragit never creates indexes.
 """
 
 from __future__ import annotations
@@ -31,6 +41,7 @@ from typing import TYPE_CHECKING, Any
 
 from ragit.config import RagSettings
 from ragit.db.sql_factory import SQLAlchemyFactory
+from ragit.metrics import DistanceMetric, resolve_distance_metric
 from ragit.stores.base import EmbeddingFunction, VectorStore
 from ragit.stores.registry import vector_store_registry
 from ragit.types import RetrievalError
@@ -41,6 +52,9 @@ if TYPE_CHECKING:
     from ragit.db.sql_factory import SQLFactory
 
 logger = logging.getLogger(__name__)
+
+_DISTANCE_OPERATORS: dict[DistanceMetric, str] = {"l2": "<->", "cosine": "<=>"}
+"""pgvector distance operator per resolved metric; never read from user input."""
 
 
 def _keyword_score(row: Any) -> float | None:
@@ -59,8 +73,14 @@ def _keyword_score(row: Any) -> float | None:
 class PgVectorStore(VectorStore):
     """pgvector-based vector store implementation.
 
-    Supports hybrid search combining vector similarity (pgvector <-> operator)
-    with PostgreSQL full-text search (tsvector/tsquery) using Reciprocal Rank Fusion.
+    Supports hybrid search combining vector similarity (the pgvector
+    operator selected by the store's distance metric: ``<->`` for
+    the default ``l2`` metric, ``<=>`` for ``cosine``) with
+    PostgreSQL full-text search (tsvector/tsquery) using Reciprocal
+    Rank Fusion. The metric is fixed at store-construction time: the
+    distance operator is resolved once in ``__init__`` from
+    ``self.metric``, so every search uses that metric for the store's
+    lifetime.
     """
 
     def __init__(  # noqa: PLR0913, PLR0917
@@ -73,6 +93,7 @@ class PgVectorStore(VectorStore):
         embedding_fn: EmbeddingFunction | None = None,
         tsquery_config: str = "english",
         sql_factory: SQLFactory | None = None,
+        metric: str | None = None,
     ):
         """Initialize the vector store with target table configuration.
 
@@ -86,7 +107,9 @@ class PgVectorStore(VectorStore):
                 carries a ``database_url``, one is created lazily through
                 the SQL factory.
             settings: Host settings. Used only to resolve a default session
-                factory when ``session_factory`` is omitted.
+                factory when ``session_factory`` is omitted, and to read the
+                optional ``rag_distance_metric`` field when ``metric`` is
+                omitted.
             embedding_fn: Async callable that embeds a list of texts. Used
                 only when ``hybrid_search`` is called with an empty embedding.
             tsquery_config: PostgreSQL text-search configuration used for
@@ -96,11 +119,16 @@ class PgVectorStore(VectorStore):
                 store issues; defaults to the SQLAlchemy factory.
                 Inject a custom :class:`ragit.db.sql_factory.SQLFactory`
                 to route the store's SQL through another stack.
+            metric: Distance metric for the vector stage (``"l2"`` by
+                default, ``"cosine"`` opt-in). Resolution order: this
+                argument, the optional ``rag_distance_metric`` host
+                settings field, then ``"l2"``.
 
         Raises:
             ValueError: If ``table_name`` or ``id_field`` contain unsafe
-                characters, if ``embedding_dim`` is omitted, or if
-                ``tsquery_config`` is not a lowercase identifier.
+                characters, if ``embedding_dim`` is omitted, if
+                ``tsquery_config`` is not a lowercase identifier, or if
+                ``metric`` is not a supported distance metric.
         """
         validate_identifier(table_name, "table_name")
         validate_identifier(id_field, "id_field")
@@ -122,6 +150,8 @@ class PgVectorStore(VectorStore):
         self._resolved_session_factory: SessionProvider | None = session_factory
         self._embedding_fn = embedding_fn
         self._sql = sql_factory or SQLAlchemyFactory()
+        self.metric: DistanceMetric = resolve_distance_metric(metric, settings)
+        self._distance_operator = _DISTANCE_OPERATORS[self.metric]
 
     def _resolve_session_factory(self) -> SessionProvider:
         """Return the session factory, creating one from settings if needed.
@@ -159,7 +189,9 @@ class PgVectorStore(VectorStore):
         """Hybrid search with vector + PostgreSQL full-text search RRF.
 
         Executes a two-stage retrieval:
-          1. Vector search using pgvector L2 distance with a distance threshold.
+          1. Vector search using the pgvector distance operator for the
+             store's metric (``<->`` L2 by default, ``<=>`` cosine) with
+             a distance threshold.
           2. PostgreSQL full-text search using tsvector/tsquery.
 
         Results from both stages are merged using Reciprocal Rank Fusion (RRF),
@@ -172,8 +204,10 @@ class PgVectorStore(VectorStore):
             embedding: Query embedding vector. If empty, the query is embedded
                 automatically using the injected ``embedding_fn``.
             n_results: Maximum number of results to return.
-            threshold: Maximum L2 distance for the vector search part. Smaller
-                values enforce stricter similarity matching.
+            threshold: Maximum distance under the store's metric (L2 or
+                cosine) for the vector search part. Smaller values enforce
+                stricter similarity matching, and thresholds are
+                metric-relative: never comparable across metrics.
             text_field: Name of the column containing the document text.
             metadata_fields: List of additional column names to include in the
                 result metadata dict.
@@ -195,8 +229,9 @@ class PgVectorStore(VectorStore):
                 - ``id`` (str): The document id.
                 - ``document`` (str): The retrieved text.
                 - ``metadata`` (dict): Structured metadata fields.
-                - ``distance`` (float): L2 distance from the vector search,
-                  or ``None`` for keyword-only hits.
+                - ``distance`` (float): Distance under the store's metric
+                  (L2 or cosine) from the vector search, or ``None`` for
+                  keyword-only hits.
                 - ``keyword_score`` (float): PostgreSQL full-text rank, or
                   ``None`` for vector-only hits.
                 - ``_rrf_score`` (float): Combined RRF relevance score.
@@ -312,18 +347,23 @@ class PgVectorStore(VectorStore):
         # is a bound parameter (cast to regconfig), never interpolated.
         tsquery_expr = "plainto_tsquery(cast(:tsquery_config as regconfig), :query)"
 
-        stmt = (
-            f"""
+        # The distance operator comes from the internal metric map only,
+        # never from user input, so the SQL stays injection-safe. The
+        # expression is interpolated (not bound) because pgvector
+        # operators cannot be parameterized.
+        distance_expr = f"embedding {self._distance_operator} cast(:embedding as vector)"
+
+        stmt = f"""
             WITH vector_search AS (
                 SELECT {vector_select_sql},
-                       embedding <-> cast(:embedding as vector) AS distance,
+                       {distance_expr} AS distance,
                        ROW_NUMBER() OVER (
                            ORDER BY
-                               embedding <-> cast(:embedding as vector),
+                               {distance_expr},
                                {self.id_field}
                        ) AS rank
                 FROM {self.table_name}
-                WHERE embedding <-> cast(:embedding as vector) < :distance_threshold
+                WHERE {distance_expr} < :distance_threshold
                 {f"AND {extra_where}" if extra_where else ""}
                 LIMIT :n_results
             ),
@@ -347,7 +387,6 @@ class PgVectorStore(VectorStore):
             ORDER BY rrf_score DESC, {self.id_field}
             LIMIT :n_results
         """
-        )
 
         try:
             if session is not None:
@@ -400,8 +439,9 @@ class PgVectorStore(VectorStore):
     ) -> list[dict[str, Any]]:
         """Standalone dense vector search (the hybrid search's vector stage).
 
-        One round-trip: a single ``SELECT`` ordered by
-        ``embedding <-> :embedding`` with the distance
+        One round-trip: a single ``SELECT`` ordered by the store's
+        distance expression (``embedding <-> :embedding`` for ``l2``,
+        ``embedding <=> :embedding`` for ``cosine``) with the
         threshold and equality filters applied as bound
         parameters.
 
@@ -409,7 +449,9 @@ class PgVectorStore(VectorStore):
             embedding: Query embedding vector (required; the
                 method does not auto-embed).
             n_results: Maximum number of results to return.
-            threshold: Maximum distance for vector search.
+            threshold: Maximum distance under the store's metric
+                (L2 or cosine) for vector search; metric-relative,
+                never comparable across metrics.
             text_field: Name of the column containing the
                 document text.
             metadata_fields: Additional column names to
@@ -442,6 +484,10 @@ class PgVectorStore(VectorStore):
             raise ValueError(f"n_results must be a positive integer; got {n_results}")
         validate_embedding(embedding, self.embedding_dim, label="query embedding")
 
+        # The distance operator comes from the internal metric map only,
+        # never from user input, so the SQL stays injection-safe.
+        distance_expr = f"embedding {self._distance_operator} cast(:embedding as vector)"
+
         select_columns = [self.id_field, text_field, *metadata_fields]
         select_sql = ", ".join(select_columns)
 
@@ -456,18 +502,16 @@ class PgVectorStore(VectorStore):
             filter_parts.append(f"{key} = :{param_name}")
             params[param_name] = value
 
-        where_clause = (
-            "WHERE embedding <-> cast(:embedding as vector) < :distance_threshold"
-        )
+        where_clause = f"WHERE {distance_expr} < :distance_threshold"
         if filter_parts:
             where_clause += " AND " + " AND ".join(filter_parts)
 
         stmt = f"""
             SELECT {select_sql},
-                   embedding <-> cast(:embedding as vector) AS distance
+                   {distance_expr} AS distance
             FROM {self.table_name}
             {where_clause}
-            ORDER BY embedding <-> cast(:embedding as vector), {self.id_field}
+            ORDER BY {distance_expr}, {self.id_field}
             LIMIT :n_results
         """
 
@@ -549,9 +593,7 @@ class PgVectorStore(VectorStore):
 
         select_columns = [self.id_field, text_field, *metadata_fields]
         select_sql = ", ".join(select_columns)
-        tsquery_expr = (
-            "plainto_tsquery(cast(:tsquery_config as regconfig), :query)"
-        )
+        tsquery_expr = "plainto_tsquery(cast(:tsquery_config as regconfig), :query)"
 
         filter_parts = []
         params: dict[str, Any] = {
@@ -636,13 +678,10 @@ class PgVectorStore(VectorStore):
             Exception: Re-raises database errors.
         """
         if ids is None and filters is None:
-            raise ValueError(
-                "delete requires at least one of ids or filters"
-            )
+            raise ValueError("delete requires at least one of ids or filters")
         if ids is not None and len(ids) == 0:
             raise ValueError(
-                "ids must not be empty; an empty id list never "
-                "means delete everything"
+                "ids must not be empty; an empty id list never means delete everything"
             )
         if filters is not None:
             for key in filters:
@@ -661,7 +700,7 @@ class PgVectorStore(VectorStore):
         stmt = f"""
             WITH deleted AS (
                 DELETE FROM {self.table_name}
-                WHERE {' AND '.join(conditions)}
+                WHERE {" AND ".join(conditions)}
                 RETURNING 1
             )
             SELECT count(*) FROM deleted
@@ -671,9 +710,7 @@ class PgVectorStore(VectorStore):
         if owns_session:
             session_factory = self._resolve_session_factory()
             async with session_factory() as owned_session:
-                count = await self._sql.fetch_scalar(
-                    owned_session, stmt, params
-                )
+                count = await self._sql.fetch_scalar(owned_session, stmt, params)
                 await owned_session.commit()
         else:
             count = await self._sql.fetch_scalar(session, stmt, params)
@@ -736,9 +773,7 @@ class PgVectorStore(VectorStore):
             conditions.append(f"{key} = :{param_name}")
             params[param_name] = value
 
-        where_clause = (
-            f"WHERE {' AND '.join(conditions)}" if conditions else ""
-        )
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         stmt = f"""
             SELECT {select_sql}
             FROM {self.table_name}
@@ -809,12 +844,10 @@ class PgVectorStore(VectorStore):
 
         where_clause = f"WHERE {' AND '.join(filter_parts)}" if filter_parts else ""
 
-        stmt = (
-            f"""
+        stmt = f"""
             SELECT COUNT(*) FROM {self.table_name}
             {where_clause}
         """
-        )
 
         try:
             if session is not None:
@@ -970,14 +1003,12 @@ class PgVectorStore(VectorStore):
             values_sql = ",\n    ".join(values_clauses)
             columns_str = ", ".join(columns)
 
-            stmt = (
-                f"""
+            stmt = f"""
                 INSERT INTO {self.table_name} ({columns_str})
                 VALUES
                     {values_sql}
                 ON CONFLICT ({id_field}) DO UPDATE SET {update_str}
             """
-            )
 
             if owns_session:
                 session_factory = self._resolve_session_factory()

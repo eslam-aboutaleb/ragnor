@@ -28,6 +28,17 @@ store keeps a ``faiss.IndexIDMap`` over
 in-process record map holding each document's text and
 metadata.
 
+Distance metric: the vector stage ranks by the store's
+metric (:mod:`ragit.metrics`). The ``l2`` default keeps
+``IndexFlatL2`` on the raw vectors. For ``cosine``, every
+embedding (documents at upsert time, the query at search
+time) is normalized to unit length first and the same
+``IndexFlatL2`` index is kept: for unit vectors
+``l2_squared = 2 - 2 * cosine_similarity``, so the reported
+cosine distance is ``l2_squared / 2.0`` -- exactly
+``1 - cosine_similarity``. Cosine ranking therefore matches
+the in-memory store's cosine path.
+
 FAISS identifies vectors by 64-bit integers, so string
 document ids are mapped to consecutive integers (and
 back) inside the store; the original ids are returned
@@ -48,6 +59,7 @@ from typing import Any
 
 import numpy as np
 
+from ragit.metrics import normalize
 from ragit.stores._scoring import token_overlap, tokenize
 from ragit.stores.base import (
     EmbeddingFunction,
@@ -78,6 +90,7 @@ class FaissStore(HybridVectorStore):
         index: Any | None = None,
         settings: Any | None = None,
         session_factory: Any | None = None,
+        metric: str | None = None,
     ):
         """Initialize the FAISS store.
 
@@ -98,10 +111,15 @@ class FaissStore(HybridVectorStore):
                 lazily.
             settings: Accepted for constructor
                 compatibility with the other stores;
-                ignored (FAISS is in-process).
+                ignored (FAISS is in-process) except for the
+                optional ``rag_distance_metric`` field.
             session_factory: Accepted for constructor
                 compatibility with the other stores;
                 ignored (FAISS is in-process).
+            metric: Distance metric for the vector stage
+                (``"l2"`` by default, ``"cosine"`` opt-in).
+                When omitted, the host settings' optional
+                ``rag_distance_metric`` field is used.
 
         Raises:
             ValueError: If ``table_name`` or ``id_field``
@@ -115,6 +133,7 @@ class FaissStore(HybridVectorStore):
             embedding_fn=embedding_fn,
             settings=settings,
             session_factory=session_factory,
+            metric=metric,
         )
         if embedding_dim is None:
             raise ValueError(
@@ -138,9 +157,7 @@ class FaissStore(HybridVectorStore):
         if self._index is None:
             import faiss  # noqa: PLC0415
 
-            self._index = faiss.IndexIDMap(
-                faiss.IndexFlatL2(self.embedding_dim)
-            )
+            self._index = faiss.IndexIDMap(faiss.IndexFlatL2(self.embedding_dim))
         return self._index
 
     def _int_id(self, doc_id: str) -> int:
@@ -187,11 +204,20 @@ class FaissStore(HybridVectorStore):
         matching documents deeper in the ranking are still
         found.
 
+        Under the ``cosine`` metric the query and the
+        stored vectors are normalized to unit length, so the
+        FAISS L2 distance over the index equals
+        ``2 - 2 * cosine_similarity`` and the reported
+        distance is half of it (``l2_squared / 2.0`` --
+        exactly ``1 - cosine_similarity``).
+
         Args:
             embedding: Query embedding vector (required;
                 the method does not auto-embed).
             n_results: Maximum number of results to return.
-            threshold: Maximum L2 distance.
+            threshold: Maximum distance under the store's
+                metric (metric-relative; never comparable
+                across metrics).
             text_field: Record key containing the document
                 text.
             metadata_fields: Record keys to include in the
@@ -225,15 +251,14 @@ class FaissStore(HybridVectorStore):
         index = self._resolve_index()
 
         search_limit = n_results * 10
-        query_vector = np.asarray([embedding], dtype="float32")
+        query_embedding = normalize(embedding) if self.metric == "cosine" else embedding
+        query_vector = np.asarray([query_embedding], dtype="float32")
         faiss_distances, faiss_labels = await asyncio.to_thread(
             index.search, query_vector, search_limit
         )
         vector_ranked: list[str] = []
         distances: dict[str, float] = {}
-        for distance, label in zip(
-            faiss_distances[0], faiss_labels[0], strict=False
-        ):
+        for distance, label in zip(faiss_distances[0], faiss_labels[0], strict=False):
             if int(label) < 0:
                 continue
             doc_id = self._int_to_string.get(int(label))
@@ -242,10 +267,13 @@ class FaissStore(HybridVectorStore):
             record = self._records.get(doc_id, {})
             if not self._matches_filters(record, filters):
                 continue
-            if float(distance) >= threshold:
+            reported = float(distance)
+            if self.metric == "cosine":
+                reported /= 2.0
+            if reported >= threshold:
                 continue
             vector_ranked.append(doc_id)
-            distances[doc_id] = float(distance)
+            distances[doc_id] = reported
         vector_ranked = vector_ranked[:n_results]
 
         results = []
@@ -314,9 +342,7 @@ class FaissStore(HybridVectorStore):
         for doc_id, record in self._records.items():
             if not self._matches_filters(record, filters):
                 continue
-            score = token_overlap(
-                query_tokens, tokenize(str(record.get(text_field, "")))
-            )
+            score = token_overlap(query_tokens, tokenize(str(record.get(text_field, ""))))
             if score > 0.0:
                 keyword_scores[doc_id] = score
 
@@ -361,11 +387,7 @@ class FaissStore(HybridVectorStore):
         """
         for key in filters:
             validate_identifier(key, "filter key")
-        return sum(
-            1
-            for record in self._records.values()
-            if self._matches_filters(record, filters)
-        )
+        return sum(1 for record in self._records.values() if self._matches_filters(record, filters))
 
     async def delete(
         self,
@@ -398,13 +420,10 @@ class FaissStore(HybridVectorStore):
             Exception: Re-raises FAISS errors.
         """
         if ids is None and filters is None:
-            raise ValueError(
-                "delete requires at least one of ids or filters"
-            )
+            raise ValueError("delete requires at least one of ids or filters")
         if ids is not None and len(ids) == 0:
             raise ValueError(
-                "ids must not be empty; an empty id list never "
-                "means delete everything"
+                "ids must not be empty; an empty id list never means delete everything"
             )
         if filters is not None:
             for key in filters:
@@ -506,6 +525,10 @@ class FaissStore(HybridVectorStore):
         and the new vector is added under the same
         integer id.
 
+        Under the ``cosine`` metric the stored vectors are
+        normalized to unit length; see the module docstring
+        for the ``l2_squared / 2.0`` distance conversion.
+
         Args:
             documents: List of document dicts with keys:
                 id, text, metadata, embedding.
@@ -551,11 +574,7 @@ class FaissStore(HybridVectorStore):
 
         # Replace existing vectors: FAISS has no update,
         # so an existing id is removed before re-adding.
-        existing = [
-            doc.get("id")
-            for doc in documents
-            if doc.get("id") in self._string_to_int
-        ]
+        existing = [doc.get("id") for doc in documents if doc.get("id") in self._string_to_int]
         if existing:
             int_ids = np.asarray(
                 [self._string_to_int[doc_id] for doc_id in existing],
@@ -575,11 +594,10 @@ class FaissStore(HybridVectorStore):
             self._records[doc_id] = record
             self._embeddings[doc_id] = doc[embedding_field]
 
-        vectors = np.asarray(
-            [doc[embedding_field] for doc in documents], dtype="float32"
-        )
-        int_ids = np.asarray(
-            [self._int_id(doc.get("id")) for doc in documents], dtype="int64"
-        )
+        stored_vectors = [doc[embedding_field] for doc in documents]
+        if self.metric == "cosine":
+            stored_vectors = [normalize(vector) for vector in stored_vectors]
+        vectors = np.asarray(stored_vectors, dtype="float32")
+        int_ids = np.asarray([self._int_id(doc.get("id")) for doc in documents], dtype="int64")
         await asyncio.to_thread(index.add_with_ids, vectors, int_ids)
         logger.info("Upserted %d documents to %s.", len(documents), self.table_name)

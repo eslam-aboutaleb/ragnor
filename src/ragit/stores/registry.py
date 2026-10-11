@@ -11,7 +11,7 @@ registry-backed
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ragit.registry import Registry
 from ragit.stores.base import VectorStore
@@ -33,6 +33,7 @@ def get_vector_store(  # noqa: PLR0913, PLR0917
     settings: RagSettings | None = None,
     session_factory: SessionProvider | None = None,
     embedding_fn: EmbeddingFunction | None = None,
+    metric: str | None = None,
 ) -> VectorStore:
     """Create a vector store through the registry-backed factory.
 
@@ -47,12 +48,22 @@ def get_vector_store(  # noqa: PLR0913, PLR0917
         id_field: Name of the primary key column.
         embedding_dim: Dimensionality of the embedding vectors.
         settings: Host settings. ``vector_store_provider`` selects
-            the provider; ``database_url`` is used by the pgvector
-            store to open its own sessions when no session factory
-            is injected.
+            the provider; the settings object is forwarded to the
+            backend constructor when it declares an explicit
+            ``settings`` parameter, so backends can read their
+            optional host fields -- ``rag_distance_metric`` for
+            the metric (when ``metric`` is omitted) and
+            ``database_url`` for the pgvector store to open its
+            own sessions when no session factory is injected.
         session_factory: Session provider injected into the store.
         embedding_fn: Embedding function injected into the store for
             automatic query embedding.
+        metric: Distance metric for the vector stage (``"l2"`` by
+            default, ``"cosine"`` opt-in; resolved
+            case-insensitively). Forwarded to the selected backend
+            only when it is not ``None``, so custom registered
+            backends whose constructor does not accept the kwarg
+            keep working.
 
     Returns:
         Configured VectorStore instance based on the provider setting.
@@ -60,13 +71,17 @@ def get_vector_store(  # noqa: PLR0913, PLR0917
     Raises:
         KeyError: If no provider is registered under the configured
             name. The message lists the registered names.
+        ValueError: If ``metric`` is not a supported distance metric
+            (raised by the selected backend).
     """
     factory = RegistryVectorStoreFactory()
-    return factory.create(
-        settings=settings,
-        table_name=table_name,
-        id_field=id_field,
-        embedding_dim=embedding_dim,
-        session_factory=session_factory,
-        embedding_fn=embedding_fn,
-    )
+    kwargs: dict[str, Any] = {
+        "table_name": table_name,
+        "id_field": id_field,
+        "embedding_dim": embedding_dim,
+        "session_factory": session_factory,
+        "embedding_fn": embedding_fn,
+    }
+    if metric is not None:
+        kwargs["metric"] = metric
+    return factory.create(settings=settings, **kwargs)

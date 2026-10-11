@@ -62,13 +62,15 @@ Selected via `settings.vector_store_provider`. **Default is `"memory"`** (not pg
 
 Every built-in backend satisfies the three capability Protocols structurally: `VectorIndex` (`vector_search`), `LexicalIndex` (`keyword_search`), and `DocumentStore` (`upsert`/`count`/`delete`/`get`). The "lexical capability" column says whether the keyword stage is a **native full-text index** (production-scale) or an **in-process fallback** (full-corpus token-overlap scan — local development, small corpora, and testing only). At scale, combine a pgvector `VectorIndex` with an external lexical engine adapted to `LexicalIndex`.
 
+Distance metric: the memory, pgvector, and FAISS stores support `l2` (default) and `cosine`, selectable per store with the `metric=` constructor argument or declaratively through the optional `rag_distance_metric` host settings field; the Qdrant and Chroma stores reject `cosine` at construction time and keep the `l2` default.
+
 | Provider     | Class                 | Use                        | Lexical capability                          | Notes                                                                                               |
 | ------------ | --------------------- | -------------------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `"memory"`   | `InMemoryVectorStore` | dev/test, zero-dep         | in-process fallback (token overlap)         | brute-force L2 + token-overlap keyword approximation; nothing persisted                             |
-| `"pgvector"` | `PgVectorStore`       | PostgreSQL production      | **native FTS** (`ts_rank`, production-scale) | real pgvector L2 + `ts_rank` full-text search; needs `[pgvector]` extra                             |
+| `"memory"`   | `InMemoryVectorStore` | dev/test, zero-dep         | in-process fallback (token overlap)         | brute-force search over `l2` (default) or `cosine` via `metric=`; token-overlap keyword approximation; nothing persisted |
+| `"pgvector"` | `PgVectorStore`       | PostgreSQL production      | **native FTS** (`ts_rank`, production-scale) | real pgvector `<->` (l2, default) or `<=>` (cosine) via `metric=`; `ts_rank` full-text search; needs `[pgvector]` extra |
 | `"qdrant"`   | `QdrantStore`         | Qdrant server              | in-process fallback (token overlap)         | native vector search + in-process token-overlap keyword; `url`/`api_key` or `settings.database_url` |
 | `"chroma"`   | `ChromaStore`         | embedded/persistent/server | in-process fallback (token overlap)         | `path=` for persistent, else ephemeral; sync client wrapped in `asyncio.to_thread`                  |
-| `"faiss"`    | `FaissStore`          | in-process exact L2        | in-process fallback (token overlap)         | `IndexIDMap` over `IndexFlatL2`; nothing persisted                                                  |
+| `"faiss"`    | `FaissStore`          | in-process exact L2        | in-process fallback (token overlap)         | `IndexIDMap` over `IndexFlatL2` (l2, default) or normalized cosine via `metric=`; nothing persisted |
 
 ```python
 from ragit.stores import get_vector_store

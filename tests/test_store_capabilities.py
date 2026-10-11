@@ -145,9 +145,7 @@ async def test_legacy_adapter_delegates_all_three_methods() -> None:
     )
 
     await adapter.count(session="session", strict=True, tenant_id="t1")
-    backend.count.assert_awaited_once_with(
-        session="session", strict=True, tenant_id="t1"
-    )
+    backend.count.assert_awaited_once_with(session="session", strict=True, tenant_id="t1")
 
     await adapter.upsert(
         documents=[{"id": "1", "text": "t", "embedding": [0.1]}],

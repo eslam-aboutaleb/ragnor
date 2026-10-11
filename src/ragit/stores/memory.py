@@ -1,9 +1,13 @@
 """In-memory vector store for tests and zero-dependency development.
 
 Implements the :class:`VectorStore` interface entirely in process
-memory: brute-force L2 vector search, a token-overlap approximation
+memory: brute-force vector search, a token-overlap approximation
 of full-text search, and the shared Reciprocal Rank Fusion merge
 (:mod:`ragit.stores._scoring`).
+
+The vector stage ranks by the store's distance metric
+(:mod:`ragit.metrics`): ``l2`` by default, ``cosine`` when the
+store is constructed with ``metric="cosine"``.
 
 The store subclasses :class:`ragit.stores.base.HybridVectorStore`:
 the vector stage lives in :meth:`vector_search` and the keyword
@@ -21,6 +25,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from ragit.metrics import cosine_distance
 from ragit.stores._scoring import l2_distance, token_overlap, tokenize
 from ragit.stores.base import EmbeddingFunction, HybridVectorStore
 from ragit.stores.registry import vector_store_registry
@@ -33,13 +38,15 @@ logger = logging.getLogger(__name__)
 class InMemoryVectorStore(HybridVectorStore):
     """In-memory vector store.
 
-    Brute-force L2 vector search with token-overlap keyword matching,
-    merged with the shared RRF formula
-    (``1.0 / (60 + rank)`` per stage, 1-based ranks, tie-break by
-    id). Result dicts carry the same keys as the other backends:
-    ``id``, ``document``, ``metadata``, ``distance`` (``None`` for
-    keyword-only hits), ``keyword_score`` (``None`` for vector-only
-    hits), and ``_rrf_score``.
+    Brute-force vector search over the store's distance metric
+    (``l2`` by default, ``cosine`` opt-in via ``metric``) with
+    token-overlap keyword matching, merged with the shared RRF
+    formula (``1.0 / (60 + rank)`` per stage, 1-based ranks,
+    tie-break by id). Result dicts carry the same keys as the
+    other backends: ``id``, ``document``, ``metadata``,
+    ``distance`` (``None`` for keyword-only hits),
+    ``keyword_score`` (``None`` for vector-only hits), and
+    ``_rrf_score``.
     """
 
     def __init__(  # noqa: PLR0913, PLR0917
@@ -50,6 +57,7 @@ class InMemoryVectorStore(HybridVectorStore):
         session_factory: Any = None,
         settings: Any = None,
         embedding_fn: EmbeddingFunction | None = None,
+        metric: str | None = None,
     ):
         """Initialize the in-memory store.
 
@@ -63,10 +71,15 @@ class InMemoryVectorStore(HybridVectorStore):
             session_factory: Accepted for constructor compatibility
                 with the pgvector store; ignored (no database).
             settings: Accepted for constructor compatibility with
-                the pgvector store; ignored (no database).
+                the pgvector store; ignored (no database) except for
+                the optional ``rag_distance_metric`` field.
             embedding_fn: Async callable that embeds a list of texts.
                 Used only when ``hybrid_search`` is called with an
                 empty embedding.
+            metric: Distance metric for the vector stage (``"l2"``
+                by default, ``"cosine"`` opt-in). When omitted, the
+                host settings' optional ``rag_distance_metric``
+                field is used.
         """
         super().__init__(
             table_name=table_name,
@@ -75,6 +88,7 @@ class InMemoryVectorStore(HybridVectorStore):
             session_factory=session_factory,
             settings=settings,
             embedding_fn=embedding_fn,
+            metric=metric,
         )
         self._records: dict[str, dict[str, Any]] = {}
         self._embeddings: dict[str, list[float]] = {}
@@ -105,13 +119,18 @@ class InMemoryVectorStore(HybridVectorStore):
         session: Any = None,
         **filters: Any,
     ) -> list[dict[str, Any]]:
-        """Brute-force L2 search over the record map.
+        """Brute-force vector search over the record map.
+
+        The candidates are scored with the store's distance metric:
+        ``l2_distance`` for ``l2`` (the default) and
+        ``cosine_distance`` for ``cosine``.
 
         Args:
             embedding: Query embedding vector (required; the method
                 does not auto-embed).
             n_results: Maximum number of results to return.
-            threshold: Maximum L2 distance.
+            threshold: Maximum distance under the store's metric
+                (metric-relative; never comparable across metrics).
             text_field: Name of the field containing the document text.
             metadata_fields: Fields to include in the result metadata.
             session: Accepted for interface compatibility; ignored
@@ -121,9 +140,9 @@ class InMemoryVectorStore(HybridVectorStore):
 
         Returns:
             list[dict]: Result dicts ordered by distance ascending
-            (tie-broken by id), each carrying ``id``, ``document``,
-            ``metadata``, ``distance``, and ``keyword_score``
-            (``None``).
+                (tie-broken by id), each carrying ``id``, ``document``,
+                ``metadata``, ``distance``, and ``keyword_score``
+                (``None``).
 
         Raises:
             ValueError: If identifiers are unsafe or the embedding
@@ -144,15 +163,18 @@ class InMemoryVectorStore(HybridVectorStore):
                 continue
             doc_embedding = self._embeddings.get(doc_id)
             if doc_embedding is not None:
-                distance = l2_distance(embedding, doc_embedding)
+                if self.metric == "cosine":
+                    distance = cosine_distance(embedding, doc_embedding)
+                else:
+                    distance = l2_distance(embedding, doc_embedding)
                 if distance < threshold:
                     vector_distances[doc_id] = distance
 
         vector_ranked = [
             doc_id
-            for doc_id, _ in sorted(
-                vector_distances.items(), key=lambda item: (item[1], item[0])
-            )[:n_results]
+            for doc_id, _ in sorted(vector_distances.items(), key=lambda item: (item[1], item[0]))[
+                :n_results
+            ]
         ]
         results = []
         for doc_id in vector_ranked:
@@ -220,9 +242,9 @@ class InMemoryVectorStore(HybridVectorStore):
 
         keyword_ranked = [
             doc_id
-            for doc_id, _ in sorted(
-                keyword_scores.items(), key=lambda item: (-item[1], item[0])
-            )[:n_results]
+            for doc_id, _ in sorted(keyword_scores.items(), key=lambda item: (-item[1], item[0]))[
+                :n_results
+            ]
         ]
         results = []
         for doc_id in keyword_ranked:
@@ -356,13 +378,10 @@ class InMemoryVectorStore(HybridVectorStore):
                 empty, or a filter key is unsafe.
         """
         if ids is None and filters is None:
-            raise ValueError(
-                "delete requires at least one of ids or filters"
-            )
+            raise ValueError("delete requires at least one of ids or filters")
         if ids is not None and len(ids) == 0:
             raise ValueError(
-                "ids must not be empty; an empty id list never "
-                "means delete everything"
+                "ids must not be empty; an empty id list never means delete everything"
             )
         if filters is not None:
             for key in filters:
@@ -372,9 +391,7 @@ class InMemoryVectorStore(HybridVectorStore):
         for doc_id in list(self._records):
             if ids is not None and doc_id not in set(ids):
                 continue
-            if filters is not None and not self._matches_filters(
-                self._records[doc_id], filters
-            ):
+            if filters is not None and not self._matches_filters(self._records[doc_id], filters):
                 continue
             del self._records[doc_id]
             self._embeddings.pop(doc_id, None)

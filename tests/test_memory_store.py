@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from ragit.metrics import cosine_distance
 from ragit.stores._scoring import token_overlap as _token_overlap
 from ragit.stores.base import (
     DocumentStore,
@@ -76,9 +77,7 @@ async def test_golden_hybrid_search_composite_matches_pre_refactor_output():
         ]
     )
 
-    results = await store.hybrid_search(
-        "alpha beta", [0.1, 0.2, 0.3], n_results=5, threshold=1.0
-    )
+    results = await store.hybrid_search("alpha beta", [0.1, 0.2, 0.3], n_results=5, threshold=1.0)
 
     assert results == [
         {
@@ -116,9 +115,7 @@ async def test_golden_hybrid_search_composite_matches_pre_refactor_output():
     ]
 
     # n_results truncates each stage before the fusion.
-    truncated = await store.hybrid_search(
-        "alpha beta", [0.1, 0.2, 0.3], n_results=2, threshold=1.0
-    )
+    truncated = await store.hybrid_search("alpha beta", [0.1, 0.2, 0.3], n_results=2, threshold=1.0)
     assert [row["id"] for row in truncated] == ["doc-1", "doc-2"]
 
     # Filters scope both stages.
@@ -152,17 +149,13 @@ async def test_vector_search_only():
             {"id": "2", "text": "gamma delta", "embedding": [0.0, 1.0, 0.0]},
         ]
     )
-    results = await store.vector_search(
-        [1.0, 0.0, 0.0], n_results=5, threshold=1.3
-    )
+    results = await store.vector_search([1.0, 0.0, 0.0], n_results=5, threshold=1.3)
     assert [row["id"] for row in results] == ["1"]
     assert results[0]["distance"] == 0.0
     assert results[0]["keyword_score"] is None
     assert results[0]["document"] == "alpha beta"
     # The vector stage applies filters.
-    scoped = await store.vector_search(
-        [1.0, 0.0, 0.0], n_results=5, threshold=1.3, owner="b"
-    )
+    scoped = await store.vector_search([1.0, 0.0, 0.0], n_results=5, threshold=1.3, owner="b")
     assert scoped == []
 
 
@@ -171,6 +164,62 @@ async def test_vector_search_validates_embedding_dimension():
     store = _store()
     with pytest.raises(ValueError, match="dimensions"):
         await store.vector_search([1.0, 0.0], n_results=5, threshold=1.3)
+
+
+@pytest.mark.asyncio
+async def test_cosine_metric_ranks_by_reference_cosine_distance():
+    """The cosine metric ranks by a reference cosine computation.
+
+    With ``metric="cosine"`` the vector stage scores candidates with
+    ``1 - cosine_similarity`` and drops candidates beyond the
+    threshold, so the ordering and the reported distances must match
+    the helpers in :mod:`ragit.metrics`.
+    """
+    store = _store(metric="cosine")
+    documents = [
+        {"id": "a", "text": "alpha", "embedding": [1.0, 0.0, 0.0]},
+        {"id": "b", "text": "beta", "embedding": [0.0, 1.0, 0.0]},
+        {"id": "c", "text": "gamma", "embedding": [1.0, 1.0, 0.0]},
+        {"id": "d", "text": "delta", "embedding": [-1.0, 0.0, 0.0]},
+    ]
+    await store.upsert(documents)
+    query = [1.0, 0.2, 0.0]
+
+    results = await store.vector_search(query, n_results=10, threshold=2.0)
+
+    expected = sorted(
+        ((cosine_distance(query, doc["embedding"]), doc["id"]) for doc in documents),
+        key=lambda item: (item[0], item[1]),
+    )
+    assert [row["id"] for row in results] == [doc_id for _, doc_id in expected]
+    for row, (distance, _doc_id) in zip(results, expected, strict=True):
+        assert row["distance"] == pytest.approx(distance)
+
+    # The threshold semantics are unchanged: a candidate whose cosine
+    # distance reaches the threshold is dropped (doc-b is orthogonal
+    # to the query, doc-d points the other way).
+    strict = await store.vector_search(query, n_results=10, threshold=0.5)
+    assert [row["id"] for row in strict] == ["a", "c"]
+
+
+@pytest.mark.asyncio
+async def test_cosine_metric_hybrid_search_fuses_both_stages():
+    store = _store(metric="cosine")
+    await store.upsert(
+        [
+            {"id": "1", "text": "alpha beta", "embedding": [1.0, 0.0, 0.0]},
+            {"id": "2", "text": "alpha gamma", "embedding": [0.0, 1.0, 0.0]},
+        ]
+    )
+    results = await store.hybrid_search("alpha beta", [1.0, 0.0, 0.0], n_results=5, threshold=1.0)
+    # doc-1 is a perfect cosine match (distance 0.0) and a full keyword
+    # hit; doc-2 is orthogonal to the query (cosine distance 1.0, so
+    # the vector stage drops it) and a partial keyword hit.
+    assert [row["id"] for row in results] == ["1", "2"]
+    assert results[0]["distance"] == pytest.approx(0.0)
+    assert results[0]["keyword_score"] == 1.0
+    assert results[1]["distance"] is None
+    assert results[1]["keyword_score"] == 0.5
 
 
 @pytest.mark.asyncio
@@ -197,10 +246,7 @@ async def test_keyword_search_only():
 async def test_keyword_search_truncates_to_n_results():
     store = _store()
     await store.upsert(
-        [
-            {"id": str(i), "text": "shared token", "embedding": [0.0, 0.0, 1.0]}
-            for i in range(5)
-        ]
+        [{"id": str(i), "text": "shared token", "embedding": [0.0, 0.0, 1.0]} for i in range(5)]
     )
     results = await store.keyword_search("shared token", n_results=2)
     assert [row["id"] for row in results] == ["0", "1"]
@@ -386,7 +432,6 @@ async def test_get_by_ids_and_filters_is_conjunction():
     assert [row["id"] for row in rows] == ["2"]
     rows = await store.get(ids=["1"], filters={"owner": "b"})
     assert rows == []
-
 
 
 def test_token_overlap_empty_query_tokens():

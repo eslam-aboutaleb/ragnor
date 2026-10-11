@@ -127,13 +127,9 @@ def fuse_hybrid(  # noqa: PLR0913
                 "id": doc_id,
                 "document": source.get("document"),
                 "metadata": source.get("metadata") or {},
-                "distance": (
-                    vector_row.get("distance") if vector_row is not None else None
-                ),
+                "distance": (vector_row.get("distance") if vector_row is not None else None),
                 "keyword_score": (
-                    keyword_row.get("keyword_score")
-                    if keyword_row is not None
-                    else None
+                    keyword_row.get("keyword_score") if keyword_row is not None else None
                 ),
                 "_rrf_score": rrf_score,
             }

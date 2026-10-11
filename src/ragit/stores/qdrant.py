@@ -32,6 +32,13 @@ through constructor arguments. The Qdrant client is created
 lazily from ``url``/``api_key`` (or ``settings.database_url``)
 on first use, or injected directly via ``client`` for hosts
 and tests that manage their own client.
+
+Distance metric: the store accepts the uniform ``metric``
+constructor kwarg so the registry can build every backend the
+same way, but the cosine metric is NOT supported here -- only
+the ``l2`` default is. Constructing the store with the cosine
+metric raises ``ValueError``; cosine ranking is available from
+the pgvector, memory, and faiss backends.
 """
 
 from __future__ import annotations
@@ -78,8 +85,7 @@ def _equality_filter(filters: dict[str, Any]) -> Any | None:
 
     return Filter(
         must=[
-            FieldCondition(key=key, match=MatchValue(value=value))
-            for key, value in filters.items()
+            FieldCondition(key=key, match=MatchValue(value=value)) for key, value in filters.items()
         ]
     )
 
@@ -101,9 +107,7 @@ def _selector_filter(
 
     must: list[Any] = []
     if ids is not None:
-        must.append(
-            FieldCondition(key=id_field, match=MatchAny(any=list(ids)))
-        )
+        must.append(FieldCondition(key=id_field, match=MatchAny(any=list(ids))))
     for key, value in (filters or {}).items():
         must.append(FieldCondition(key=key, match=MatchValue(value=value)))
     return Filter(must=must) if must else None
@@ -129,6 +133,7 @@ class QdrantStore(HybridVectorStore):
         embedding_fn: EmbeddingFunction | None = None,
         client: Any | None = None,
         session_factory: Any | None = None,
+        metric: str | None = None,
     ):
         """Initialize the Qdrant store.
 
@@ -142,7 +147,9 @@ class QdrantStore(HybridVectorStore):
                 Falls back to ``settings.database_url``.
             api_key: API key for authenticated Qdrant servers.
             settings: Host settings; ``database_url`` is used as
-                the Qdrant URL when ``url`` is omitted.
+                the Qdrant URL when ``url`` is omitted, and the
+                optional ``rag_distance_metric`` field selects the
+                metric when ``metric`` is omitted.
             embedding_fn: Async callable that embeds a list of
                 texts, used to auto-embed queries.
             client: Pre-built Qdrant client (an
@@ -151,10 +158,16 @@ class QdrantStore(HybridVectorStore):
             session_factory: Accepted for constructor
                 compatibility with the other stores; ignored
                 (Qdrant manages its own connections).
+            metric: Distance metric for the vector stage. Only
+                ``l2`` (the default) is supported by this
+                backend.
 
         Raises:
             ValueError: If ``table_name`` or ``id_field`` contain
-                unsafe characters, or ``embedding_dim`` is omitted.
+                unsafe characters, if ``embedding_dim`` is omitted,
+                if ``metric`` is not a supported distance metric,
+                or if the cosine metric is requested (unsupported
+                by this backend).
         """
         super().__init__(
             table_name=table_name,
@@ -163,7 +176,14 @@ class QdrantStore(HybridVectorStore):
             session_factory=session_factory,
             settings=settings,
             embedding_fn=embedding_fn,
+            metric=metric,
         )
+        if self.metric == "cosine":
+            raise ValueError(
+                "the 'cosine' distance metric is unsupported by the Qdrant "
+                "backend; use l2 (the default), or switch to the pgvector, "
+                "memory, or faiss backend for cosine ranking"
+            )
         if embedding_dim is None:
             raise ValueError(
                 "embedding_dim is required; pass the dimension configured "
@@ -205,9 +225,7 @@ class QdrantStore(HybridVectorStore):
 
             await client.create_collection(
                 collection_name=self.table_name,
-                vectors_config=VectorParams(
-                    size=self.embedding_dim, distance=Distance.EUCLID
-                ),
+                vectors_config=VectorParams(size=self.embedding_dim, distance=Distance.EUCLID),
             )
         self._collection_ready = True
 
@@ -241,9 +259,7 @@ class QdrantStore(HybridVectorStore):
                 payload = dict(point.payload or {})
                 doc_id = str(payload.get(self.id_field, point.id))
                 payloads.setdefault(doc_id, payload)
-                score = token_overlap(
-                    query_tokens, tokenize(str(payload.get(text_field, "")))
-                )
+                score = token_overlap(query_tokens, tokenize(str(payload.get(text_field, ""))))
                 if score > 0.0:
                     keyword_scores[doc_id] = score
             if offset is None:
@@ -456,9 +472,7 @@ class QdrantStore(HybridVectorStore):
         except Exception as exc:
             logger.error("Count failed on %s: %s", self.table_name, exc)
             if strict:
-                raise RetrievalError(
-                    f"Count failed on {self.table_name}: {exc}"
-                ) from exc
+                raise RetrievalError(f"Count failed on {self.table_name}: {exc}") from exc
             return 0
 
     async def delete(
@@ -492,13 +506,10 @@ class QdrantStore(HybridVectorStore):
             Exception: Re-raises Qdrant errors.
         """
         if ids is None and filters is None:
-            raise ValueError(
-                "delete requires at least one of ids or filters"
-            )
+            raise ValueError("delete requires at least one of ids or filters")
         if ids is not None and len(ids) == 0:
             raise ValueError(
-                "ids must not be empty; an empty id list never "
-                "means delete everything"
+                "ids must not be empty; an empty id list never means delete everything"
             )
         if filters is not None:
             for key in filters:
@@ -514,12 +525,8 @@ class QdrantStore(HybridVectorStore):
             before = int(before_response.count)
             from qdrant_client import PointIdsList  # noqa: PLC0415
 
-            selector: Any = PointIdsList(
-                points=[_point_id(doc_id) for doc_id in ids]
-            )
-            await client.delete(
-                collection_name=self.table_name, points_selector=selector
-            )
+            selector: Any = PointIdsList(points=[_point_id(doc_id) for doc_id in ids])
+            await client.delete(collection_name=self.table_name, points_selector=selector)
             after_response = await client.count(collection_name=self.table_name)
             after = int(after_response.count)
         else:
@@ -534,9 +541,7 @@ class QdrantStore(HybridVectorStore):
             from qdrant_client import FilterSelector  # noqa: PLC0415
 
             selector = FilterSelector(filter=query_filter)
-            await client.delete(
-                collection_name=self.table_name, points_selector=selector
-            )
+            await client.delete(collection_name=self.table_name, points_selector=selector)
             after_response = await client.count(
                 collection_name=self.table_name, count_filter=query_filter
             )

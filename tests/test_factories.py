@@ -94,15 +94,9 @@ async def test_execute_fetch_all_and_fetch_scalar() -> None:
     session_factory = factory.create_session_factory(SQLITE_URL)
 
     async with session_factory() as session:
-        await factory.execute(
-            session, "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)"
-        )
-        await factory.execute(
-            session, "INSERT INTO items (name) VALUES (:name)", {"name": "alpha"}
-        )
-        await factory.execute(
-            session, "INSERT INTO items (name) VALUES (:name)", {"name": "beta"}
-        )
+        await factory.execute(session, "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)")
+        await factory.execute(session, "INSERT INTO items (name) VALUES (:name)", {"name": "alpha"})
+        await factory.execute(session, "INSERT INTO items (name) VALUES (:name)", {"name": "beta"})
 
         rows = await factory.fetch_all(session, "SELECT id, name FROM items ORDER BY id")
         assert rows == [{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta"}]
@@ -116,12 +110,8 @@ async def test_fetch_all_binds_named_params() -> None:
     session_factory = factory.create_session_factory(SQLITE_URL)
 
     async with session_factory() as session:
-        await factory.execute(
-            session, "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)"
-        )
-        await factory.execute(
-            session, "INSERT INTO items (name) VALUES (:name)", {"name": "alpha"}
-        )
+        await factory.execute(session, "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)")
+        await factory.execute(session, "INSERT INTO items (name) VALUES (:name)", {"name": "alpha"})
 
         rows = await factory.fetch_all(
             session, "SELECT name FROM items WHERE name = :name", {"name": "alpha"}
@@ -251,6 +241,39 @@ def test_create_custom_registered_provider() -> None:
     assert store.kwargs == {"table_name": "chunks", "embedding_dim": 4}
 
 
+def test_create_forwards_settings_to_builtin_backend() -> None:
+    settings = SimpleNamespace(vector_store_provider="memory", rag_distance_metric="cosine")
+
+    store = RegistryVectorStoreFactory().create(
+        settings=settings, table_name="chunks", embedding_dim=4
+    )
+
+    assert isinstance(store, InMemoryVectorStore)
+    assert store.metric == "cosine"
+
+
+def test_create_forwards_settings_only_when_constructor_declares_it() -> None:
+    registry = Registry[VectorStore]()
+
+    @registry.register("settings-aware")
+    class _SettingsAwareStore(_DummyStore):
+        def __init__(self, settings: Any = None, **kwargs: Any) -> None:
+            super().__init__(**kwargs)
+            self.settings_received = settings
+
+    factory = RegistryVectorStoreFactory(registry=registry)
+
+    store = factory.create(
+        settings=SimpleNamespace(vector_store_provider="settings-aware"),
+        table_name="chunks",
+        embedding_dim=4,
+    )
+
+    assert isinstance(store, _SettingsAwareStore)
+    assert store.settings_received is not None
+    assert "settings" not in store.kwargs
+
+
 def test_host_registered_pgvector_override_is_respected() -> None:
     registry = Registry[VectorStore]()
 
@@ -285,9 +308,7 @@ def test_create_non_identifier_provider_raises_key_error() -> None:
     settings = SimpleNamespace(vector_store_provider="not-a-module")
 
     with pytest.raises(KeyError, match="Unknown provider 'not-a-module'"):
-        factory.create(
-            settings=settings, table_name="chunks", embedding_dim=1536
-        )
+        factory.create(settings=settings, table_name="chunks", embedding_dim=1536)
 
 
 def test_create_backend_with_missing_dependency_raises_import_error() -> None:
@@ -324,9 +345,7 @@ def test_get_vector_store_defaults_to_memory() -> None:
 def test_get_vector_store_memory_provider() -> None:
     settings = SimpleNamespace(vector_store_provider="memory")
 
-    store = get_vector_store(
-        table_name="chunks", embedding_dim=1536, settings=settings
-    )
+    store = get_vector_store(table_name="chunks", embedding_dim=1536, settings=settings)
 
     assert isinstance(store, InMemoryVectorStore)
 
@@ -409,12 +428,8 @@ class _FakeVersionStore:
     async def close_active(self, session: Any) -> None:
         pass
 
-    async def create_version(
-        self, session: Any, snapshot: IngestionSnapshot
-    ) -> VersionRecord:
-        return VersionRecord(
-            version_id="version-1", snapshot=snapshot, source_id="source-1"
-        )
+    async def create_version(self, session: Any, snapshot: IngestionSnapshot) -> VersionRecord:
+        return VersionRecord(version_id="version-1", snapshot=snapshot, source_id="source-1")
 
     async def delete_chunks(self, session: Any, version_id: str) -> None:
         pass
@@ -517,9 +532,7 @@ async def test_pipeline_uses_injected_sql_factory_for_advisory_lock() -> None:
     assert sql_factory.lock_keys == ["src"]
     # The SQLAlchemy factory was not used: no advisory-lock SQL
     # reached the session the pipeline owns.
-    assert not any(
-        "pg_advisory_lock" in sql for sql in session_factory.sessions[0].executed
-    )
+    assert not any("pg_advisory_lock" in sql for sql in session_factory.sessions[0].executed)
 
 
 # ---------------------------------------------------------------------------
@@ -607,10 +620,7 @@ def test_custom_vector_store_factory_returns_fixed_store() -> None:
     factory = _FixedStoreFactory(store)
 
     assert factory.create() is store
-    assert (
-        factory.create(settings=SimpleNamespace(vector_store_provider="memory"))
-        is store
-    )
+    assert factory.create(settings=SimpleNamespace(vector_store_provider="memory")) is store
 
 
 # ---------------------------------------------------------------------------

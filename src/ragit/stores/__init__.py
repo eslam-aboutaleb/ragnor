@@ -20,6 +20,15 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
+from ragit.metrics import (
+    DEFAULT_DISTANCE_METRIC,
+    SUPPORTED_DISTANCE_METRICS,
+    DistanceMetric,
+    cosine_distance,
+    cosine_similarity,
+    normalize,
+    resolve_distance_metric,
+)
 from ragit.stores.base import (
     DocumentStore,
     EmbeddingFunction,
@@ -50,8 +59,7 @@ def __getattr__(name: str) -> Any:
             module = importlib.import_module(module_name)
         except ImportError as exc:
             raise ImportError(
-                f"The {extra} backend requires the '{extra}' extra: "
-                f"pip install 'ragit[{extra}]'"
+                f"The {extra} backend requires the '{extra}' extra: pip install 'ragit[{extra}]'"
             ) from exc
         return getattr(module, attribute)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
@@ -59,6 +67,8 @@ def __getattr__(name: str) -> Any:
 
 __all__ = [
     "ChromaStore",
+    "DEFAULT_DISTANCE_METRIC",
+    "DistanceMetric",
     "DocumentStore",
     "EmbeddingFunction",
     "FaissStore",
@@ -69,9 +79,14 @@ __all__ = [
     "PgVectorStore",
     "QdrantStore",
     "RegistryVectorStoreFactory",
+    "SUPPORTED_DISTANCE_METRICS",
     "VectorIndex",
     "VectorStore",
     "VectorStoreFactory",
+    "cosine_distance",
+    "cosine_similarity",
     "get_vector_store",
+    "normalize",
+    "resolve_distance_metric",
     "vector_store_registry",
 ]

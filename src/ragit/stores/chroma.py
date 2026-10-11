@@ -34,6 +34,13 @@ everything through constructor arguments. The Chroma
 client is created lazily on first use -- an
 ``EphemeralClient`` by default, or a
 ``PersistentClient`` when ``path`` is given.
+
+Distance metric: the store accepts the uniform ``metric``
+constructor kwarg so the registry can build every backend
+the same way, but the cosine metric is NOT supported here
+-- only the ``l2`` default is. Constructing the store with
+the cosine metric raises ``ValueError``; cosine ranking is
+available from the pgvector, memory, and faiss backends.
 """
 
 from __future__ import annotations
@@ -81,6 +88,7 @@ class ChromaStore(HybridVectorStore):
         client: Any | None = None,
         path: str | None = None,
         session_factory: Any | None = None,
+        metric: str | None = None,
     ):
         """Initialize the Chroma store.
 
@@ -94,7 +102,9 @@ class ChromaStore(HybridVectorStore):
                 configured for the active embedding model.
             settings: Host settings; accepted for
                 constructor compatibility with the other
-                stores.
+                stores, and read for the optional
+                ``rag_distance_metric`` field when ``metric``
+                is omitted.
             embedding_fn: Async callable that embeds a list
                 of texts, used to auto-embed queries.
             client: Pre-built Chroma client. When omitted,
@@ -107,10 +117,16 @@ class ChromaStore(HybridVectorStore):
             session_factory: Accepted for constructor
                 compatibility with the other stores; ignored
                 (Chroma manages its own connections).
+            metric: Distance metric for the vector stage. Only
+                ``l2`` (the default) is supported by this
+                backend.
 
         Raises:
             ValueError: If ``table_name`` contains unsafe
-                characters, or ``embedding_dim`` is omitted.
+                characters, if ``embedding_dim`` is omitted,
+                if ``metric`` is not a supported distance
+                metric, or if the cosine metric is requested
+                (unsupported by this backend).
         """
         super().__init__(
             table_name=table_name,
@@ -119,7 +135,14 @@ class ChromaStore(HybridVectorStore):
             settings=settings,
             embedding_fn=embedding_fn,
             session_factory=session_factory,
+            metric=metric,
         )
+        if self.metric == "cosine":
+            raise ValueError(
+                "the 'cosine' distance metric is unsupported by the Chroma "
+                "backend; use l2 (the default), or switch to the pgvector, "
+                "memory, or faiss backend for cosine ranking"
+            )
         if embedding_dim is None:
             raise ValueError(
                 "embedding_dim is required; pass the dimension configured "
@@ -145,9 +168,7 @@ class ChromaStore(HybridVectorStore):
                     self._client = chromadb.PersistentClient(path=self._path)
                 else:
                     self._client = chromadb.EphemeralClient()
-            self._collection = self._client.get_or_create_collection(
-                name=self.table_name
-            )
+            self._collection = self._client.get_or_create_collection(name=self.table_name)
         return self._collection
 
     async def vector_search(  # noqa: PLR0913, PLR0917
@@ -225,8 +246,7 @@ class ChromaStore(HybridVectorStore):
                     "metadata": {
                         field: record_metadata[field]
                         for field in metadata_fields
-                        if field in record_metadata
-                        and record_metadata[field] is not None
+                        if field in record_metadata and record_metadata[field] is not None
                     },
                     "distance": float(distance),
                     "keyword_score": None,
@@ -316,8 +336,7 @@ class ChromaStore(HybridVectorStore):
                     "metadata": {
                         field: record_metadata[field]
                         for field in metadata_fields
-                        if field in record_metadata
-                        and record_metadata[field] is not None
+                        if field in record_metadata and record_metadata[field] is not None
                     },
                     "distance": None,
                     "keyword_score": keyword_scores[doc_id],
@@ -355,17 +374,13 @@ class ChromaStore(HybridVectorStore):
         try:
             collection = self._resolve_collection()
             if filters:
-                records = await asyncio.to_thread(
-                    collection.get, where=_where_filter(filters)
-                )
+                records = await asyncio.to_thread(collection.get, where=_where_filter(filters))
                 return len(records.get("ids") or [])
             return int(await asyncio.to_thread(collection.count))
         except Exception as exc:
             logger.error("Count failed on %s: %s", self.table_name, exc)
             if strict:
-                raise RetrievalError(
-                    f"Count failed on {self.table_name}: {exc}"
-                ) from exc
+                raise RetrievalError(f"Count failed on {self.table_name}: {exc}") from exc
             return 0
 
     async def delete(
@@ -399,13 +414,10 @@ class ChromaStore(HybridVectorStore):
             Exception: Re-raises Chroma errors.
         """
         if ids is None and filters is None:
-            raise ValueError(
-                "delete requires at least one of ids or filters"
-            )
+            raise ValueError("delete requires at least one of ids or filters")
         if ids is not None and len(ids) == 0:
             raise ValueError(
-                "ids must not be empty; an empty id list never "
-                "means delete everything"
+                "ids must not be empty; an empty id list never means delete everything"
             )
         if filters is not None:
             for key in filters:
@@ -457,7 +469,7 @@ class ChromaStore(HybridVectorStore):
             ValueError: If any identifier is unsafe.
             Exception: Re-raises Chroma errors.
         """
-        for key in (filters or {}):
+        for key in filters or {}:
             validate_identifier(key, "filter key")
         metadata_fields = metadata_fields or []
         for field in metadata_fields:
@@ -485,8 +497,7 @@ class ChromaStore(HybridVectorStore):
                     "metadata": {
                         field: record_metadata[field]
                         for field in metadata_fields
-                        if field in record_metadata
-                        and record_metadata[field] is not None
+                        if field in record_metadata and record_metadata[field] is not None
                     },
                 }
             )
@@ -563,9 +574,7 @@ class ChromaStore(HybridVectorStore):
                 embeddings=embeddings,
                 metadatas=metadatas,
             )
-            logger.info(
-                "Upserted %d documents to %s.", len(documents), self.table_name
-            )
+            logger.info("Upserted %d documents to %s.", len(documents), self.table_name)
         except Exception as exc:
             logger.error("Upsert failed on %s: %s", self.table_name, exc)
             raise

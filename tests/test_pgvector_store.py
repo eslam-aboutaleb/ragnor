@@ -38,6 +38,7 @@ def _make_store(
     table_name: str = "policy_chunks",
     id_field: str = "id",
     embedding_fn: AsyncMock | None = None,
+    metric: str | None = None,
 ) -> tuple[PgVectorStore, MagicMock]:
     """Wire a store to a mocked session factory (and optional embedder)."""
     factory = MagicMock()
@@ -48,6 +49,7 @@ def _make_store(
         embedding_dim=1536,
         session_factory=factory,
         embedding_fn=embedding_fn,
+        metric=metric,
     )
     return store, factory
 
@@ -679,16 +681,12 @@ class TestPgVectorStoreCapabilities:
     async def test_vector_search_rejects_non_positive_n_results(self) -> None:
         store, _factory = _make_store(AsyncMock(), table_name="claims")
         with pytest.raises(ValueError, match="n_results must be a positive integer"):
-            await store.vector_search(
-                embedding=[0.1] * 1536, n_results=0, threshold=1.3
-            )
+            await store.vector_search(embedding=[0.1] * 1536, n_results=0, threshold=1.3)
 
     async def test_vector_search_validates_embedding_dimension(self) -> None:
         store, _factory = _make_store(AsyncMock(), table_name="claims")
         with pytest.raises(ValueError, match="dimensions"):
-            await store.vector_search(
-                embedding=[0.1], n_results=5, threshold=1.3
-            )
+            await store.vector_search(embedding=[0.1], n_results=5, threshold=1.3)
 
     async def test_keyword_search_sql_structure(self) -> None:
         """keyword_search is a single FTS SELECT ordered by ts_rank."""
@@ -723,8 +721,14 @@ class TestPgVectorStoreCapabilities:
 
         sql = str(captured["stmt"])
         assert "tsvector @@ plainto_tsquery(cast(:tsquery_config as regconfig), :query)" in sql
-        assert "ts_rank(tsvector, plainto_tsquery(cast(:tsquery_config as regconfig), :query)) AS score" in sql
-        assert "ORDER BY ts_rank(tsvector, plainto_tsquery(cast(:tsquery_config as regconfig), :query)) DESC, id" in sql
+        assert (
+            "ts_rank(tsvector, plainto_tsquery(cast(:tsquery_config as regconfig), :query)) AS score"
+            in sql
+        )
+        assert (
+            "ORDER BY ts_rank(tsvector, plainto_tsquery(cast(:tsquery_config as regconfig), :query)) DESC, id"
+            in sql
+        )
         assert "LIMIT :n_results" in sql
         assert "owner_id = :filter_owner_id" in sql
         assert captured["params"]["query"] == "water damage"
@@ -803,9 +807,7 @@ class TestPgVectorStoreCapabilities:
 
         store, _factory = _make_store(_SpySession(), table_name="claims")
 
-        deleted = await store.delete(
-            ids=["claim-1"], filters={"owner_id": "user-123"}
-        )
+        deleted = await store.delete(ids=["claim-1"], filters={"owner_id": "user-123"})
 
         sql = str(captured["stmt"])
         assert "id = ANY(:ids) AND owner_id = :filter_owner_id" in sql
@@ -856,9 +858,7 @@ class TestPgVectorStoreCapabilities:
 
         store, _factory = _make_store(_SpySession(), table_name="claims")
 
-        rows = await store.get(
-            ids=["1", "2"], metadata_fields=["section"]
-        )
+        rows = await store.get(ids=["1", "2"], metadata_fields=["section"])
 
         sql = str(captured["stmt"])
         assert "SELECT id, text, section" in sql
@@ -909,3 +909,103 @@ class TestPgVectorStoreCapabilities:
         sql = str(captured["stmt"])
         assert "WHERE" not in sql
         assert [row["id"] for row in rows] == ["1"]
+
+
+class TestPgVectorStoreDistanceMetric:
+    """The metric selects the pgvector distance operator in the SQL."""
+
+    async def test_default_metric_is_l2(self) -> None:
+        store, _factory = _make_store(AsyncMock())
+        assert store.metric == "l2"
+
+    async def test_unknown_metric_raises(self) -> None:
+        with pytest.raises(ValueError, match="Unknown distance metric"):
+            _make_store(AsyncMock(), metric="dot")
+
+    async def test_hybrid_search_cosine_uses_the_cosine_operator(self) -> None:
+        captured: dict[str, Any] = {}
+
+        class _SpySession:
+            async def execute(self, stmt, params=None):  # noqa: ANN001, ANN202, ARG002
+                captured["stmt"] = stmt
+                result = MagicMock()
+                result.mappings.return_value.all.return_value = [
+                    _mock_row({"id": "1", "document": "doc", "distance": 0.5, "rrf_score": 0.8})
+                ]
+                return result
+
+        store, _factory = _make_store(_SpySession(), metric="cosine")
+
+        await store.hybrid_search(
+            query="test",
+            embedding=[0.1] * 1536,
+            n_results=5,
+            threshold=0.3,
+            text_field="text",
+        )
+
+        sql = str(captured["stmt"])
+        assert "embedding <=> cast(:embedding as vector) AS distance" in sql
+        assert "embedding <=> cast(:embedding as vector) < :distance_threshold" in sql
+        assert (
+            "ORDER BY\n                               embedding <=> cast(:embedding as vector),\n                               id"
+            in sql
+        )
+        assert "<->" not in sql
+
+    async def test_vector_search_cosine_uses_the_cosine_operator(self) -> None:
+        captured: dict[str, Any] = {}
+
+        class _SpySession:
+            async def execute(self, stmt, params=None):  # noqa: ANN001, ANN202, ARG002
+                captured["stmt"] = stmt
+                result = MagicMock()
+                result.mappings.return_value.all.return_value = [
+                    _mock_row({"id": "1", "text": "test doc", "distance": 0.5})
+                ]
+                return result
+
+        store, _factory = _make_store(_SpySession(), metric="cosine")
+
+        await store.vector_search(
+            embedding=[0.1] * 1536,
+            n_results=5,
+            threshold=0.3,
+            text_field="text",
+        )
+
+        sql = str(captured["stmt"])
+        assert "embedding <=> cast(:embedding as vector) AS distance" in sql
+        assert "embedding <=> cast(:embedding as vector) < :distance_threshold" in sql
+        assert "ORDER BY embedding <=> cast(:embedding as vector), id" in sql
+        assert "<->" not in sql
+
+    async def test_metric_defaults_to_the_l2_operator_in_both_searches(self) -> None:
+        captured: list[str] = []
+
+        class _SpySession:
+            async def execute(self, stmt, params=None):  # noqa: ANN001, ANN202, ARG002
+                captured.append(str(stmt))
+                result = MagicMock()
+                result.mappings.return_value.all.return_value = [
+                    _mock_row({"id": "1", "text": "doc", "distance": 0.5, "rrf_score": 0.8})
+                ]
+                return result
+
+        store, _factory = _make_store(_SpySession())
+
+        await store.hybrid_search(
+            query="test",
+            embedding=[0.1] * 1536,
+            n_results=5,
+            threshold=0.3,
+            text_field="text",
+        )
+        await store.vector_search(
+            embedding=[0.1] * 1536, n_results=5, threshold=0.3, text_field="text"
+        )
+
+        assert len(captured) == 2
+        for sql in captured:
+            assert "embedding <-> cast(:embedding as vector) AS distance" in sql
+            assert "<=>" not in sql

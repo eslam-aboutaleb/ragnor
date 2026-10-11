@@ -236,7 +236,7 @@ ragit reads its configuration through the **`RagSettings` protocol** — your ex
 | `ingest_on_startup`                | `bool`  | Host startup ingestion flag                                                                                            |
 | `database_url`                     | `str`   | Fallback session factory for the pgvector store; fallback URL for the Qdrant store                                     |
 
-Two fields are optional and read via `getattr`: `embedding_provider` (default `"litellm"`, selects the embedder provider) and `llm_model` (read by the LLM judge). The protocol is `@runtime_checkable`, so host applications validate their settings at start-up with a plain `isinstance(settings, RagSettings)`. A `SettingsProvider` protocol (any object with a `get_settings()` method) is also available for accessor-style hosts.
+Two fields are optional and read via `getattr`: `embedding_provider` (default `"litellm"`, selects the embedder provider) and `llm_model` (read by the LLM judge). A third optional field, `rag_distance_metric` (default `"l2"`, selects the vector-store distance metric — see [Distance metrics](#distance-metrics)), is also read via `getattr`, so a settings object keeps satisfying the protocol whether or not it declares it. The protocol is `@runtime_checkable`, so host applications validate their settings at start-up with a plain `isinstance(settings, RagSettings)`. A `SettingsProvider` protocol (any object with a `get_settings()` method) is also available for accessor-style hosts.
 
 ---
 
@@ -311,6 +311,16 @@ embedder = LitellmEmbeddingFunction(
 vectors = await embedder(["hello", "world"])
 ```
 
+Two optional keyword arguments remove the wrappers hosts used to write around this class, both defaulting to today's behavior: `cache_max_entries` (default `0`, off) turns on a bounded in-process LRU cache keyed by the model name and the text, so unchanged texts are never re-embedded; `max_batch_size` (default `None`) splits large batches into per-call chunks for provider-side input limits. When the cache is on, only the misses are embedded and the results are reassembled in the original input order.
+
+```python
+embedder = LitellmEmbeddingFunction(
+    api_key="sk-...", model_name="text-embedding-3-small",
+    cache_max_entries=4096,   # bounded LRU; 0 disables caching
+    max_batch_size=512,       # per-call input cap; None sends one call
+)
+```
+
 ### Dimension registry
 
 The dimension registry is the single source of truth mapping model names to vector dimensions, so changing the embedding model cannot silently desynchronize the dimension checks at insert time. Known models return their dimension; **unknown models warn and fall back to `FALLBACK_DIMENSION` (1536)** instead of crashing start-up — register your model if the fallback is wrong.
@@ -340,18 +350,55 @@ ragit is vector-database agnostic: it ships no required database. Every backend 
 
 | Need                                        | Choose                             | Lexical capability                          | Why                                                                                                                       |
 | ------------------------------------------- | ---------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Tests, zero-dependency dev                  | `InMemoryVectorStore` (`"memory"`) | in-process fallback (token overlap)       | Brute-force L2 + token-overlap keyword approximation; same RRF merge; nothing persisted                                   |
-| Production on PostgreSQL                    | `PgVectorStore` (`"pgvector"`)     | **native FTS** (`ts_rank`, production-scale) | Real pgvector L2 distance + `ts_rank` full-text search                                                                    |
-| Production vector search on a Qdrant server | `QdrantStore` (`"qdrant"`)         | in-process fallback (token overlap)       | Qdrant's native nearest-neighbor search + in-process token-overlap keyword stage, merged with RRF                         |
-| Embedded or server Chroma                   | `ChromaStore` (`"chroma"`)         | in-process fallback (token overlap)       | Chroma's native vector search + in-process token-overlap keyword stage; ephemeral or persistent                           |
-| In-process exact L2 index                   | `FaissStore` (`"faiss"`)           | in-process fallback (token overlap)       | Exact `IndexFlatL2` search over an in-process `IndexIDMap`; no server, nothing persisted                                  |
+| Tests, zero-dependency dev                  | `InMemoryVectorStore` (`"memory"`) | in-process fallback (token overlap)       | Brute-force **L2 or cosine** + token-overlap keyword approximation; same RRF merge; nothing persisted                     |
+| Production on PostgreSQL                    | `PgVectorStore` (`"pgvector"`)     | **native FTS** (`ts_rank`, production-scale) | Real pgvector distance (`<->` L2 or `<=>` cosine) + `ts_rank` full-text search                                            |
+| Production vector search on a Qdrant server | `QdrantStore` (`"qdrant"`)         | in-process fallback (token overlap)       | Qdrant's native nearest-neighbor search + in-process token-overlap keyword stage, merged with RRF (L2 only)               |
+| Embedded or server Chroma                   | `ChromaStore` (`"chroma"`)         | in-process fallback (token overlap)       | Chroma's native vector search + in-process token-overlap keyword stage; ephemeral or persistent (L2 only)                 |
+| In-process exact vector index               | `FaissStore` (`"faiss"`)           | in-process fallback (token overlap)       | Exact `IndexFlatL2` search over an in-process `IndexIDMap`; no server, nothing persisted (L2 or cosine)                   |
 | Production on another vector DB             | Your own `VectorStore` subclass    | —                                           | Register it and select via `settings.vector_store_provider` — see [Extending ragit](#extending-ragit-provider-registries) |
 
 The in-memory, Qdrant, Chroma, and FAISS stores' keyword score is a **token-overlap ratio, not a real `ts_rank`** — expect ranking differences versus the pgvector backend, so never tune production thresholds against it. Their `LexicalIndex` implementation is an **in-process fallback** (a full-corpus token-overlap scan) intended for local development, small corpora, and testing; implementing `LexicalIndex` does not guarantee production-scale keyword performance. pgvector is the only built-in **native lexical index** (PostgreSQL full-text search). Hosts at scale combine a pgvector `VectorIndex` with an external lexical engine adapted to `LexicalIndex` — a first-class composition the retrieval strategies (`ragit.retrieval.strategies`) support out of the box.
 
+### Distance metrics
+
+Every store's vector stage ranks by one distance metric: **`l2`** (Euclidean, the historical default) or **`cosine`** (`1 - cosine_similarity`, in `[0, 2]`). The metric is selected per store — the `metric` constructor argument wins over the optional `rag_distance_metric` host settings field, which wins over the `"l2"` default; values are case-insensitive:
+
+```python
+from ragit.stores import get_vector_store, resolve_distance_metric
+
+store = get_vector_store(
+    table_name="policy_chunks",
+    embedding_dim=1536,
+    session_factory=my_session_factory,
+    embedding_fn=embedder,
+    metric="cosine",                  # or settings carrying rag_distance_metric
+)
+
+resolve_distance_metric("COSINE")                       # "cosine"
+resolve_distance_metric(None, my_settings)              # reads rag_distance_metric
+resolve_distance_metric(None)                           # "l2"
+```
+
+Cosine support per built-in backend:
+
+| Backend     | Cosine | How                                                                                                   |
+| ----------- | ------ | ----------------------------------------------------------------------------------------------------- |
+| `memory`    | yes    | True cosine similarity (`ragit.metrics.cosine_distance`) over the in-process records                    |
+| `pgvector`  | yes    | The `<=>` operator; needs no pre-normalization. Match the index opclass (`vector_cosine_ops`) — DDL is host-owned |
+| `faiss`     | yes    | Vectors and queries are normalized, then ranked on the existing `IndexFlatL2`; the reported distance is `l2² / 2`, exactly `1 - cosine_similarity` |
+| `qdrant`    | no     | L2 only; constructing it with `metric="cosine"` raises `ValueError`                                    |
+| `chroma`    | no     | L2 only; constructing it with `metric="cosine"` raises `ValueError`                                    |
+
+Two conventions matter when you switch a store's metric:
+
+1. **Thresholds are distances, and distances are metric-relative.** `rag_distance_threshold` keeps its meaning ("smaller is stricter") under both metrics, but a value tuned under `l2` means something different under `cosine` — convert a cosine *similarity* cutoff `s` to the distance `1 - s` and re-tune against a labeled query set (see [Evaluation](#evaluation)) before serving.
+2. **The index must match the metric.** ragit never creates indexes; a pgvector cosine deployment indexes with `vector_cosine_ops` and an L2 deployment with `vector_l2_ops`. Searching with `<=>` against a `vector_l2_ops` index still computes correctly, but without the HNSW acceleration.
+
+`get_vector_store` forwards `metric` to the selected backend only when it is not `None`, and forwards the `settings` object only to backends whose constructor declares an explicit `settings` parameter — so a custom registered backend built on the documented registry kwargs keeps working unchanged.
+
 ### In-memory store
 
-For tests and zero-dependency development — **not** a production backend. It accepts the same constructor kwargs as the pgvector store for drop-in compatibility; the database arguments are ignored. Pass `embedding_fn` to auto-embed queries when `hybrid_search` is called with an empty embedding.
+For tests and zero-dependency development — **not** a production backend. It accepts the same constructor kwargs as the pgvector store for drop-in compatibility; the database arguments are ignored. The vector stage ranks by the store's metric (`l2` by default, `cosine` opt-in — see [Distance metrics](#distance-metrics)), so a cosine host can pre-tune thresholds against it locally. Pass `embedding_fn` to auto-embed queries when `hybrid_search` is called with an empty embedding.
 
 ### pgvector store (built-in)
 
@@ -368,7 +415,7 @@ store = PgVectorStore(
 )
 ```
 
-The pgvector store keeps its optimized single-query `hybrid_search` (one round-trip, two SQL CTEs fused in the database). It also exposes the capability methods standalone: `vector_search` (vector CTE ordered by `embedding <-> :embedding` with the distance threshold and equality filters as bound parameters), `keyword_search` (FTS CTE ordered by `ts_rank`), plus `delete` (`DELETE ... WHERE id = ANY(:ids)` and/or equality-filter predicates) and `get` (`SELECT ... WHERE id = ANY(:ids)`).
+The pgvector store keeps its optimized single-query `hybrid_search` (one round-trip, two SQL CTEs fused in the database). It also exposes the capability methods standalone: `vector_search` (vector CTE ordered by the store's distance expression — `embedding <-> :embedding` under the default `l2` metric, `embedding <=> :embedding` under `cosine`, see [Distance metrics](#distance-metrics) — with the distance threshold and equality filters as bound parameters), `keyword_search` (FTS CTE ordered by `ts_rank`), plus `delete` (`DELETE ... WHERE id = ANY(:ids)` and/or equality-filter predicates) and `get` (`SELECT ... WHERE id = ANY(:ids)`).
 
 ### Qdrant store (built-in)
 
@@ -387,7 +434,7 @@ store = QdrantStore(
 )
 ```
 
-Qdrant identifies points by unsigned integers or UUIDs, so string document ids are mapped deterministically to `uuid5` point ids (the original id is kept in the payload under `id_field`). The vector stage uses Qdrant's native nearest-neighbor search (Euclid distance); the keyword stage scrolls the collection's payloads and scores token overlap in process, because Qdrant has no built-in full-text rank. Both stages are ranked independently and merged with RRF, so the result shape matches the other backends.
+Qdrant identifies points by unsigned integers or UUIDs, so string document ids are mapped deterministically to `uuid5` point ids (the original id is kept in the payload under `id_field`). The vector stage uses Qdrant's native nearest-neighbor search (Euclid distance); the keyword stage scrolls the collection's payloads and scores token overlap in process, because Qdrant has no built-in full-text rank. Both stages are ranked independently and merged with RRF, so the result shape matches the other backends. Cosine distance is not supported by this backend — see [Distance metrics](#distance-metrics).
 
 ### Chroma store (built-in)
 
@@ -405,7 +452,7 @@ store = ChromaStore(
 )
 ```
 
-The vector stage uses Chroma's native nearest-neighbor search (L2 distance); the keyword stage scores token overlap in process over the collection's documents, because Chroma has no built-in full-text rank. Both stages are ranked independently and merged with RRF.
+The vector stage uses Chroma's native nearest-neighbor search (L2 distance); the keyword stage scores token overlap in process over the collection's documents, because Chroma has no built-in full-text rank. Both stages are ranked independently and merged with RRF. Cosine distance is not supported by this backend — see [Distance metrics](#distance-metrics).
 
 ### FAISS store (built-in)
 
@@ -422,7 +469,7 @@ store = FaissStore(
 )
 ```
 
-FAISS identifies vectors by 64-bit integers, so string document ids are mapped to consecutive int64 ids (and back) inside the store; the original ids are returned in results. FAISS cannot filter natively, so the vector search over-fetches candidates (10× `n_results`) and filters them in process; the keyword stage scores token overlap over the in-process record map, because FAISS has no text search. Both stages are ranked independently and merged with RRF.
+FAISS identifies vectors by 64-bit integers, so string document ids are mapped to consecutive int64 ids (and back) inside the store; the original ids are returned in results. FAISS cannot filter natively, so the vector search over-fetches candidates (10× `n_results`) and filters them in process; the keyword stage scores token overlap over the in-process record map, because FAISS has no text search. Both stages are ranked independently and merged with RRF. Under the `cosine` metric the vectors and queries are normalized to unit length first and the reported distance is `l2² / 2` — exactly `1 - cosine_similarity`, so FAISS cosine ranking matches the memory and pgvector cosine paths (see [Distance metrics](#distance-metrics)).
 
 All backends return result dicts with the same keys: `id`, `document`, `metadata`, `distance` (vector hits only), `keyword_score` (keyword hits only), and `_rrf_score`. They also share the same behaviors: `strict=True` raises `RetrievalError` instead of swallowing failures, an `embedding_fn` auto-embeds queries when `hybrid_search` is called with an empty embedding, and `**filters` applies equality filters to both search stages.
 
@@ -432,7 +479,7 @@ Every backend also implements the `DocumentStore` lifecycle: `delete(ids=None, f
 
 By default, store failures are logged and swallowed into an empty result list (or `0` for `count`) — the historical behavior. Pass `strict=True` to raise `ragit.types.RetrievalError` instead, which you want for fail-fast pipelines and tests. The opt-in swallow contract lives only in the legacy `hybrid_search`/`count` and in the retrieval strategies: the capability methods (`vector_search`, `keyword_search`) and the lifecycle operations (`delete`, `get`) have no `strict` parameter and always raise on failure.
 
-Stores are selected through `vector_store_registry` via `get_vector_store(...)`, which reads `settings.vector_store_provider` (default `"memory"`) and instantiates the provider with the remaining kwargs. To use another vector database, register your backend under a name and set `vector_store_provider` to it — no ragit code changes.
+Stores are selected through `vector_store_registry` via `get_vector_store(...)`, which reads `settings.vector_store_provider` (default `"memory"`) and instantiates the provider with the remaining kwargs. To use another vector database, register your backend under a name and set `vector_store_provider` to it — no ragit code changes. `get_vector_store` also accepts `metric="l2" | "cosine"` (forwarded to the selected backend only when it is not `None`, so backends built on the documented registry kwargs are untouched), and forwards the `settings` object to backends whose constructor declares an explicit `settings` parameter, so they can read their optional host fields.
 
 ---
 
@@ -452,7 +499,9 @@ retriever = HybridRetriever(
 results = await retriever.retrieve(
     "What is the refund policy?",
     n_results=5,
-    distance_threshold=0.5,   # defaults to settings.rag_distance_threshold
+    distance_threshold=0.5,   # defaults to settings.rag_distance_threshold;
+                              # a distance under the store's metric (see
+                              # Distance metrics) -- metric-relative
     owner_id="user-123",      # any equality filter, applied to both stages
 )
 rows = as_dicts(results)      # back to dicts for legacy consumers
