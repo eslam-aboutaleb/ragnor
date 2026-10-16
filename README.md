@@ -160,7 +160,7 @@ The core install has **zero third-party packages** — `import ragit.*` never re
 | `chroma`           | `chromadb>=0.5`                               | Chroma vector store                                                |
 | `faiss`            | `faiss-cpu>=1.8`                              | FAISS vector store                                                 |
 | `local-embeddings` | *(reserved — currently empty)*                | Future local-model embedding backend (e.g. sentence-transformers) |
-| `test`             | `pytest`, `pytest-asyncio`, `aiosqlite`, `sqlalchemy[asyncio]` | Test dependencies                                  |
+| `test`             | `pytest`, `pytest-asyncio`, `aiosqlite`, `sqlalchemy[asyncio]`, `numpy`, `litellm` | Full test suite, including the LiteLLM integration check |
 | `all`              | `ragit[litellm,pgvector,qdrant,chroma,faiss]` | Every shipped capability at once                           |
 
 The extra names `pdf` and `web` are reserved for future loader/serving integrations.
