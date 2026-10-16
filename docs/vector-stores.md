@@ -2,7 +2,6 @@
 
 This page keeps the backend-specific setup and behavioral details together. Start with the [README overview](../README.md#vector-stores) to choose a store.
 
-
 ragit is vector-database agnostic: it ships no required database. Every backend — built-in or your own — implements the same `VectorStore` ABC with three methods: `hybrid_search`, `count`, and `upsert` (full signatures in `src/ragit/stores/base.py`; the ABC itself has no database dependency). Storage is split from retrieval strategy: three `@runtime_checkable` capability Protocols describe what a backend can do — `VectorIndex` (`vector_search`), `LexicalIndex` (`keyword_search`), and `DocumentStore` (`upsert`/`count`/`delete`/`get`) — and a host adapts an existing search engine to a Protocol by implementing its methods, with no ragit inheritance. Five backends ship in the box — `memory`, `pgvector`, `qdrant`, `chroma`, and `faiss` — each in its own module, imported lazily by the factory so its driver dependency stays optional until the backend is selected. Any other vector database plugs in through the registry.
 
 **Session ownership rule:** when the caller supplies a `session`, the caller owns the transaction (commit/rollback). When omitted, the store opens its own session and commits where the operation is transactional.
