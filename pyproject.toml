@@ -28,7 +28,9 @@ test = [
     "pypdf>=5,<7",
     "pathspec>=0.12,<1",
     "httpx>=0.28,<1",
+    "mcp>=1.0.0",
 ]
+
 litellm = [
     "litellm>=1.84",
 ]
