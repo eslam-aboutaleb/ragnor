@@ -3,6 +3,17 @@
 The LiteLLM integration ships behind the ``litellm`` extra and
 is imported lazily (via the module ``__getattr__`` below), so
 ``import ragit.embeddings`` works without litellm installed.
+
+New in this release:
+
+* :class:`~ragit.embeddings.profile.EmbeddingProfile` — provider/model/dimension
+  identity and canonical hash.
+* :class:`~ragit.embeddings.executor.EmbeddingExecutor` — resilient embedding
+  executor with retry, concurrency control, and response validation.
+* :class:`~ragit.embeddings.cache.EmbeddingCache` — scoped, profile-keyed
+  in-process cache with LRU eviction and optional TTL.
+* :class:`~ragit.embeddings.metrics.EmbeddingMetrics` — accumulated call/hit/retry
+  counters.
 """
 
 from __future__ import annotations
@@ -11,10 +22,29 @@ import importlib
 from typing import Any
 
 from ragit.embeddings.base import EmbeddingFunction
+from ragit.embeddings.cache import EmbeddingCache, EmbeddingCacheConfig
 from ragit.embeddings.dimensions import (
     FALLBACK_DIMENSION,
     get_embedding_dimension,
     register_dimension,
+)
+from ragit.embeddings.executor import (
+    EmbeddingError,
+    EmbeddingExecutor,
+    EmbeddingPermanentError,
+    EmbeddingResponseError,
+    EmbeddingTransientError,
+)
+from ragit.embeddings.metrics import EmbeddingMetrics
+from ragit.embeddings.profile import (
+    DistanceMetric,
+    EmbeddingProfile,
+    NormalizationMode,
+    ProfileValidationError,
+    TaskMode,
+    profiles_compatible_for_query,
+    profiles_require_reindex,
+    validate_profile_at_startup,
 )
 from ragit.embeddings.registry import (
     embedding_registry,
@@ -49,6 +79,7 @@ def __getattr__(name: str) -> Any:
 
 
 __all__ = [
+    # Legacy / unchanged
     "EmbeddingFunction",
     "FALLBACK_DIMENSION",
     "LitellmEmbeddingFunction",
@@ -57,4 +88,24 @@ __all__ = [
     "get_embedding_dimension",
     "get_embedding_function",
     "register_dimension",
+    # Profile
+    "DistanceMetric",
+    "EmbeddingProfile",
+    "NormalizationMode",
+    "ProfileValidationError",
+    "TaskMode",
+    "profiles_compatible_for_query",
+    "profiles_require_reindex",
+    "validate_profile_at_startup",
+    # Executor
+    "EmbeddingError",
+    "EmbeddingExecutor",
+    "EmbeddingPermanentError",
+    "EmbeddingResponseError",
+    "EmbeddingTransientError",
+    # Cache
+    "EmbeddingCache",
+    "EmbeddingCacheConfig",
+    # Metrics
+    "EmbeddingMetrics",
 ]

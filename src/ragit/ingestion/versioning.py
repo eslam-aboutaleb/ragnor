@@ -87,6 +87,13 @@ class IngestionSnapshot:
         chunk_size: Words per chunk.
         overlap: Overlapping words between consecutive chunks.
         retrieval_schema_version: Version of the retrieval schema.
+        extractor_id: Identifier of the extractor used.
+        extractor_version: Version of the extractor.
+        extractor_options: Non-secret options passed to the extractor.
+        embedding_profile_hash: Canonical hash of the
+            :class:`~ragit.embeddings.profile.EmbeddingProfile` used for
+            this ingestion.  Empty string when no profile is available
+            (backward-compatible default).
     """
 
     source_hash: str
@@ -99,6 +106,7 @@ class IngestionSnapshot:
     extractor_id: str = "none"
     extractor_version: str = "0"
     extractor_options: dict[str, Any] = field(default_factory=dict)
+    embedding_profile_hash: str = ""
 
 
 def snapshot_matches(
@@ -170,6 +178,7 @@ def build_snapshot(  # noqa: PLR0913, PLR0917
     extractor_id: str | None = None,
     extractor_version: str | None = None,
     extractor_options: dict[str, Any] | None = None,
+    embedding_profile: Any | None = None,
 ) -> IngestionSnapshot:
     """Build the current snapshot for ``source_hash``.
 
@@ -183,6 +192,15 @@ def build_snapshot(  # noqa: PLR0913, PLR0917
         source_hash: SHA-256 hex digest of the source content.
         settings: Settings carrying the embedding model.
         chunker: Chunker that splits the document.
+        extractor: Optional extractor instance or string id.
+        extractor_id: Optional extractor identifier (overridden by
+            ``extractor`` when provided).
+        extractor_version: Optional extractor version.
+        extractor_options: Optional non-secret extractor options.
+        embedding_profile: Optional
+            :class:`~ragit.embeddings.profile.EmbeddingProfile`.
+            When provided its :meth:`canonical_hash` is stored in the
+            snapshot so profile changes force a re-ingest.
 
     Returns:
         The snapshot describing this ingestion configuration.
@@ -196,6 +214,9 @@ def build_snapshot(  # noqa: PLR0913, PLR0917
         )
         extractor_version = getattr(extractor, "version", extractor_version)
         extractor_options = getattr(extractor, "options", extractor_options)
+    profile_hash = ""
+    if embedding_profile is not None and hasattr(embedding_profile, "canonical_hash"):
+        profile_hash = embedding_profile.canonical_hash()
     return IngestionSnapshot(
         source_hash=source_hash,
         embedding_model=settings.embedding_model,
@@ -207,4 +228,5 @@ def build_snapshot(  # noqa: PLR0913, PLR0917
         extractor_id=extractor_id or "none",
         extractor_version=extractor_version or "0",
         extractor_options=safe_config(extractor_options or {}),
+        embedding_profile_hash=profile_hash,
     )
