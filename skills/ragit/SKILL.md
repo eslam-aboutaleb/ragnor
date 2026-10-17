@@ -79,7 +79,7 @@ store = get_vector_store(
     table_name="policy_chunks",
     embedding_dim=1536,
     settings=settings,
-    embedding_fn=embedder,   # auto-embed queries
+    embedding_fn=embedder,  # auto-embed queries
 )
 ```
 
@@ -94,13 +94,17 @@ from ragit.chunking import MarkdownSectionChunker, SlidingWindowChunker
 from ragit.ingestion import FileDocumentSource, IngestionPipeline
 
 pipeline = IngestionPipeline(
-    store=store, embedder=embedder, chunker=chunker,
-    session_factory=my_session_factory, settings=settings,
+    store=store,
+    embedder=embedder,
+    chunker=chunker,
+    session_factory=my_session_factory,
+    settings=settings,
 )
 
 # lock_key: PostgreSQL advisory lock serializes concurrent ingestion
 count = await pipeline.run(
-    FileDocumentSource("docs/policy.md"), version_store,
+    FileDocumentSource("docs/policy.md"),
+    version_store,
     lock_key="docs/policy.md",
 )
 ```
@@ -126,7 +130,7 @@ results = await retriever.retrieve(
     "What is the refund policy?",
     n_results=5,
     distance_threshold=0.5,  # defaults to settings.rag_distance_threshold
-    owner_id="user-123",     # any equality filter, applied to both stages
+    owner_id="user-123",  # any equality filter, applied to both stages
 )
 rows = as_dicts(results)
 ```
@@ -146,8 +150,9 @@ processed = await process_pending_jobs(store, processor, limit=10, worker_id="wo
 await reclaim_stale_jobs(store, stale_after_seconds=300.0)
 
 # Programmatic drainer (runs until the stop event) or console entry point
-await drain_forever(store, processor, interval=5.0, batch_size=10,
-                    worker_id="worker-1", stop=stop_event)
+await drain_forever(
+    store, processor, interval=5.0, batch_size=10, worker_id="worker-1", stop=stop_event
+)
 main(store, processor, interval=5.0, batch_size=10, worker_id="worker-1")
 ```
 
@@ -158,15 +163,19 @@ Claiming uses `FOR UPDATE SKIP LOCKED` (concurrent drainers scale horizontally w
 ```python
 from ragit.evaluation import LabeledQuery, RagEvaluationHarness, run_evaluation, EvalConfig
 
-harness = RagEvaluationHarness([
-    LabeledQuery(query="refund policy?", expected_chunk_ids={"chunk_0"}),
-])
+harness = RagEvaluationHarness(
+    [
+        LabeledQuery(query="refund policy?", expected_chunk_ids={"chunk_0"}),
+    ]
+)
 metrics = await harness.evaluate(retrieval_fn)  # async (query: str) -> list[result dicts]
 # metrics: recall_at_k, precision_at_k, mrr, latency, errors
 
 result = await run_evaluation(
     EvalConfig(mode="end-to-end", judge="heuristic", n_results=5),
-    retrieval_fn, dataset, settings=settings,
+    retrieval_fn,
+    dataset,
+    settings=settings,
     answer_fn=answer_fn,  # async (query: str, context: str) -> answer
 )
 ```
@@ -180,6 +189,7 @@ Answer-quality judges: `evaluate_answer_heuristic` (free, deterministic, token-o
 ```python
 from ragit.embeddings import embedding_registry
 from ragit.embeddings.base import EmbeddingFunction
+
 
 @embedding_registry.register("my-provider")
 class MyEmbeddingProvider:
@@ -197,27 +207,56 @@ class MyEmbeddingProvider:
 ```python
 from ragit.stores import HybridVectorStore, vector_store_registry
 
+
 @vector_store_registry.register("my-backend")
 class MyVectorStore(HybridVectorStore):
-    def __init__(self, table_name="documents", id_field="id", embedding_dim=None,
-                 session_factory=None, settings=None, embedding_fn=None):
-        super().__init__(table_name=table_name, id_field=id_field,
-                         embedding_dim=embedding_dim, session_factory=session_factory,
-                         settings=settings, embedding_fn=embedding_fn)
+    def __init__(
+        self,
+        table_name="documents",
+        id_field="id",
+        embedding_dim=None,
+        session_factory=None,
+        settings=None,
+        embedding_fn=None,
+    ):
+        super().__init__(
+            table_name=table_name,
+            id_field=id_field,
+            embedding_dim=embedding_dim,
+            session_factory=session_factory,
+            settings=settings,
+            embedding_fn=embedding_fn,
+        )
 
-    async def vector_search(self, embedding, n_results, threshold,
-                            text_field="text", metadata_fields=None,
-                            session=None, **filters): ...   # always raises on failure
+    async def vector_search(
+        self,
+        embedding,
+        n_results,
+        threshold,
+        text_field="text",
+        metadata_fields=None,
+        session=None,
+        **filters,
+    ): ...  # always raises on failure
 
-    async def keyword_search(self, query, n_results, text_field="text",
-                             metadata_fields=None, session=None, **filters): ...
+    async def keyword_search(
+        self, query, n_results, text_field="text", metadata_fields=None, session=None, **filters
+    ): ...
 
-    async def upsert(self, documents, session=None, text_field="text",
-                     embedding_field="embedding", id_field=None, extra_fields=None): ...
+    async def upsert(
+        self,
+        documents,
+        session=None,
+        text_field="text",
+        embedding_field="embedding",
+        id_field=None,
+        extra_fields=None,
+    ): ...
     async def count(self, session=None, strict=False, **filters) -> int: ...
     async def delete(self, ids=None, filters=None, session=None) -> int: ...
-    async def get(self, ids=None, filters=None, session=None,
-                  text_field="text", metadata_fields=None) -> list[dict]: ...
+    async def get(
+        self, ids=None, filters=None, session=None, text_field="text", metadata_fields=None
+    ) -> list[dict]: ...
 ```
 
 **Path B — keep the legacy fused interface.** If your backend already implements only `hybrid_search`/`count`/`upsert` (a fused hybrid result cannot be decomposed into independent vector and keyword stages), wrap it in `LegacyHybridStoreAdapter` — the adapter delegates the three legacy methods and deliberately claims **no** capabilities (`isinstance(adapter, VectorIndex)` is `False`), so it never pretends to satisfy the Protocols:
@@ -225,10 +264,18 @@ class MyVectorStore(HybridVectorStore):
 ```python
 from ragit.stores import LegacyHybridStoreAdapter, vector_store_registry
 
+
 @vector_store_registry.register("my-legacy-backend")
 class MyLegacyStore(LegacyHybridStoreAdapter):
-    def __init__(self, table_name="documents", id_field="id", embedding_dim=None,
-                 session_factory=None, settings=None, embedding_fn=None):
+    def __init__(
+        self,
+        table_name="documents",
+        id_field="id",
+        embedding_dim=None,
+        session_factory=None,
+        settings=None,
+        embedding_fn=None,
+    ):
         super().__init__(backend=_MyLegacyBackend(...))
 ```
 

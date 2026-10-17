@@ -174,6 +174,13 @@ class PgVectorStore(VectorStore):
             )
         return self._resolved_session_factory
 
+    @property
+    def capabilities(self) -> Any:
+        """Declared store capabilities."""
+        from ragit.retrieval.capabilities import DEFAULT_PGVECTOR_CAPABILITIES  # noqa: PLC0415
+
+        return DEFAULT_PGVECTOR_CAPABILITIES
+
     async def hybrid_search(  # noqa: PLR0913, PLR0915, PLR0917
         self,
         query: str,

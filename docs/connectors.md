@@ -29,10 +29,10 @@ loaded documents. `load()` and `load_all()` collect a snapshot from its beginnin
 from ragit.ingestion import DirectoryConnector
 
 source = DirectoryConnector(
-    './knowledge',
-    include=['**/*.md', '**/*.txt', '**/*.html', '**/*.pdf'],
-    exclude=['private/**'],
-    extensions=['md', 'txt', 'html', 'pdf'],
+    "./knowledge",
+    include=["**/*.md", "**/*.txt", "**/*.html", "**/*.pdf"],
+    exclude=["private/**"],
+    extensions=["md", "txt", "html", "pdf"],
     max_bytes=10 * 1024 * 1024,
     page_size=100,
 )

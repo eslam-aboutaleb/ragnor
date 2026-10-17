@@ -200,19 +200,23 @@ This walkthrough traces one document through the whole subsystem using the offli
 The wiring looks like this:
 
 ```python
-settings = MySettings()            # any object with the RagSettings fields
+settings = MySettings()  # any object with the RagSettings fields
 store = InMemoryVectorStore()
 embedder = get_embedding_function(settings)
 chunker = MarkdownSectionChunker(SlidingWindowChunker())
 pipeline = IngestionPipeline(
-    store=store, embedder=embedder, chunker=chunker,
-    session_factory=null_session_factory, settings=settings,
+    store=store,
+    embedder=embedder,
+    chunker=chunker,
+    session_factory=null_session_factory,
+    settings=settings,
 )
 count = await pipeline.run(FileDocumentSource("docs/policy.md"), version_store)
 
 retriever = HybridRetriever(
     spec=RetrieverSpec(table_name="documents", metadata_fields=["chunk_id", "section"]),
-    settings=settings, session_factory=null_session_factory,
+    settings=settings,
+    session_factory=null_session_factory,
 )
 results = await retriever.retrieve("What is the refund policy?")
 ```
@@ -257,8 +261,8 @@ from ragit.chunking import SlidingWindowChunker, sliding_window_chunk
 chunks = sliding_window_chunk(text, chunk_size=600, overlap=100)  # functional
 
 chunker = SlidingWindowChunker(chunk_size=600, overlap=100)  # protocol form
-chunks = chunker.chunk(text)   # -> list[Chunk] with uuid ids
-chunker.version                # "sliding-window-v1"
+chunks = chunker.chunk(text)  # -> list[Chunk] with uuid ids
+chunker.version  # "sliding-window-v1"
 ```
 
 `chunk_size >= 1` and `0 <= overlap < chunk_size`; otherwise `ValueError`. Empty or whitespace-only text yields `[]`.
@@ -309,7 +313,8 @@ The default provider wraps `litellm.embedding`, so any LiteLLM-supported backend
 from ragit.embeddings import LitellmEmbeddingFunction
 
 embedder = LitellmEmbeddingFunction(
-    api_key="sk-...", model_name="text-embedding-3-small",
+    api_key="sk-...",
+    model_name="text-embedding-3-small",
 )
 vectors = await embedder(["hello", "world"])
 ```
@@ -318,9 +323,10 @@ Two optional keyword arguments remove the wrappers hosts used to write around th
 
 ```python
 embedder = LitellmEmbeddingFunction(
-    api_key="sk-...", model_name="text-embedding-3-small",
-    cache_max_entries=4096,   # bounded LRU; 0 disables caching
-    max_batch_size=512,       # per-call input cap; None sends one call
+    api_key="sk-...",
+    model_name="text-embedding-3-small",
+    cache_max_entries=4096,  # bounded LRU; 0 disables caching
+    max_batch_size=512,  # per-call input cap; None sends one call
 )
 ```
 
@@ -334,7 +340,7 @@ from ragit.embeddings import get_embedding_dimension, register_dimension
 get_embedding_dimension("text-embedding-3-small")  # 1536
 get_embedding_dimension("text-embedding-3-large")  # 3072
 get_embedding_dimension("text-embedding-ada-002")  # 1536
-register_dimension("my-model", 768)                # custom models
+register_dimension("my-model", 768)  # custom models
 ```
 
 ### Getting an embedder
@@ -375,12 +381,12 @@ retriever = HybridRetriever(
 results = await retriever.retrieve(
     "What is the refund policy?",
     n_results=5,
-    distance_threshold=0.5,   # defaults to settings.rag_distance_threshold;
-                              # a distance under the store's metric (see
-                              # Distance metrics) -- metric-relative
-    owner_id="user-123",      # any equality filter, applied to both stages
+    distance_threshold=0.5,  # defaults to settings.rag_distance_threshold;
+    # a distance under the store's metric (see
+    # Distance metrics) -- metric-relative
+    owner_id="user-123",  # any equality filter, applied to both stages
 )
-rows = as_dicts(results)      # back to dicts for legacy consumers
+rows = as_dicts(results)  # back to dicts for legacy consumers
 ```
 
 `RetrieverSpec` validates every SQL identifier at construction time; `embedding_dim` is optional and defaults to the dimension registered for `settings.embedding_model`.
@@ -407,13 +413,18 @@ The split keeps a slow remote embedding request from holding a transaction and a
 
 ```python
 pipeline = IngestionPipeline(
-    store=store, embedder=embedder, chunker=chunker,
-    session_factory=my_session_factory, settings=settings,
+    store=store,
+    embedder=embedder,
+    chunker=chunker,
+    session_factory=my_session_factory,
+    settings=settings,
 )
 
 # With a lock key: the pipeline owns the session, locks it, commits it
 count = await pipeline.run(
-    FileDocumentSource("docs/policy.md"), version_store, lock_key="docs/policy.md",
+    FileDocumentSource("docs/policy.md"),
+    version_store,
+    lock_key="docs/policy.md",
 )
 
 # With a caller-owned session: the pipeline never commits
@@ -499,8 +510,9 @@ processed = await process_pending_jobs(store, processor, limit=10, worker_id="wo
 from ragit.jobs.drainer import drain_forever, main
 
 # Programmatic: runs until the stop event is set
-await drain_forever(store, processor, interval=5.0, batch_size=10,
-                    worker_id="worker-1", stop=stop_event)
+await drain_forever(
+    store, processor, interval=5.0, batch_size=10, worker_id="worker-1", stop=stop_event
+)
 
 # Console entry point: installs logging, handles SIGINT/SIGTERM
 main(store, processor, interval=5.0, batch_size=10, worker_id="worker-1")
@@ -521,9 +533,11 @@ The job table itself is host-owned: `EmbeddingJobStore` (claim, mark, enqueue, r
 ```python
 from ragit.evaluation import LabeledQuery, RagEvaluationHarness
 
-harness = RagEvaluationHarness([
-    LabeledQuery(query="refund policy?", expected_chunk_ids={"chunk_0"}),
-])
+harness = RagEvaluationHarness(
+    [
+        LabeledQuery(query="refund policy?", expected_chunk_ids={"chunk_0"}),
+    ]
+)
 metrics = await harness.evaluate(retrieval_fn)
 # retrieval_fn: async (query: str) -> list[result dicts]
 ```
@@ -546,14 +560,14 @@ The heuristic judge is domain-neutral by default: key facts are numbers, plus an
 ```python
 result = await run_evaluation(
     EvalConfig(mode="end-to-end", judge="heuristic", n_results=5),
-    retrieval_fn,      # async (query: str) -> list[result dicts]
-    dataset,           # list[EvalSample], pre-filtered
+    retrieval_fn,  # async (query: str) -> list[result dicts]
+    dataset,  # list[EvalSample], pre-filtered
     settings=settings,
     answer_fn=answer_fn,  # async (query: str, context: str) -> answer
 )
-print(result.retrieval_metrics)   # recall@K, precision@K, MRR, latency
-print(result.answer_metrics)      # avg faithfulness/relevance/...
-print(result.summary)             # human-readable report
+print(result.retrieval_metrics)  # recall@K, precision@K, MRR, latency
+print(result.answer_metrics)  # avg faithfulness/relevance/...
+print(result.summary)  # human-readable report
 ```
 
 **Modes.** Three modes, each measuring something different:
