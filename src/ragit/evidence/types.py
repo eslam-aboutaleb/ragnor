@@ -341,6 +341,30 @@ class EvidenceItem:
         )
         return f"{self.source_id}@{self.revision}:{self.document_id}{offsets}"
 
+    def to_dict(self) -> dict[str, Any]:
+        """Convert item to a structured dictionary representation."""
+        return {
+            "citation_label": self.citation_label,
+            "durable_id": self.durable_id,
+            "source_id": self.source_id,
+            "document_id": self.document_id,
+            "revision": self.revision,
+            "text": self.text,
+            "title": self.title,
+            "uri": self.uri,
+            "page": self.page,
+            "section": self.section,
+            "line": self.line,
+            "start_offset": self.start_offset,
+            "end_offset": self.end_offset,
+            "retrieval_stage": self.retrieval_stage,
+            "score": self.score,
+            "freshness": self.freshness,
+            "token_count": self.token_count,
+            "is_merged": self.is_merged,
+            "merged_chunk_ids": list(self.merged_chunk_ids),
+        }
+
 
 @dataclass
 class EvidenceBundle:
@@ -439,3 +463,19 @@ class EvidenceBundle:
 
         blocks.append("=== END RETRIEVED EVIDENCE ===")
         return separator.join(blocks)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert evidence bundle to a structured dictionary representation."""
+        return {
+            "items": [item.to_dict() for item in self.items],
+            "status": self.status.value if hasattr(self.status, "value") else str(self.status),
+            "total_tokens": self.total_tokens,
+            "can_answer": self.can_answer,
+            "should_abstain": self.should_abstain,
+            "is_truncated": self.is_truncated,
+            "dropped_duplicates_count": self.dropped_duplicates_count,
+            "merged_spans_count": self.merged_spans_count,
+            "status_detail": self.status_detail,
+            "citations": self.citations(),
+            "formatted_context": self.format_context(),
+        }
