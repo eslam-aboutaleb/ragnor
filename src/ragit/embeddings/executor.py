@@ -44,6 +44,7 @@ from typing import Any
 from ragit.embeddings.base import EmbeddingFunction
 from ragit.embeddings.metrics import EmbeddingMetrics
 from ragit.embeddings.profile import EmbeddingProfile, TaskMode
+from ragit.telemetry.events import EventKind, NullEventSink, TelemetryEvent
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +215,7 @@ class EmbeddingExecutor:
         max_retries: int = 3,
         clock: Callable[[], float] | None = None,
         sleep: Callable[[float], Any] | None = None,
+        event_sink: Any | None = None,
     ) -> None:
         if max_batch_size < 1:
             raise ValueError(f"max_batch_size must be >= 1, got {max_batch_size}")
@@ -234,6 +236,7 @@ class EmbeddingExecutor:
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._clock: Callable[[], float] = clock or time.monotonic
         self._sleep: Callable[[float], Any] = sleep or asyncio.sleep
+        self._event_sink = event_sink if event_sink is not None else NullEventSink()
 
     # ------------------------------------------------------------------
     # Public API
@@ -334,6 +337,19 @@ class EmbeddingExecutor:
                     delay,
                     len(batch),
                 )
+                self._event_sink.emit(
+                    TelemetryEvent(
+                        event_kind=EventKind.RETRY_SCHEDULED,
+                        stage="embedding",
+                        duration_ms=delay * 1000.0,
+                        error=last_exc,
+                        counts={
+                            "attempt": attempt,
+                            "max_retries": self._max_retries,
+                            "batch_size": len(batch),
+                        },
+                    )
+                )
                 await self._sleep(delay)
                 metrics.total_retry_count += 1
 
@@ -343,6 +359,17 @@ class EmbeddingExecutor:
                 metrics.embed_calls += 1
                 metrics.cache_misses += len(batch)
                 metrics.total_input_tokens_estimate += _estimate_tokens(batch)
+                self._event_sink.emit(
+                    TelemetryEvent(
+                        event_kind=EventKind.BATCH_EMBEDDED,
+                        stage="embedding",
+                        counts={
+                            "batch_size": len(batch),
+                            "estimated_tokens": _estimate_tokens(batch),
+                            "dimension": self._profile.dimension,
+                        },
+                    )
+                )
                 return vectors, metrics
 
             except EmbeddingPermanentError:

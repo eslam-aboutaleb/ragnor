@@ -247,3 +247,80 @@ async def enqueue_job(
             provided.
     """
     await store.enqueue(payload, session=session)
+
+
+class InMemoryEmbeddingJobStore:
+    """In-memory reference implementation of EmbeddingJobStore."""
+
+    def __init__(self, jobs: list[JobPayload] | None = None) -> None:
+        self.jobs: list[JobPayload] = list(jobs or [])
+
+    async def enqueue(self, payload: dict[str, Any], session: Any = None) -> None:
+        """Enqueue a new job payload."""
+        job_id = payload.get("idempotency_key") or f"job-{len(self.jobs) + 1}"
+        status = payload.get("status", "pending")
+        job = JobPayload(
+            job_id=job_id,
+            payload=payload,
+            status=status,
+            status_detail=payload.get("status_detail"),
+            retry_count=payload.get("retries", 0),
+            max_attempts=payload.get("max_attempts", MAX_ATTEMPTS),
+            created_at=datetime.now(UTC),
+        )
+        self.jobs.append(job)
+
+    async def claim_pending(self, limit: int, worker_id: str) -> list[JobPayload]:
+        """Claim pending jobs up to limit."""
+        now = datetime.now(UTC)
+        claimable = [
+            j
+            for j in self.jobs
+            if j.status == "pending"
+            or (
+                j.status == "failed"
+                and j.next_retry_at is not None
+                and j.next_retry_at <= now
+                and j.retry_count < j.max_attempts
+            )
+        ]
+        return claimable[:limit]
+
+    async def mark_processing(self, jobs: list[JobPayload], worker_id: str) -> list[JobPayload]:
+        """Mark jobs as processing with lock stamped."""
+        return claim_jobs(jobs, worker_id, datetime.now(UTC))
+
+    async def mark_completed(self, job: JobPayload) -> None:
+        """Mark job as completed."""
+        job.status = "completed"
+        job.completed_at = datetime.now(UTC)
+
+    async def mark_failed(self, job: JobPayload, error: Exception) -> None:
+        """Mark job as failed or dead_letter."""
+        job.retry_count += 1
+        if job.retry_count >= job.max_attempts:
+            job.status = "dead_letter"
+            job.status_detail = str(error)
+        else:
+            job.status = "failed"
+            job.status_detail = str(error)
+
+    async def reclaim_stale(self, stale_after_seconds: float | None = None) -> int:
+        """Reclaim stale jobs."""
+        reclaimed = 0
+        now = datetime.now(UTC)
+        threshold = timedelta(seconds=stale_after_seconds or 300)
+        for j in self.jobs:
+            if j.status == "processing" and j.locked_at and (now - j.locked_at) > threshold:
+                j.status = "pending"
+                j.locked_at = None
+                j.locked_by = None
+                reclaimed += 1
+        return reclaimed
+
+    async def get_status_counts(self) -> dict[str, int]:
+        """Return counts of jobs by status."""
+        counts: dict[str, int] = {}
+        for j in self.jobs:
+            counts[j.status] = counts.get(j.status, 0) + 1
+        return counts

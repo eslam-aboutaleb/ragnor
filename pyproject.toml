@@ -53,8 +53,9 @@ watch = ["watchfiles>=0.24"]
 web = ["httpx>=0.28,<1"]
 object-storage = ["boto3>=1.34"]
 rerank = ["litellm>=1.84"]
+opentelemetry = ["opentelemetry-api>=1.20"]
 all = [
-    "ragit-toolkit[litellm,pgvector,qdrant,chroma,faiss,pdf,directory,watch,web,object-storage,rerank]",
+    "ragit-toolkit[litellm,pgvector,qdrant,chroma,faiss,pdf,directory,watch,web,object-storage,rerank,opentelemetry]",
 ]
 
 [tool.setuptools.packages.find]

@@ -25,6 +25,7 @@ owns its capability dependencies.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -32,6 +33,7 @@ from ragit.config import RagSettings
 from ragit.embeddings import get_embedding_dimension, get_embedding_function
 from ragit.retrieval.types import RetrievalRequest, RetrievalResponse
 from ragit.stores import get_vector_store
+from ragit.telemetry.events import EventKind, NullEventSink, TelemetryEvent
 from ragit.types import SearchResult
 from ragit.validation import validate_identifier
 
@@ -127,12 +129,13 @@ class HybridRetriever:
     dependency at all).
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         spec: RetrieverSpec,
         settings: RagSettings,
         session_factory: SessionProvider | None = None,
         strategy: Any = None,
+        event_sink: Any | None = None,
     ) -> None:
         """Initialize the retriever.
 
@@ -151,11 +154,13 @@ class HybridRetriever:
                 delegates to the strategy. When omitted (the
                 default), the embedder and the hybrid store
                 are built from ``settings`` and ``spec``.
+            event_sink: Optional sink for telemetry events.
         """
         self._spec = spec
         self._settings = settings
         self._session_factory = session_factory
         self._strategy = strategy
+        self._event_sink = event_sink if event_sink is not None else NullEventSink()
         if strategy is None:
             self._embed_fn = get_embedding_function(settings)
             embedding_dim = spec.embedding_dim
@@ -199,6 +204,7 @@ class HybridRetriever:
         Returns:
             Search results sorted by RRF score.
         """
+        t0 = time.perf_counter()
         if isinstance(query, RetrievalRequest):
             req = query
             query_str = req.query
@@ -249,7 +255,22 @@ class HybridRetriever:
                 **filters,
             )
             rows = rows[:n_results]
-        return [_to_search_result(row) for row in rows]
+
+        duration_ms = (time.perf_counter() - t0) * 1000.0
+        results = [_to_search_result(row) for row in rows]
+        self._event_sink.emit(
+            TelemetryEvent(
+                event_kind=EventKind.SEARCH_COMPLETED,
+                stage="retrieval",
+                duration_ms=duration_ms,
+                counts={
+                    "candidate_k": candidate_k if candidate_k is not None else n_results,
+                    "final_k": n_results,
+                    "result_count": len(results),
+                },
+            )
+        )
+        return results
 
     async def retrieve_typed(
         self,

@@ -30,6 +30,7 @@ from ragit.ingestion.sources import RawDocument
 from ragit.stores.base import VectorStore
 from ragit.sync.manifest import ManifestRecord, ManifestStatus, ManifestStore
 from ragit.sync.state import SyncStateStore
+from ragit.telemetry.events import EventKind, EventSink, NullEventSink, TelemetryEvent
 from ragit.validation import validate_embedding
 
 if TYPE_CHECKING:
@@ -155,6 +156,7 @@ class DefaultSyncCoordinator:
         batch_size: int = 32,
         lease_ttl_seconds: float = 30.0,
         activation_mode: ActivationMode = ActivationMode.DOCUMENT,
+        event_sink: EventSink | None = None,
     ) -> None:
         self._manifest_store = manifest_store
         self._state_store = state_store
@@ -167,6 +169,7 @@ class DefaultSyncCoordinator:
         self._batch_size = max(1, batch_size)
         self._lease_ttl_seconds = lease_ttl_seconds
         self._activation_mode = activation_mode
+        self._event_sink: EventSink = event_sink or NullEventSink()
 
     def _chunker_fingerprint(self) -> str:
         name = self._chunker.__class__.__name__
@@ -306,11 +309,37 @@ class DefaultSyncCoordinator:
         report = SyncReport(scope=scope, success=False, fence_epoch=token.epoch)
         retired_chunk_ids: list[str] = []
 
+        self._event_sink.emit(
+            TelemetryEvent(
+                event_kind=EventKind.SCAN_STARTED,
+                stage="sync",
+                source_id=scope,
+                run_id=f"sync-{token.epoch}",
+                counts={"limit": limit or 0},
+            )
+        )
+
         try:
             # Step 2: Scan pages and checkpoint
             documents, authoritative_scan = await self._scan_source(
                 source, cursor=cursor, limit=limit
             )
+            for doc in documents:
+                doc_id = (
+                    getattr(doc, "id", None)
+                    or getattr(doc, "external_id", None)
+                    or getattr(doc, "source_name", "unknown")
+                )
+                self._event_sink.emit(
+                    TelemetryEvent(
+                        event_kind=EventKind.DOCUMENT_LOADED,
+                        stage="sync",
+                        source_id=scope,
+                        document_id=str(doc_id),
+                        run_id=f"sync-{token.epoch}",
+                    )
+                )
+
             if is_authoritative is not None:
                 authoritative_scan = is_authoritative
             report.authoritative = authoritative_scan
@@ -328,6 +357,17 @@ class DefaultSyncCoordinator:
             report.unchanged_count = len(plan.unchanged)
             report.removed_count = len(plan.removed)
             report.metadata_only_count = len(plan.metadata_only)
+
+            for item in plan.unchanged:
+                self._event_sink.emit(
+                    TelemetryEvent(
+                        event_kind=EventKind.DOCUMENT_SKIPPED,
+                        stage="sync",
+                        source_id=scope,
+                        document_id=item.document_id,
+                        run_id=f"sync-{token.epoch}",
+                    )
+                )
 
             # Fast path: unchanged scan performs zero embedding calls
             if not plan.added and not plan.changed and not plan.removed and not plan.metadata_only:
@@ -480,6 +520,17 @@ class DefaultSyncCoordinator:
                         ]
                         await self._vector_store.upsert(activated)
                         report.chunk_count += len(activated)
+
+                self._event_sink.emit(
+                    TelemetryEvent(
+                        event_kind=EventKind.GENERATION_ACTIVATED,
+                        stage="sync",
+                        source_id=scope,
+                        run_id=f"sync-{token.epoch}",
+                        generation=new_gen,
+                        counts={"documents": len(staged_docs_by_id), "chunks": report.chunk_count},
+                    )
+                )
             else:
                 # Document-level activation by default
                 for doc_id, staged_chunks in staged_docs_by_id.items():
@@ -499,6 +550,17 @@ class DefaultSyncCoordinator:
                             await self._vector_store.upsert(activated)
                             retired_chunk_ids.extend(old_chunk_ids)
                             report.chunk_count += len(activated)
+                            self._event_sink.emit(
+                                TelemetryEvent(
+                                    event_kind=EventKind.GENERATION_ACTIVATED,
+                                    stage="sync",
+                                    source_id=scope,
+                                    document_id=doc_id,
+                                    run_id=f"sync-{token.epoch}",
+                                    generation=rec.active_generation,
+                                    counts={"chunks": len(activated)},
+                                )
+                            )
 
             # Step 6: Apply tombstones only within authoritative coverage
             if authoritative_scan and plan.removed:
@@ -530,6 +592,17 @@ class DefaultSyncCoordinator:
             report.success = True
             return report
 
+        except Exception as exc:
+            self._event_sink.emit(
+                TelemetryEvent(
+                    event_kind=EventKind.SYNC_FAILED,
+                    stage="sync",
+                    source_id=scope,
+                    run_id=f"sync-{token.epoch}",
+                    error=exc,
+                )
+            )
+            raise
         finally:
             await self._state_store.release_lease(token)
 
