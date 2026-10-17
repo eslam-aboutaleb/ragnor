@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "ragit-toolkit"
 version = "0.4.0"
 description = "Domain-agnostic RAG toolkit: embeddings, chunking, vector stores, retrieval, ingestion, evaluation, and jobs."
+readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 dependencies = []
