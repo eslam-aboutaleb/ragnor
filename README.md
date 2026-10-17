@@ -4,7 +4,7 @@
 
 **Domain-agnostic RAG toolkit** — chunking, embeddings, vector stores, hybrid retrieval, idempotent ingestion, background jobs, and evaluation.
 
-ragit is a RAG _subsystem_, not an application. It grew out of a production financial-assistant deployment and was generalized so **any** host application — finance, legal, medical, anything — can plug its own domain bindings into the same machinery. It ships no application code: every host-specific dependency (settings, session factory, version tables, job tables, datasets) is injected through protocols and case-insensitive provider registries.
+ragit is a RAG _subsystem_, not an application. so **any** host application can plug its own domain bindings into the same machinery. It ships no application code: every host-specific dependency (settings, session factory, version tables, job tables, datasets) is injected through protocols and case-insensitive provider registries.
 
 ---
 
