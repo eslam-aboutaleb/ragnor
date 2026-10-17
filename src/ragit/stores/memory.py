@@ -26,10 +26,24 @@ import logging
 from typing import Any
 
 from ragit.metrics import cosine_distance
-from ragit.stores._scoring import l2_distance, token_overlap, tokenize
+from ragit.stores._scoring import (
+    build_upsert_record,
+    filter_record_map,
+    format_search_hit,
+    l2_distance,
+    project_metadata,
+    score_records_overlap,
+    validate_upsert_documents,
+)
 from ragit.stores.base import EmbeddingFunction, HybridVectorStore
 from ragit.stores.registry import vector_store_registry
-from ragit.validation import validate_embedding, validate_identifier
+from ragit.validation import (
+    validate_delete_selectors,
+    validate_embedding,
+    validate_identifier,
+    validate_search_identifiers,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -112,16 +126,10 @@ class InMemoryVectorStore(HybridVectorStore):
         return True
 
     def _metadata_projection(
-        self,
-        record: dict[str, Any],
-        metadata_fields: list[str],
+        self, record: dict[str, Any], metadata_fields: list[str]
     ) -> dict[str, Any]:
-        """Project ``metadata_fields`` out of ``record``."""
-        return {
-            field: record[field]
-            for field in metadata_fields
-            if field in record and record[field] is not None
-        }
+        """Project ``metadata_fields`` out of in-memory ``record``."""
+        return project_metadata(record, metadata_fields)
 
     async def vector_search(  # noqa: PLR0913, PLR0917
         self,
@@ -194,13 +202,12 @@ class InMemoryVectorStore(HybridVectorStore):
         for doc_id in vector_ranked:
             record = self._records[doc_id]
             results.append(
-                {
-                    "id": str(doc_id) if doc_id is not None else None,
-                    "document": record.get(text_field),
-                    "metadata": self._metadata_projection(record, metadata_fields),
-                    "distance": float(vector_distances[doc_id]),
-                    "keyword_score": None,
-                }
+                format_search_hit(
+                    doc_id=str(doc_id) if doc_id is not None else None,
+                    document=record.get(text_field),
+                    metadata=self._metadata_projection(record, metadata_fields),
+                    distance=float(vector_distances[doc_id]),
+                )
             )
         return results
 
@@ -238,21 +245,11 @@ class InMemoryVectorStore(HybridVectorStore):
         Raises:
             ValueError: If identifiers are unsafe.
         """
-        validate_identifier(text_field, "text_field")
-        for key in filters:
-            validate_identifier(key, "filter key")
+        validate_search_identifiers(text_field, filters, metadata_fields)
         metadata_fields = metadata_fields or []
-        for field in metadata_fields:
-            validate_identifier(field, "metadata_field")
-
-        query_tokens = set(tokenize(query))
-        keyword_scores: dict[str, float] = {}
-        for doc_id, record in self._records.items():
-            if not self._matches_filters(record, filters):
-                continue
-            score = token_overlap(query_tokens, tokenize(str(record.get(text_field, ""))))
-            if score > 0.0:
-                keyword_scores[doc_id] = score
+        keyword_scores = score_records_overlap(
+            self._records, query, text_field, filters, self._matches_filters
+        )
 
         keyword_ranked = [
             doc_id
@@ -264,13 +261,12 @@ class InMemoryVectorStore(HybridVectorStore):
         for doc_id in keyword_ranked:
             record = self._records[doc_id]
             results.append(
-                {
-                    "id": str(doc_id) if doc_id is not None else None,
-                    "document": record.get(text_field),
-                    "metadata": self._metadata_projection(record, metadata_fields),
-                    "distance": None,
-                    "keyword_score": float(keyword_scores[doc_id]),
-                }
+                format_search_hit(
+                    doc_id=str(doc_id) if doc_id is not None else None,
+                    document=record.get(text_field),
+                    metadata=self._metadata_projection(record, metadata_fields),
+                    keyword_score=float(keyword_scores[doc_id]),
+                )
             )
         return results
 
@@ -327,41 +323,23 @@ class InMemoryVectorStore(HybridVectorStore):
         Raises:
             ValueError: If any field name contains unsafe characters.
         """
-        validate_identifier(text_field, "text_field")
-        validate_identifier(embedding_field, "embedding_field")
-        if id_field is None:
-            id_field = self.id_field
-        validate_identifier(id_field, "id_field")
-        if extra_fields:
-            for key in extra_fields:
-                validate_identifier(key, "extra_field")
-
+        id_field = validate_upsert_documents(
+            documents,
+            text_field,
+            embedding_field,
+            id_field,
+            self.id_field,
+            extra_fields,
+            self.embedding_dim,
+        )
         if not documents:
             return
 
         for doc in documents:
-            for key in doc.get("metadata", {}):
-                validate_identifier(key, "metadata key")
-
-        for doc in documents:
-            if self.embedding_dim is not None:
-                validate_embedding(
-                    doc["embedding"],
-                    self.embedding_dim,
-                    label="document embedding",
-                )
-
-        for doc in documents:
             doc_id = doc.get("id")
-            record: dict[str, Any] = {
-                id_field: doc_id,
-                text_field: doc[text_field],
-            }
-            record.update(doc.get("metadata", {}))
-            if extra_fields:
-                record.update(extra_fields)
-            self._records[doc_id] = record
+            self._records[doc_id] = build_upsert_record(doc, id_field, text_field, extra_fields)
             self._embeddings[doc_id] = doc[embedding_field]
+
         logger.info("Upserted %d documents to in-memory store %s.", len(documents), self.table_name)
 
     async def delete(
@@ -391,15 +369,7 @@ class InMemoryVectorStore(HybridVectorStore):
             ValueError: If no selector is supplied, ``ids`` is
                 empty, or a filter key is unsafe.
         """
-        if ids is None and filters is None:
-            raise ValueError("delete requires at least one of ids or filters")
-        if ids is not None and len(ids) == 0:
-            raise ValueError(
-                "ids must not be empty; an empty id list never means delete everything"
-            )
-        if filters is not None:
-            for key in filters:
-                validate_identifier(key, "filter key")
+        validate_delete_selectors(ids, filters)
 
         deleted = 0
         for doc_id in list(self._records):
@@ -445,25 +415,11 @@ class InMemoryVectorStore(HybridVectorStore):
         Raises:
             ValueError: If any identifier is unsafe.
         """
-        validate_identifier(text_field, "text_field")
-        metadata_fields = metadata_fields or []
-        for field in metadata_fields:
-            validate_identifier(field, "metadata_field")
-        if filters is not None:
-            for key in filters:
-                validate_identifier(key, "filter key")
-
-        results = []
-        for doc_id, record in self._records.items():
-            if ids is not None and doc_id not in set(ids):
-                continue
-            if filters is not None and not self._matches_filters(record, filters):
-                continue
-            results.append(
-                {
-                    "id": str(doc_id) if doc_id is not None else None,
-                    "document": record.get(text_field),
-                    "metadata": self._metadata_projection(record, metadata_fields),
-                }
-            )
-        return results
+        validate_search_identifiers(text_field, filters, metadata_fields)
+        return filter_record_map(
+            self._records,
+            ids=ids,
+            filters=filters,
+            text_field=text_field,
+            metadata_fields=metadata_fields,
+        )

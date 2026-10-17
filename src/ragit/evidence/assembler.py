@@ -113,6 +113,33 @@ class EvidenceAssembler:
 
         return deduped, dropped
 
+    @staticmethod
+    def _create_merged_hit(
+        current: SearchHit,
+        nxt: SearchHit,
+        combined_text: str,
+        end_offset: int | None = None,
+    ) -> SearchHit:
+        """Construct a merged SearchHit from two overlapping chunks."""
+        return SearchHit(
+            id=current.id,
+            document=combined_text,
+            metadata=dict(current.metadata),
+            score=max(current.score or 0.0, nxt.score or 0.0),
+            stage=current.stage or nxt.stage,
+            source_id=current.source_id,
+            document_id=current.document_id,
+            revision=current.revision,
+            title=current.title or nxt.title,
+            uri=current.uri or nxt.uri,
+            page=current.page or nxt.page,
+            section=current.section or nxt.section,
+            line=current.line or nxt.line,
+            start_offset=current.start_offset,
+            end_offset=end_offset if end_offset is not None else current.end_offset,
+            freshness=current.freshness or nxt.freshness,
+        )
+
     def _merge_spans(self, hits: list[SearchHit]) -> tuple[list[SearchHit], int]:
         """Merge overlapping or contiguous same-source spans when safe."""
         if not self.merge_overlapping_spans or len(hits) < 2:
@@ -164,23 +191,8 @@ class EvidenceAssembler:
                             new_end = current.end_offset
 
                         merged_group_chunks.append(nxt.id)
-                        current = SearchHit(
-                            id=current.id,
-                            document=combined_text,
-                            metadata=dict(current.metadata),
-                            score=max(current.score or 0.0, nxt.score or 0.0),
-                            stage=current.stage or nxt.stage,
-                            source_id=current.source_id,
-                            document_id=current.document_id,
-                            revision=current.revision,
-                            title=current.title or nxt.title,
-                            uri=current.uri or nxt.uri,
-                            page=current.page or nxt.page,
-                            section=current.section or nxt.section,
-                            line=current.line or nxt.line,
-                            start_offset=current.start_offset,
-                            end_offset=new_end,
-                            freshness=current.freshness or nxt.freshness,
+                        current = self._create_merged_hit(
+                            current, nxt, combined_text, end_offset=new_end
                         )
                         current.metadata["merged_chunk_ids"] = list(merged_group_chunks)
                     else:
@@ -197,18 +209,7 @@ class EvidenceAssembler:
                         if current.document.endswith(nxt.document[:overlap_len]):
                             combined_text = current.document + nxt.document[overlap_len:]
                             total_merged_count += 1
-                            current = SearchHit(
-                                id=current.id,
-                                document=combined_text,
-                                metadata=dict(current.metadata),
-                                score=max(current.score or 0.0, nxt.score or 0.0),
-                                stage=current.stage or nxt.stage,
-                                source_id=current.source_id,
-                                document_id=current.document_id,
-                                revision=current.revision,
-                                title=current.title or nxt.title,
-                                uri=current.uri or nxt.uri,
-                            )
+                            current = self._create_merged_hit(current, nxt, combined_text)
                             merged = True
                             break
                     if not merged:

@@ -60,13 +60,23 @@ from typing import Any
 import numpy as np
 
 from ragit.metrics import normalize
-from ragit.stores._scoring import token_overlap, tokenize
-from ragit.stores.base import (
-    EmbeddingFunction,
-    HybridVectorStore,
+from ragit.stores._scoring import (
+    build_upsert_record,
+    filter_record_map,
+    format_search_hit,
+    project_metadata,
+    score_records_overlap,
+    validate_upsert_documents,
 )
+from ragit.stores.base import EmbeddingFunction, HybridVectorStore
 from ragit.stores.registry import vector_store_registry
-from ragit.validation import validate_embedding, validate_identifier
+from ragit.validation import (
+    validate_delete_selectors,
+    validate_embedding,
+    validate_identifier,
+    validate_search_identifiers,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -174,16 +184,10 @@ class FaissStore(HybridVectorStore):
         return all(record.get(key) == value for key, value in filters.items())
 
     def _metadata_projection(
-        self,
-        record: dict[str, Any],
-        metadata_fields: list[str],
+        self, record: dict[str, Any], metadata_fields: list[str]
     ) -> dict[str, Any]:
-        """Project ``metadata_fields`` out of ``record``."""
-        return {
-            field: record[field]
-            for field in metadata_fields
-            if field in record and record[field] is not None
-        }
+        """Project ``metadata_fields`` out of faiss ``record``."""
+        return project_metadata(record, metadata_fields)
 
     async def vector_search(  # noqa: PLR0913, PLR0917
         self,
@@ -280,13 +284,12 @@ class FaissStore(HybridVectorStore):
         for doc_id in vector_ranked:
             record = self._records.get(doc_id, {})
             results.append(
-                {
-                    "id": doc_id,
-                    "document": record.get(text_field),
-                    "metadata": self._metadata_projection(record, metadata_fields),
-                    "distance": distances[doc_id],
-                    "keyword_score": None,
-                }
+                format_search_hit(
+                    doc_id=doc_id,
+                    document=record.get(text_field),
+                    metadata=self._metadata_projection(record, metadata_fields),
+                    distance=distances[doc_id],
+                )
             )
         return results
 
@@ -330,21 +333,11 @@ class FaissStore(HybridVectorStore):
         Raises:
             ValueError: If identifiers are unsafe.
         """
-        validate_identifier(text_field, "text_field")
-        for key in filters:
-            validate_identifier(key, "filter key")
+        validate_search_identifiers(text_field, filters, metadata_fields)
         metadata_fields = metadata_fields or []
-        for field in metadata_fields:
-            validate_identifier(field, "metadata_field")
-
-        query_tokens = set(tokenize(query))
-        keyword_scores: dict[str, float] = {}
-        for doc_id, record in self._records.items():
-            if not self._matches_filters(record, filters):
-                continue
-            score = token_overlap(query_tokens, tokenize(str(record.get(text_field, ""))))
-            if score > 0.0:
-                keyword_scores[doc_id] = score
+        keyword_scores = score_records_overlap(
+            self._records, query, text_field, filters, self._matches_filters
+        )
 
         keyword_ranked = sorted(
             keyword_scores, key=lambda doc_id: (-keyword_scores[doc_id], doc_id)
@@ -354,13 +347,12 @@ class FaissStore(HybridVectorStore):
         for doc_id in keyword_ranked:
             record = self._records.get(doc_id, {})
             results.append(
-                {
-                    "id": doc_id,
-                    "document": record.get(text_field),
-                    "metadata": self._metadata_projection(record, metadata_fields),
-                    "distance": None,
-                    "keyword_score": keyword_scores[doc_id],
-                }
+                format_search_hit(
+                    doc_id=doc_id,
+                    document=record.get(text_field),
+                    metadata=self._metadata_projection(record, metadata_fields),
+                    keyword_score=keyword_scores[doc_id],
+                )
             )
         return results
 
@@ -419,15 +411,7 @@ class FaissStore(HybridVectorStore):
                 empty, or a filter key is unsafe.
             Exception: Re-raises FAISS errors.
         """
-        if ids is None and filters is None:
-            raise ValueError("delete requires at least one of ids or filters")
-        if ids is not None and len(ids) == 0:
-            raise ValueError(
-                "ids must not be empty; an empty id list never means delete everything"
-            )
-        if filters is not None:
-            for key in filters:
-                validate_identifier(key, "filter key")
+        validate_delete_selectors(ids, filters)
 
         to_delete = [
             doc_id
@@ -480,34 +464,18 @@ class FaissStore(HybridVectorStore):
                 result metadata dict.
 
         Returns:
-            list[dict]: ``id``/``document``/``metadata`` dicts
-            (score keys are meaningless for direct fetches).
-
+            list[dict]: Matched document records with projected metadata.
         Raises:
-            ValueError: If any identifier is unsafe.
+            ValueError: If an identifier validation fails.
         """
-        validate_identifier(text_field, "text_field")
-        metadata_fields = metadata_fields or []
-        for field in metadata_fields:
-            validate_identifier(field, "metadata_field")
-        if filters is not None:
-            for key in filters:
-                validate_identifier(key, "filter key")
-
-        results = []
-        for doc_id, record in self._records.items():
-            if ids is not None and doc_id not in set(ids):
-                continue
-            if filters is not None and not self._matches_filters(record, filters):
-                continue
-            results.append(
-                {
-                    "id": doc_id,
-                    "document": record.get(text_field),
-                    "metadata": self._metadata_projection(record, metadata_fields),
-                }
-            )
-        return results
+        validate_search_identifiers(text_field, filters, metadata_fields)
+        return filter_record_map(
+            self._records,
+            ids=ids,
+            filters=filters,
+            text_field=text_field,
+            metadata_fields=metadata_fields,
+        )
 
     async def upsert(  # noqa: PLR0913, PLR0917
         self,
@@ -549,26 +517,17 @@ class FaissStore(HybridVectorStore):
             ValueError: If any field name contains unsafe
                 characters.
         """
-        validate_identifier(text_field, "text_field")
-        validate_identifier(embedding_field, "embedding_field")
-        if id_field is None:
-            id_field = self.id_field
-        validate_identifier(id_field, "id_field")
-        if extra_fields:
-            for key in extra_fields:
-                validate_identifier(key, "extra_field")
-
+        id_field = validate_upsert_documents(
+            documents,
+            text_field,
+            embedding_field,
+            id_field,
+            self.id_field,
+            extra_fields,
+            self.embedding_dim,
+        )
         if not documents:
             return
-
-        for doc in documents:
-            validate_embedding(
-                doc["embedding"],
-                self.embedding_dim,
-                label="document embedding",
-            )
-            for key in doc.get("metadata", {}):
-                validate_identifier(key, "metadata key")
 
         index = self._resolve_index()
 
@@ -584,14 +543,7 @@ class FaissStore(HybridVectorStore):
 
         for doc in documents:
             doc_id = doc.get("id")
-            record: dict[str, Any] = {
-                id_field: doc_id,
-                text_field: doc[text_field],
-            }
-            record.update(doc.get("metadata", {}))
-            if extra_fields:
-                record.update(extra_fields)
-            self._records[doc_id] = record
+            self._records[doc_id] = build_upsert_record(doc, id_field, text_field, extra_fields)
             self._embeddings[doc_id] = doc[embedding_field]
 
         stored_vectors = [doc[embedding_field] for doc in documents]

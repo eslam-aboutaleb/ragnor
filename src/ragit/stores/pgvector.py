@@ -42,10 +42,18 @@ from typing import TYPE_CHECKING, Any
 from ragit.config import RagSettings
 from ragit.db.sql_factory import SQLAlchemyFactory
 from ragit.metrics import DistanceMetric, resolve_distance_metric
+from ragit.stores._scoring import format_search_hit, project_metadata
 from ragit.stores.base import EmbeddingFunction, VectorStore
 from ragit.stores.registry import vector_store_registry
 from ragit.types import RetrievalError
-from ragit.validation import validate_embedding, validate_identifier
+from ragit.validation import (
+    validate_delete_selectors,
+    validate_embedding,
+    validate_identifier,
+    validate_search_identifiers,
+    validate_upsert_identifiers,
+)
+
 
 if TYPE_CHECKING:
     from ragit.db.session import SessionProvider
@@ -173,6 +181,40 @@ class PgVectorStore(VectorStore):
                 self._settings.database_url
             )
         return self._resolved_session_factory
+
+    async def _execute_search_query(  # noqa: PLR0913
+        self,
+        session: Any,
+        stmt: str,
+        params: dict[str, Any],
+        text_field: str,
+        metadata_fields: list[str],
+        *,
+        distance_field: str | None = None,
+        keyword_field: str | None = None,
+    ) -> list[dict[str, Any]]:
+        owns_session = session is None
+        if owns_session:
+            session_factory = self._resolve_session_factory()
+            async with session_factory() as owned_session:
+                rows = await self._sql.fetch_all(owned_session, stmt, params)
+        else:
+            rows = await self._sql.fetch_all(session, stmt, params)
+
+        results = []
+        for row in rows:
+            dist = row[distance_field] if distance_field and distance_field in row else None
+            kw = row[keyword_field] if keyword_field and keyword_field in row else None
+            results.append(
+                format_search_hit(
+                    doc_id=str(row[self.id_field]),
+                    document=row[text_field],
+                    metadata=project_metadata(row, metadata_fields),
+                    distance=dist,
+                    keyword_score=kw,
+                )
+            )
+        return results
 
     @property
     def capabilities(self) -> Any:
@@ -481,14 +523,11 @@ class PgVectorStore(VectorStore):
                 embedding has the wrong dimension.
             Exception: Re-raises database errors.
         """
-        validate_identifier(text_field, "text_field")
-        for key in filters:
-            validate_identifier(key, "filter key")
+        validate_search_identifiers(text_field, filters, metadata_fields)
         metadata_fields = metadata_fields or []
-        for field in metadata_fields:
-            validate_identifier(field, "metadata_field")
         if n_results < 1:
             raise ValueError(f"n_results must be a positive integer; got {n_results}")
+
         validate_embedding(embedding, self.embedding_dim, label="query embedding")
 
         # The distance operator comes from the internal metric map only,
@@ -522,31 +561,14 @@ class PgVectorStore(VectorStore):
             LIMIT :n_results
         """
 
-        owns_session = session is None
-        if owns_session:
-            session_factory = self._resolve_session_factory()
-            async with session_factory() as owned_session:
-                rows = await self._sql.fetch_all(owned_session, stmt, params)
-        else:
-            rows = await self._sql.fetch_all(session, stmt, params)
-
-        results = []
-        for row in rows:
-            metadata = {
-                field: row[field]
-                for field in metadata_fields
-                if field in row and row[field] is not None
-            }
-            results.append(
-                {
-                    "id": str(row[self.id_field]),
-                    "document": row[text_field],
-                    "metadata": metadata,
-                    "distance": row["distance"],
-                    "keyword_score": None,
-                }
-            )
-        return results
+        return await self._execute_search_query(
+            session=session,
+            stmt=stmt,
+            params=params,
+            text_field=text_field,
+            metadata_fields=metadata_fields,
+            distance_field="distance",
+        )
 
     async def keyword_search(  # noqa: PLR0913, PLR0917
         self,
@@ -567,15 +589,11 @@ class PgVectorStore(VectorStore):
         Args:
             query: Natural language search query.
             n_results: Maximum number of results to return.
-            text_field: Name of the column containing the
-                document text.
-            metadata_fields: Additional column names to
-                include in the result metadata dict.
-            session: Optional external session. When
-                supplied, the caller owns the transaction
-                (commit/rollback). When omitted, the store
-                opens its own session.
-            **filters: Additional filters (e.g., tenant_id).
+            text_field: Column storing the text matching plainto_tsquery.
+            metadata_fields: Extra metadata column names for the output dict.
+            session: Optional caller transaction session; otherwise a new
+                session is acquired for the duration of this read.
+            **filters: Bound equality filters for row selection.
 
         Returns:
             list[dict]: Result dicts ordered by
@@ -589,12 +607,8 @@ class PgVectorStore(VectorStore):
                 ``n_results`` is not positive.
             Exception: Re-raises database errors.
         """
-        validate_identifier(text_field, "text_field")
-        for key in filters:
-            validate_identifier(key, "filter key")
+        validate_search_identifiers(text_field, filters, metadata_fields)
         metadata_fields = metadata_fields or []
-        for field in metadata_fields:
-            validate_identifier(field, "metadata_field")
         if n_results < 1:
             raise ValueError(f"n_results must be a positive integer; got {n_results}")
 
@@ -626,31 +640,14 @@ class PgVectorStore(VectorStore):
             LIMIT :n_results
         """
 
-        owns_session = session is None
-        if owns_session:
-            session_factory = self._resolve_session_factory()
-            async with session_factory() as owned_session:
-                rows = await self._sql.fetch_all(owned_session, stmt, params)
-        else:
-            rows = await self._sql.fetch_all(session, stmt, params)
-
-        results = []
-        for row in rows:
-            metadata = {
-                field: row[field]
-                for field in metadata_fields
-                if field in row and row[field] is not None
-            }
-            results.append(
-                {
-                    "id": str(row[self.id_field]),
-                    "document": row[text_field],
-                    "metadata": metadata,
-                    "distance": None,
-                    "keyword_score": row["score"],
-                }
-            )
-        return results
+        return await self._execute_search_query(
+            session=session,
+            stmt=stmt,
+            params=params,
+            text_field=text_field,
+            metadata_fields=metadata_fields,
+            keyword_field="score",
+        )
 
     async def delete(
         self,
@@ -684,15 +681,7 @@ class PgVectorStore(VectorStore):
                 is empty, or a filter key is unsafe.
             Exception: Re-raises database errors.
         """
-        if ids is None and filters is None:
-            raise ValueError("delete requires at least one of ids or filters")
-        if ids is not None and len(ids) == 0:
-            raise ValueError(
-                "ids must not be empty; an empty id list never means delete everything"
-            )
-        if filters is not None:
-            for key in filters:
-                validate_identifier(key, "filter key")
+        validate_delete_selectors(ids, filters)
 
         conditions = []
         params: dict[str, Any] = {}
@@ -759,13 +748,8 @@ class PgVectorStore(VectorStore):
             ValueError: If any identifier is unsafe.
             Exception: Re-raises database errors.
         """
-        validate_identifier(text_field, "text_field")
+        validate_search_identifiers(text_field, filters, metadata_fields)
         metadata_fields = metadata_fields or []
-        for field in metadata_fields:
-            validate_identifier(field, "metadata_field")
-        if filters is not None:
-            for key in filters:
-                validate_identifier(key, "filter key")
 
         select_columns = [self.id_field, text_field, *metadata_fields]
         select_sql = ", ".join(select_columns)
@@ -795,21 +779,14 @@ class PgVectorStore(VectorStore):
         else:
             rows = await self._sql.fetch_all(session, stmt, params)
 
-        results = []
-        for row in rows:
-            metadata = {
-                field: row[field]
-                for field in metadata_fields
-                if field in row and row[field] is not None
+        return [
+            {
+                "id": str(row[self.id_field]),
+                "document": row[text_field],
+                "metadata": project_metadata(row, metadata_fields),
             }
-            results.append(
-                {
-                    "id": str(row[self.id_field]),
-                    "document": row[text_field],
-                    "metadata": metadata,
-                }
-            )
-        return results
+            for row in rows
+        ]
 
     async def count(
         self,
@@ -964,14 +941,9 @@ class PgVectorStore(VectorStore):
             ValueError: If any column name contains unsafe characters.
             Exception: Re-raises database errors after logging.
         """
-        validate_identifier(text_field, "text_field")
-        validate_identifier(embedding_field, "embedding_field")
-        if id_field is None:
-            id_field = self.id_field
-        validate_identifier(id_field, "id_field")
-        if extra_fields:
-            for key in extra_fields:
-                validate_identifier(key, "extra_field")
+        id_field = validate_upsert_identifiers(
+            text_field, embedding_field, id_field, self.id_field, extra_fields
+        )
 
         if not documents:
             return

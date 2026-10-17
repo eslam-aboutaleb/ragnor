@@ -115,6 +115,7 @@ async def _run_builtin_stdio_loop(
         if not line_str:
             continue
 
+        req_id = None
         try:
             request = json.loads(line_str)
             req_id = request.get("id")

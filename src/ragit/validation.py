@@ -8,8 +8,10 @@ finite values before they reach the database.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sequence
 import math
 import re
+from typing import Any
 
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -56,3 +58,50 @@ def validate_embedding(
                 raise ValueError(f"{label}[{i}] is not finite: {value!r}")
         except TypeError as exc:
             raise TypeError(f"{label}[{i}] is not a number: {value!r}") from exc
+
+
+def validate_upsert_identifiers(
+    text_field: str,
+    embedding_field: str,
+    id_field: str | None = None,
+    default_id_field: str = "id",
+    extra_fields: Iterable[str] | None = None,
+) -> str:
+    """Validate identifiers used in upsert operations and return the resolved id field."""
+    validate_identifier(text_field, "text_field")
+    validate_identifier(embedding_field, "embedding_field")
+    resolved_id = id_field if id_field is not None else default_id_field
+    validate_identifier(resolved_id, "id_field")
+    if extra_fields:
+        for key in extra_fields:
+            validate_identifier(key, "extra_field")
+    return resolved_id
+
+
+def validate_search_identifiers(
+    text_field: str,
+    filters: Iterable[str] | None = None,
+    metadata_fields: Iterable[str] | None = None,
+) -> None:
+    """Validate identifiers used in search operations."""
+    validate_identifier(text_field, "text_field")
+    if filters:
+        for key in filters:
+            validate_identifier(key, "filter key")
+    if metadata_fields:
+        for field in metadata_fields:
+            validate_identifier(field, "metadata_field")
+
+
+def validate_delete_selectors(
+    ids: Sequence[Any] | None,
+    filters: Mapping[str, Any] | None,
+) -> None:
+    """Validate deletion selectors (ids and/or filters)."""
+    if ids is None and filters is None:
+        raise ValueError("delete requires at least one of ids or filters")
+    if ids is not None and len(ids) == 0:
+        raise ValueError("ids must not be empty; an empty id list never means delete everything")
+    if filters is not None:
+        for key in filters:
+            validate_identifier(key, "filter key")

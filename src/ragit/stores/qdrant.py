@@ -48,16 +48,25 @@ import uuid
 from typing import Any
 
 from ragit.config import RagSettings
-from ragit.stores._scoring import l2_distance, token_overlap, tokenize
-from ragit.stores.base import (
-    EmbeddingFunction,
-    HybridVectorStore,
+from ragit.stores._scoring import (
+    format_search_hit,
+    handle_count_error,
+    l2_distance,
+    project_metadata,
+    token_overlap,
+    tokenize,
+    validate_upsert_documents,
 )
+from ragit.stores.base import EmbeddingFunction, HybridVectorStore
 from ragit.stores.registry import vector_store_registry
-from ragit.types import RetrievalError
-from ragit.validation import validate_embedding, validate_identifier
+from ragit.validation import (
+    validate_delete_selectors,
+    validate_embedding,
+    validate_identifier,
+)
 
 logger = logging.getLogger(__name__)
+
 
 _SCROLL_BATCH = 100
 _ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "ragit-qdrant-point-ids")
@@ -229,6 +238,22 @@ class QdrantStore(HybridVectorStore):
             )
         self._collection_ready = True
 
+    async def _scroll_all_points(self, client: Any, query_filter: Any) -> list[Any]:
+        all_points: list[Any] = []
+        offset: Any = None
+        while True:
+            points, offset = await client.scroll(
+                collection_name=self.table_name,
+                scroll_filter=query_filter,
+                limit=_SCROLL_BATCH,
+                offset=offset,
+                with_payload=True,
+            )
+            all_points.extend(points)
+            if offset is None:
+                break
+        return all_points
+
     async def _keyword_stage(
         self,
         client: Any,
@@ -246,24 +271,14 @@ class QdrantStore(HybridVectorStore):
         keyword_scores: dict[str, float] = {}
         payloads: dict[str, dict[str, Any]] = {}
         query_tokens = set(tokenize(query))
-        offset: Any = None
-        while True:
-            points, offset = await client.scroll(
-                collection_name=self.table_name,
-                scroll_filter=query_filter,
-                limit=_SCROLL_BATCH,
-                offset=offset,
-                with_payload=True,
-            )
-            for point in points:
-                payload = dict(point.payload or {})
-                doc_id = str(payload.get(self.id_field, point.id))
-                payloads.setdefault(doc_id, payload)
-                score = token_overlap(query_tokens, tokenize(str(payload.get(text_field, ""))))
-                if score > 0.0:
-                    keyword_scores[doc_id] = score
-            if offset is None:
-                break
+        points = await self._scroll_all_points(client, query_filter)
+        for point in points:
+            payload = dict(point.payload or {})
+            doc_id = str(payload.get(self.id_field, point.id))
+            payloads.setdefault(doc_id, payload)
+            score = token_overlap(query_tokens, tokenize(str(payload.get(text_field, ""))))
+            if score > 0.0:
+                keyword_scores[doc_id] = score
         return keyword_scores, payloads
 
     async def vector_search(  # noqa: PLR0913, PLR0917
@@ -341,19 +356,13 @@ class QdrantStore(HybridVectorStore):
         results = []
         for doc_id in vector_ranked:
             payload = payloads[doc_id]
-            metadata = {
-                field: payload[field]
-                for field in metadata_fields
-                if field in payload and payload[field] is not None
-            }
             results.append(
-                {
-                    "id": doc_id,
-                    "document": payload.get(text_field),
-                    "metadata": metadata,
-                    "distance": distances[doc_id],
-                    "keyword_score": None,
-                }
+                format_search_hit(
+                    doc_id=doc_id,
+                    document=payload.get(text_field),
+                    metadata=project_metadata(payload, metadata_fields),
+                    distance=distances[doc_id],
+                )
             )
         return results
 
@@ -417,19 +426,13 @@ class QdrantStore(HybridVectorStore):
         results = []
         for doc_id in keyword_ranked:
             payload = payloads.get(doc_id, {})
-            metadata = {
-                field: payload[field]
-                for field in metadata_fields
-                if field in payload and payload[field] is not None
-            }
             results.append(
-                {
-                    "id": doc_id,
-                    "document": payload.get(text_field),
-                    "metadata": metadata,
-                    "distance": None,
-                    "keyword_score": keyword_scores[doc_id],
-                }
+                format_search_hit(
+                    doc_id=doc_id,
+                    document=payload.get(text_field),
+                    metadata=project_metadata(payload, metadata_fields),
+                    keyword_score=keyword_scores[doc_id],
+                )
             )
         return results
 
@@ -470,10 +473,7 @@ class QdrantStore(HybridVectorStore):
             )
             return int(response.count)
         except Exception as exc:
-            logger.error("Count failed on %s: %s", self.table_name, exc)
-            if strict:
-                raise RetrievalError(f"Count failed on {self.table_name}: {exc}") from exc
-            return 0
+            return handle_count_error(self.table_name, exc, strict, logger)
 
     async def delete(
         self,
@@ -505,15 +505,7 @@ class QdrantStore(HybridVectorStore):
                 empty, or a filter key is unsafe.
             Exception: Re-raises Qdrant errors.
         """
-        if ids is None and filters is None:
-            raise ValueError("delete requires at least one of ids or filters")
-        if ids is not None and len(ids) == 0:
-            raise ValueError(
-                "ids must not be empty; an empty id list never means delete everything"
-            )
-        if filters is not None:
-            for key in filters:
-                validate_identifier(key, "filter key")
+        validate_delete_selectors(ids, filters)
 
         await self._ensure_collection()
         client = self._resolve_client()
@@ -592,33 +584,18 @@ class QdrantStore(HybridVectorStore):
         client = self._resolve_client()
         query_filter = _selector_filter(ids, filters, self.id_field)
 
+        points = await self._scroll_all_points(client, query_filter)
         results: list[dict[str, Any]] = []
-        offset: Any = None
-        while True:
-            points, offset = await client.scroll(
-                collection_name=self.table_name,
-                scroll_filter=query_filter,
-                limit=_SCROLL_BATCH,
-                offset=offset,
-                with_payload=True,
-            )
-            for point in points:
-                payload = dict(point.payload or {})
-                doc_id = str(payload.get(self.id_field, point.id))
-                metadata = {
-                    field: payload[field]
-                    for field in metadata_fields
-                    if field in payload and payload[field] is not None
+        for point in points:
+            payload = dict(point.payload or {})
+            doc_id = str(payload.get(self.id_field, point.id))
+            results.append(
+                {
+                    "id": doc_id,
+                    "document": payload.get(text_field),
+                    "metadata": project_metadata(payload, metadata_fields),
                 }
-                results.append(
-                    {
-                        "id": doc_id,
-                        "document": payload.get(text_field),
-                        "metadata": metadata,
-                    }
-                )
-            if offset is None:
-                break
+            )
         return results
 
     async def upsert(  # noqa: PLR0913, PLR0917
@@ -651,24 +628,17 @@ class QdrantStore(HybridVectorStore):
                 characters.
             Exception: Re-raises Qdrant errors after logging.
         """
-        validate_identifier(text_field, "text_field")
-        validate_identifier(embedding_field, "embedding_field")
-        if id_field is None:
-            id_field = self.id_field
-        validate_identifier(id_field, "id_field")
-        if extra_fields:
-            for key in extra_fields:
-                validate_identifier(key, "extra_field")
-
+        id_field = validate_upsert_documents(
+            documents,
+            text_field,
+            embedding_field,
+            id_field,
+            self.id_field,
+            extra_fields,
+            self.embedding_dim,
+        )
         if not documents:
             return
-
-        for doc in documents:
-            validate_embedding(
-                doc["embedding"],
-                self.embedding_dim,
-                label="document embedding",
-            )
 
         await self._ensure_collection()
         client = self._resolve_client()

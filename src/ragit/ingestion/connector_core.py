@@ -341,3 +341,24 @@ def extract_documents(  # noqa: PLR0913, PLR0917
         result.complete = False
         result.status = SourceStatus.ERROR
     return result
+
+
+def parse_checkpoint_since(checkpoint: Any) -> float | None:
+    """Parse a checkpoint into an epoch timestamp float, or None."""
+    if checkpoint is None:
+        return None
+    if isinstance(checkpoint, (int, float)):
+        return float(checkpoint)
+    if isinstance(checkpoint, str):
+        try:
+            return float(checkpoint)
+        except ValueError:
+            from datetime import datetime  # noqa: PLC0415
+
+            try:
+                return datetime.fromisoformat(checkpoint).timestamp()
+            except (ValueError, TypeError) as exc:
+                raise ValueError(f"Invalid checkpoint: {checkpoint}") from exc
+    if isinstance(checkpoint, dict):
+        return float(checkpoint.get("mtime", checkpoint.get("since", 0)))
+    raise ValueError(f"Invalid checkpoint: {checkpoint}")

@@ -24,55 +24,17 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 from dataclasses import dataclass, field
 from typing import Any
 
 from ragit.chunking.base import Chunker
 from ragit.config import RagSettings
 from ragit.embeddings import get_embedding_dimension
+from ragit.embeddings._safe_config import safe_config
 from ragit.ingestion.sources import RawDocument
 
 RETRIEVAL_SCHEMA_VERSION = "v1"
 """Version of the retrieval schema the snapshots carry."""
-
-
-def safe_config(value: Any) -> Any:
-    """Copy JSON configuration only, omitting secrets and arbitrary objects.
-
-    Never use repr/default=str: clients and credentials may expose secrets there.
-    """
-    if value is None or isinstance(value, (str, bool, int)):
-        return value
-    if isinstance(value, float):
-        return value if math.isfinite(value) else None
-    if isinstance(value, dict):
-        return {
-            key: safe_config(item)
-            for key, item in value.items()
-            if isinstance(key, str)
-            and key.lower() not in {"token", "headers", "cookies"}
-            and not key.lower().endswith("_token")
-            and not any(
-                part in key.lower()
-                for part in (
-                    "secret",
-                    "password",
-                    "credential",
-                    "authorization",
-                    "api_key",
-                    "apikey",
-                )
-            )
-            and isinstance(item, (str, bool, int, float, dict, list, tuple, type(None)))
-        }
-    if isinstance(value, (list, tuple)):
-        return [
-            safe_config(item)
-            for item in value
-            if isinstance(item, (str, bool, int, float, dict, list, tuple, type(None)))
-        ]
-    return None
 
 
 @dataclass
