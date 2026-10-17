@@ -35,7 +35,12 @@ from typing import Any, Protocol, runtime_checkable
 from ragit.metrics import DistanceMetric, resolve_distance_metric
 from ragit.stores._scoring import fuse_hybrid
 from ragit.types import RetrievalError
-from ragit.validation import validate_embedding, validate_identifier
+from ragit.validation import (
+    validate_embedding,
+    validate_identifier,
+    validate_search_identifiers,
+)
+
 
 EmbeddingFunction = Callable[[list[str]], Awaitable[list[list[float]]]]
 """Async callable that embeds a list of texts into vectors."""
@@ -76,7 +81,7 @@ class VectorIndex(Protocol):
         session: Any = None,
         **filters: Any,
     ) -> list[dict[str, Any]]:
-        """Search for the nearest neighbors of ``embedding``."""
+        """Vector similarity search protocol method."""
         ...
 
 
@@ -121,7 +126,7 @@ class LexicalIndex(Protocol):
         session: Any = None,
         **filters: Any,
     ) -> list[dict[str, Any]]:
-        """Search for documents matching ``query``."""
+        """Lexical keyword search protocol method."""
         ...
 
 
@@ -443,12 +448,8 @@ class HybridVectorStore(VectorStore):
             ragit.types.RetrievalError: If a search stage fails and
                 ``strict=True``.
         """
-        validate_identifier(text_field, "text_field")
-        for key in filters:
-            validate_identifier(key, "filter key")
+        validate_search_identifiers(text_field, filters, metadata_fields)
         metadata_fields = metadata_fields or []
-        for field in metadata_fields:
-            validate_identifier(field, "metadata_field")
 
         if n_results < 1:
             raise ValueError(f"n_results must be a positive integer; got {n_results}")
@@ -526,8 +527,8 @@ class LegacyHybridStoreAdapter(VectorStore):
         self,
         query: str,
         embedding: list[float],
-        n_results: int,
-        threshold: float,
+        n_results: int = 5,
+        threshold: float = 0.0,
         text_field: str = "text",
         metadata_fields: list[str] | None = None,
         session: Any = None,

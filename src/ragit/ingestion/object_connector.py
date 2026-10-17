@@ -20,6 +20,7 @@ from ragit.ingestion.connector_core import (
     SourceStatus,
     collect_pages,
     extract_documents,
+    parse_checkpoint_since,
 )
 
 
@@ -294,24 +295,7 @@ class ObjectStorageConnector:
 
     async def load_incremental(self, *, checkpoint: Any = None) -> LoadResult:
         """Load objects modified after checkpoint."""
-        since: float | None = None
-        if checkpoint is not None:
-            if isinstance(checkpoint, (int, float)):
-                since = float(checkpoint)
-            elif isinstance(checkpoint, str):
-                try:
-                    since = float(checkpoint)
-                except ValueError:
-                    from datetime import datetime  # noqa: PLC0415
-
-                    try:
-                        since = datetime.fromisoformat(checkpoint).timestamp()
-                    except (ValueError, TypeError) as exc:
-                        raise ValueError(f"Invalid checkpoint: {checkpoint}") from exc
-            elif isinstance(checkpoint, dict):
-                since = float(checkpoint.get("mtime", checkpoint.get("since", 0)))
-            else:
-                raise ValueError(f"Invalid checkpoint: {checkpoint}")
+        since = parse_checkpoint_since(checkpoint)
 
         full = await self.load_all()
         if not full.complete or full.errors:

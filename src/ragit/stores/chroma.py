@@ -50,14 +50,21 @@ import logging
 from typing import Any
 
 from ragit.config import RagSettings
-from ragit.stores._scoring import token_overlap, tokenize
-from ragit.stores.base import (
-    EmbeddingFunction,
-    HybridVectorStore,
+from ragit.stores._scoring import (
+    format_search_hit,
+    handle_count_error,
+    project_metadata,
+    token_overlap,
+    tokenize,
+    validate_upsert_documents,
 )
+from ragit.stores.base import EmbeddingFunction, HybridVectorStore
 from ragit.stores.registry import vector_store_registry
-from ragit.types import RetrievalError
-from ragit.validation import validate_embedding, validate_identifier
+from ragit.validation import (
+    validate_delete_selectors,
+    validate_embedding,
+    validate_identifier,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -238,19 +245,13 @@ class ChromaStore(HybridVectorStore):
             if distance is not None and distance >= threshold:
                 continue
             doc_id = str(raw_id)
-            record_metadata = dict(metadata or {})
             results.append(
-                {
-                    "id": doc_id,
-                    "document": document,
-                    "metadata": {
-                        field: record_metadata[field]
-                        for field in metadata_fields
-                        if field in record_metadata and record_metadata[field] is not None
-                    },
-                    "distance": float(distance),
-                    "keyword_score": None,
-                }
+                format_search_hit(
+                    doc_id=doc_id,
+                    document=document,
+                    metadata=project_metadata(dict(metadata or {}), metadata_fields),
+                    distance=float(distance),
+                )
             )
         return results
 
@@ -275,15 +276,11 @@ class ChromaStore(HybridVectorStore):
         Args:
             query: Natural language search query.
             n_results: Maximum number of results to return.
-            text_field: Accepted for interface compatibility;
-                Chroma stores document text as the record's
-                document.
-            metadata_fields: Metadata keys to include in the
-                result metadata dict.
-            session: Accepted for interface compatibility;
-                ignored (Chroma has no SQL session concept).
-            **filters: Equality filters applied to the search
-                (e.g., ``tenant_id="..."``).
+            text_field: Ignored for payload retrieval; Chroma stores
+                document text natively as the record's document.
+            metadata_fields: Keys projected into the returned result metadata.
+            session: Ignored (Chroma operations are non-transactional).
+            **filters: Metadata equality constraints passed to Chroma.
 
         Returns:
             list[dict]: Result dicts ordered by keyword score
@@ -330,17 +327,12 @@ class ChromaStore(HybridVectorStore):
         for doc_id in keyword_ranked:
             record_metadata = metadatas.get(doc_id, {})
             results.append(
-                {
-                    "id": doc_id,
-                    "document": documents.get(doc_id),
-                    "metadata": {
-                        field: record_metadata[field]
-                        for field in metadata_fields
-                        if field in record_metadata and record_metadata[field] is not None
-                    },
-                    "distance": None,
-                    "keyword_score": keyword_scores[doc_id],
-                }
+                format_search_hit(
+                    doc_id=doc_id,
+                    document=documents.get(doc_id),
+                    metadata=project_metadata(record_metadata, metadata_fields),
+                    keyword_score=keyword_scores[doc_id],
+                )
             )
         return results
 
@@ -378,10 +370,7 @@ class ChromaStore(HybridVectorStore):
                 return len(records.get("ids") or [])
             return int(await asyncio.to_thread(collection.count))
         except Exception as exc:
-            logger.error("Count failed on %s: %s", self.table_name, exc)
-            if strict:
-                raise RetrievalError(f"Count failed on {self.table_name}: {exc}") from exc
-            return 0
+            return handle_count_error(self.table_name, exc, strict, logger)
 
     async def delete(
         self,
@@ -413,15 +402,7 @@ class ChromaStore(HybridVectorStore):
                 empty, or a filter key is unsafe.
             Exception: Re-raises Chroma errors.
         """
-        if ids is None and filters is None:
-            raise ValueError("delete requires at least one of ids or filters")
-        if ids is not None and len(ids) == 0:
-            raise ValueError(
-                "ids must not be empty; an empty id list never means delete everything"
-            )
-        if filters is not None:
-            for key in filters:
-                validate_identifier(key, "filter key")
+        validate_delete_selectors(ids, filters)
 
         collection = self._resolve_collection()
         where = _where_filter(filters) if filters else None
@@ -537,23 +518,17 @@ class ChromaStore(HybridVectorStore):
                 characters.
             Exception: Re-raises Chroma errors after logging.
         """
-        validate_identifier(text_field, "text_field")
-        validate_identifier(embedding_field, "embedding_field")
-        if extra_fields:
-            for key in extra_fields:
-                validate_identifier(key, "extra_field")
-
+        validate_upsert_documents(
+            documents,
+            text_field,
+            embedding_field,
+            "id",
+            self.id_field,
+            extra_fields,
+            self.embedding_dim,
+        )
         if not documents:
             return
-
-        for doc in documents:
-            validate_embedding(
-                doc["embedding"],
-                self.embedding_dim,
-                label="document embedding",
-            )
-            for key in doc.get("metadata", {}):
-                validate_identifier(key, "metadata key")
 
         ids = [str(doc.get("id")) for doc in documents]
         texts = [doc[text_field] for doc in documents]

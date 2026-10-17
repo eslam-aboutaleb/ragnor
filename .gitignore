@@ -7,4 +7,6 @@ dist/
 .ruff_cache/
 .kilo/
 .coverage
+coverage.xml
+htmlcov/
 .DS_Store

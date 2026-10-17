@@ -109,6 +109,20 @@ class BoundedSpanResult:
     is_truncated: bool
     status: EvidenceStatus
 
+    def to_dict(self) -> dict[str, Any]:
+        """Convert bounded span result to a structured dictionary representation."""
+        return {
+            "source_id": self.source_id,
+            "document_id": self.document_id,
+            "revision": self.revision,
+            "text": self.text,
+            "start_offset": self.start_offset,
+            "end_offset": self.end_offset,
+            "total_document_length": self.total_document_length,
+            "is_truncated": self.is_truncated,
+            "status": self.status.value if hasattr(self.status, "value") else str(self.status),
+        }
+
 
 class SourceLookup:
     """Authorized source document lookup engine.

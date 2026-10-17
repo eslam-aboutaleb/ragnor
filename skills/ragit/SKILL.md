@@ -281,7 +281,117 @@ class MyLegacyStore(LegacyHybridStoreAdapter):
 
 The constructor **must accept the registry factory kwargs** (`table_name`, `id_field`, `embedding_dim`, `session_factory`, `settings`, `embedding_fn`) because `get_vector_store` instantiates it with them.
 
-## 9. Gotchas
+## 9. Tool Bridge and Model Context Protocol (MCP)
+
+ragit provides a single **framework-neutral tool bridge** (`KnowledgeBridge`) that unifies retrieval, bounded evidence assembly, immutable citation resolution, and health monitoring. Framework integrations (MCP servers, agent runtimes, APIs) call this bridge rather than duplicating retrieval and authorization logic.
+
+### Skill vs MCP Distinction
+
+- **Skill (Instructions & Guidelines)**: Human- and LLM-readable documentation detailing when to retrieve, how to formulate queries, how to interpret provenance metadata and citation labels, and what security boundaries apply.
+- **MCP Server (Executable Surface)**: A live, machine-callable JSON-RPC 2.0 integration surface exposing tools (`search_knowledge`, `get_source`, `knowledge_status`) over standard input/output (stdio) or remote network transports.
+
+### Direct Async Python Usage
+
+```python
+from ragit.tools import KnowledgeBridge
+from ragit.evidence import SourceLookup, MemorySnapshotStore, EvidenceAssembler
+
+bridge = KnowledgeBridge(
+    retriever=my_retriever,
+    source_lookup=SourceLookup(MemorySnapshotStore()),
+    assembler=EvidenceAssembler(),
+    allow_management=False,  # Read-only by default
+)
+
+# 1. Search knowledge with budget accounting and filters
+bundle = await bridge.search_knowledge(
+    query="refund guidelines",
+    collection="support",
+    filters={"locale": "en-US"},
+    budget_limit=2000,
+    scope="tenant_123",
+)
+
+# 2. Fetch bounded authorized source span
+span = await bridge.get_source(
+    source_ref="kb_repo",
+    document_id="faq_refund",
+    revision="v1",
+    start_offset=0,
+    end_offset=500,
+    scope="tenant_123",
+)
+
+# 3. Inspect sanitized collection status
+status = await bridge.knowledge_status(collection="support", scope="tenant_123")
+```
+
+### Running the MCP Adapter
+
+Install with the `mcp` extra:
+
+```bash
+pip install "ragit-toolkit[mcp]"
+```
+
+Launch a local stdio server for desktop clients or CLI agents:
+
+```python
+import asyncio
+from ragit.mcp import create_mcp_server, run_stdio_server
+
+# Read tools are exposed by default; management tools require explicit opt-in
+server = create_mcp_server(bridge, name="ragit-knowledge", enable_management_tools=False)
+
+# Run over local stdio
+asyncio.run(run_stdio_server(bridge))
+```
+
+For remote network transports, configure `RemoteTransportConfig` with host-provided authentication, rate limiting, and scope mapping:
+
+```python
+from ragit.tools import RemoteTransportConfig, RateLimiter, ScopeAuthorizer
+
+config = RemoteTransportConfig(
+    auth_token_validator=lambda token: token == "secret-host-token",
+    rate_limiter=RateLimiter(requests_per_minute=120, max_concurrent=20),
+    scope_authorizer=ScopeAuthorizer(scope_mapping={"client_1": {"tenant_123"}}),
+    host="0.0.0.0",
+    port=8080,
+)
+```
+
+### Tool Semantics
+
+| Tool | Inputs | Output | Description |
+| ---- | ------ | ------ | ----------- |
+| `search_knowledge` | `query`, `collection`, `filters`, `candidate_k`, `final_k`, `budget_limit`, `scope` | Structured `EvidenceBundle` | Executes hybrid search with filter pushdown, deduplication, optional source diversity balancing, and budget constraints. |
+| `get_source` | `source_ref`, `document_id`, `revision`, `start_offset`, `end_offset`, `collection`, `scope` | `BoundedSpanResult` | Fetches an authorized, bounded span from an immutable revision snapshot. Never substitutes newer content for old citations. |
+| `knowledge_status` | `collection`, `scope`, `include_expensive` | Sanitized status summary | Reports system readiness (`ready`, `degraded`, `unavailable`, `unknown`), active document/chunk counts, and freshness. |
+| `sync_collection` *(Opt-in)* | `collection`, `source_id`, `documents`, `scope` | Ingestion report | Ingests document batches. Guarded by `allow_management=True`. |
+| `revoke_document` *(Opt-in)* | `collection`, `document_id`, `source_id`, `scope` | Deletion report | Authoritatively removes document and active chunks from search visibility. |
+
+### Citations, Provenance & Immutability
+
+- **Citation Labels vs Durable Identity**: Labels like `[1]` or `[2]` are ephemeral, deterministic presentation markers inside an individual `EvidenceBundle`. Durable citation identity is composed of `source_id@revision:document_id[start:end]`.
+- **Immutable Historical Snapshots**: When looking up evidence from an earlier search, `get_source` requires the exact stated revision. If that revision is no longer retained, it returns `revision_unavailable` (or raises `RevisionUnavailableError`). ragit **never** silently substitutes current content for historical citations.
+
+### Error Handling & Boundaries
+
+- **Distinct Statuses**: `EvidenceStatus` explicitly distinguishes `SUCCESS`, `EMPTY_SEARCH` (no hits matching query/filters), `BACKEND_FAILURE` (store or network timeout), `INSUFFICIENT_BUDGET` (budget too small for even one chunk), `STALE_INDEX`, and `REVISION_UNAVAILABLE`. An empty search result does NOT equate to an unanswerable question; host applications decide whether to answer, abstain, or ask questions.
+- **Input Sanitization**: Tool arguments cannot supply arbitrary filesystem paths (`/etc/`, `../`, `file://`), credentials/tokens (`Bearer ...`, private keys, API keys), or unrestricted fetch/SSRF URLs (e.g. `localhost`, `127.0.0.1`, cloud metadata `169.254.169.254`). Unsafe inputs raise `SecurityValidationError`.
+- **Scope Authorization**: Tenant boundaries (`ScopeAuthorizer`) are enforced before retrieval and before source lookup. Mismatched scopes fail closed with `ScopeAuthorizationError`.
+- **Permission Guards**: Read tools are enabled by default; management tools (`sync_collection`, `revoke_document`) are disabled unless `allow_management=True` is explicitly configured.
+
+### Tested Starter Recipes
+
+Runnable offline recipes with deterministic fake embeddings and memory storage, followed by production profiles:
+
+- `examples/recipes/policy_knowledge.py`: Policy and compliance knowledge with page citations and immutable revision updates.
+- `examples/recipes/customer_service_faq.py`: Customer service FAQs with product and locale filters and authoritative FAQ revocation.
+- `examples/recipes/multi_collection_diversity.py`: Cross-collection search with source diversity balancing.
+
+## 10. Gotchas
 
 - **Register embedding dimensions** with `register_dimension("my-model", 768)`. Unknown models warn and fall back to `FALLBACK_DIMENSION` (1536) — a silent mismatch surfaces later as `ValueError: embedding has N dimensions; expected M`.
 - **All SQL identifiers must pass `validate_identifier`** (`^[A-Za-z_][A-Za-z0-9_]*$`) — table names, column names, filter keys, metadata keys. Identifiers are never quoted or escaped; anything else is rejected.
@@ -289,9 +399,11 @@ The constructor **must accept the registry factory kwargs** (`table_name`, `id_f
 - **The pgvector store needs the `pgvector` extra** — `ModuleNotFoundError: No module named 'sqlalchemy'` means it is missing.
 - **Advisory locks are PostgreSQL-only** — pass `lock_key=None` on other stacks.
 - `PgVectorStore` requires `embedding_dim` and either a `session_factory` or `settings` carrying a `database_url`.
+- **MCP management tools are opt-in**: `sync_collection` and `revoke_document` will raise `PermissionError` unless `allow_management=True` is passed to `KnowledgeBridge`.
 
-## 10. Pointers
+## 11. Pointers
 
 - Full guide: `README.md` — key sections: Installation, Configuration (the `RagSettings` field table), Chunking, Embeddings, Vector stores, Hybrid retrieval, Ingestion, Job outbox and drainer, Evaluation, Extending ragit: provider registries, Host integration checklist, Security model, Troubleshooting, Design invariants.
 - `examples/host_integration.py` — complete runnable host-integration template (domain settings, a registered embedder provider, a registered vector backend, pipeline, retriever, evaluation harness); runs fully offline: `python examples/host_integration.py`.
 - `examples/minimal_app.py` — zero-host-code FastAPI app (in-memory store, fake embedder unless `OPENAI_API_KEY` is set): `python examples/minimal_app.py`, then `curl "http://127.0.0.1:8000/search?query=refund"`.
+- `examples/recipes/` — starter framework recipes: `policy_knowledge.py`, `customer_service_faq.py`, `multi_collection_diversity.py`.

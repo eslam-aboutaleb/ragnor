@@ -149,7 +149,66 @@ def _validate_scope_defense_in_depth(
     return validated
 
 
-class DenseRetrieval:
+def _prepare_retrieval(backend: Any, req: RetrievalRequest) -> dict[str, Any]:
+    caps = get_backend_capabilities(backend)
+    caps.validate_constraints(req.mandatory_capabilities)
+    effective_filters = req.effective_filters()
+    caps.validate_filters(effective_filters)
+    return effective_filters
+
+
+def _dedupe_and_finalize(
+    results: list[dict[str, Any]], req: RetrievalRequest
+) -> list[dict[str, Any]]:
+    seen_ids: set[str] = set()
+    deduped: list[dict[str, Any]] = []
+    for r in results:
+        rid = str(r.get("id"))
+        if rid not in seen_ids:
+            seen_ids.add(rid)
+            deduped.append(r)
+    validated = _validate_scope_defense_in_depth(deduped, req)
+    return validated[: req.final_k]
+
+
+async def _expand_queries(query: str, transformer: QueryTransformer | None) -> list[str]:
+    if transformer is not None:
+        return await transformer.transform(query)
+    return [query]
+
+
+class _BaseRetrievalStrategy:
+    """Base class providing typed response wrapping across retrieval strategies."""
+
+    async def retrieve(
+        self,
+        query: str | RetrievalRequest,
+        n_results: int = 5,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    async def retrieve_typed(self, request: RetrievalRequest) -> RetrievalResponse:
+        """Execute retrieval and return a typed :class:`RetrievalResponse`."""
+        rows = await self.retrieve(request)
+        return RetrievalResponse.from_dicts(
+            rows,
+            query=request.query,
+            candidate_k=request.get_candidate_k(),
+            final_k=request.final_k,
+        )
+
+
+def _handle_retrieval_exception(exc: Exception, stage: str, strict: bool) -> list[dict[str, Any]]:
+    if isinstance(exc, (CapabilityUnsupportedError, ScopeViolationError)):
+        raise exc
+    logger.error("%s retrieval failed: %s", stage, exc)
+    if strict:
+        raise RetrievalError(f"{stage} retrieval failed: {exc}") from exc
+    return []
+
+
+class DenseRetrieval(_BaseRetrievalStrategy):
     """Dense-only retrieval over a :class:`VectorIndex`.
 
     Embeds the query with the injected embedder and
@@ -180,17 +239,10 @@ class DenseRetrieval:
         if req.threshold is None:
             raise ValueError("dense retrieval requires a distance threshold; pass threshold=...")
 
-        # Validate mandatory constraints against backend capabilities
-        caps = get_backend_capabilities(self._vector_index)
-        caps.validate_constraints(req.mandatory_capabilities)
-        effective_filters = req.effective_filters()
-        caps.validate_filters(effective_filters)
+        effective_filters = _prepare_retrieval(self._vector_index, req)
 
         try:
-            queries = [req.query]
-            if self._query_transformer is not None:
-                queries = await self._query_transformer.transform(req.query)
-
+            queries = await _expand_queries(req.query, self._query_transformer)
             all_results: list[dict[str, Any]] = []
             candidate_k = req.get_candidate_k()
 
@@ -207,39 +259,12 @@ class DenseRetrieval:
                 )
                 all_results.extend(results)
 
-            # Deduplicate by id if multi-query was used
-            seen_ids: set[str] = set()
-            deduped: list[dict[str, Any]] = []
-            for r in all_results:
-                rid = str(r.get("id"))
-                if rid not in seen_ids:
-                    seen_ids.add(rid)
-                    deduped.append(r)
-
-            validated = _validate_scope_defense_in_depth(deduped, req)
-            return validated[: req.final_k]
-        except CapabilityUnsupportedError:
-            raise
-        except ScopeViolationError:
-            raise
+            return _dedupe_and_finalize(all_results, req)
         except Exception as exc:
-            logger.error("Dense retrieval failed: %s", exc)
-            if req.strict:
-                raise RetrievalError(f"Dense retrieval failed: {exc}") from exc
-            return []
-
-    async def retrieve_typed(self, request: RetrievalRequest) -> RetrievalResponse:
-        """Execute retrieval and return a typed :class:`RetrievalResponse`."""
-        rows = await self.retrieve(request)
-        return RetrievalResponse.from_dicts(
-            rows,
-            query=request.query,
-            candidate_k=request.get_candidate_k(),
-            final_k=request.final_k,
-        )
+            return _handle_retrieval_exception(exc, "Dense", req.strict)
 
 
-class KeywordRetrieval:
+class KeywordRetrieval(_BaseRetrievalStrategy):
     """Keyword-only retrieval over a :class:`LexicalIndex`.
 
     Calls the index's ``keyword_search`` with no embedding dependency.
@@ -265,16 +290,10 @@ class KeywordRetrieval:
         """Retrieve documents by keyword search."""
         req, remaining_kwargs = _coerce_request(query, n_results, kwargs)
 
-        caps = get_backend_capabilities(self._lexical_index)
-        caps.validate_constraints(req.mandatory_capabilities)
-        effective_filters = req.effective_filters()
-        caps.validate_filters(effective_filters)
+        effective_filters = _prepare_retrieval(self._lexical_index, req)
 
         try:
-            queries = [req.query]
-            if self._query_transformer is not None:
-                queries = await self._query_transformer.transform(req.query)
-
+            queries = await _expand_queries(req.query, self._query_transformer)
             all_results: list[dict[str, Any]] = []
             candidate_k = req.get_candidate_k()
 
@@ -289,38 +308,12 @@ class KeywordRetrieval:
                 )
                 all_results.extend(results)
 
-            seen_ids: set[str] = set()
-            deduped: list[dict[str, Any]] = []
-            for r in all_results:
-                rid = str(r.get("id"))
-                if rid not in seen_ids:
-                    seen_ids.add(rid)
-                    deduped.append(r)
-
-            validated = _validate_scope_defense_in_depth(deduped, req)
-            return validated[: req.final_k]
-        except CapabilityUnsupportedError:
-            raise
-        except ScopeViolationError:
-            raise
+            return _dedupe_and_finalize(all_results, req)
         except Exception as exc:
-            logger.error("Keyword retrieval failed: %s", exc)
-            if req.strict:
-                raise RetrievalError(f"Keyword retrieval failed: {exc}") from exc
-            return []
-
-    async def retrieve_typed(self, request: RetrievalRequest) -> RetrievalResponse:
-        """Execute retrieval and return a typed :class:`RetrievalResponse`."""
-        rows = await self.retrieve(request)
-        return RetrievalResponse.from_dicts(
-            rows,
-            query=request.query,
-            candidate_k=request.get_candidate_k(),
-            final_k=request.final_k,
-        )
+            return _handle_retrieval_exception(exc, "Keyword", req.strict)
 
 
-class HybridRetrieval:
+class HybridRetrieval(_BaseRetrievalStrategy):
     """Hybrid retrieval over two capability stages, RRF-fused and optionally reranked.
 
     Supports candidate_k separately from final_k, filter pushdown,
@@ -423,13 +416,3 @@ class HybridRetrieval:
             if req.strict:
                 raise RetrievalError(f"Hybrid retrieval failed: {exc}") from exc
             return []
-
-    async def retrieve_typed(self, request: RetrievalRequest) -> RetrievalResponse:
-        """Execute retrieval and return a typed :class:`RetrievalResponse`."""
-        rows = await self.retrieve(request)
-        return RetrievalResponse.from_dicts(
-            rows,
-            query=request.query,
-            candidate_k=request.get_candidate_k(),
-            final_k=request.final_k,
-        )

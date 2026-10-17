@@ -27,6 +27,7 @@ from .connector_core import (
     TransientSourceError,
     collect_pages,
     extract_documents,
+    parse_checkpoint_since,
 )
 from .sources import RawDocument
 
@@ -516,24 +517,7 @@ class DirectoryConnector:
         Absence from an incremental delta never implies deletion; incremental
         results set incremental=True, preventing full-snapshot replacement.
         """
-        since: float | None = None
-        if checkpoint is not None:
-            if isinstance(checkpoint, (int, float)):
-                since = float(checkpoint)
-            elif isinstance(checkpoint, str):
-                try:
-                    since = float(checkpoint)
-                except ValueError:
-                    from datetime import datetime  # noqa: PLC0415
-
-                    try:
-                        since = datetime.fromisoformat(checkpoint).timestamp()
-                    except (ValueError, TypeError) as exc:
-                        raise ValueError(f"Invalid checkpoint: {checkpoint}") from exc
-            elif isinstance(checkpoint, dict):
-                since = float(checkpoint.get("mtime", checkpoint.get("since", 0)))
-            else:
-                raise ValueError(f"Invalid checkpoint: {checkpoint}")
+        since = parse_checkpoint_since(checkpoint)
 
         full_result = await self.load_all()
         if not full_result.complete or full_result.errors:
