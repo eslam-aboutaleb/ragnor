@@ -27,7 +27,7 @@ test = [
     "aiosqlite>=0.20",
     "sqlalchemy[asyncio]>=2.0.30",
     "pypdf>=5,<7",
-    "pathspec>=0.12,<1",
+    "pathspec>=0.12,<2",
     "httpx>=0.28,<1",
     "mcp>=1.0.0",
 ]
@@ -51,7 +51,7 @@ faiss = [
     "faiss-cpu>=1.8",
 ]
 pdf = ["pypdf>=5,<7"]
-directory = ["pathspec>=0.12,<1"]
+directory = ["pathspec>=0.12,<2"]
 watch = ["watchfiles>=0.24"]
 web = ["httpx>=0.28,<1"]
 object-storage = ["boto3>=1.34"]
