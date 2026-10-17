@@ -395,6 +395,10 @@ rows = as_dicts(results)      # back to dicts for legacy consumers
 
 ## Ingestion
 
+For paginated directory, object-storage, HTTP/API, and website ingestion,
+including extraction, completeness/deletion safety, and security requirements,
+see the [source connector guide](docs/connectors.md).
+
 ### The pipeline
 
 The pipeline runs in two phases. The **prepare phase** opens no transaction and takes no lock: **load source → hash the source manifest → compare snapshot → chunk → embed → validate**. The **critical section** is short: **re-check snapshot → retire old version → create version → upsert**, inside one transaction, serialized by an advisory lock when a `lock_key` is supplied (a PostgreSQL advisory lock — see below); omit it and serialize ingestion in your own infrastructure.

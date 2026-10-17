@@ -15,11 +15,15 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from ragit.types import Document
+
+if TYPE_CHECKING:
+    from ragit.ingestion.connector_core import DiscoveryPage, LoadResult, SourceConnector
 
 logger = logging.getLogger(__name__)
 
@@ -34,11 +38,23 @@ class RawDocument:
         content: The full document text.
         external_id: Optional identifier from the source
             system (e.g., an object key or row id).
+        metadata: Source-specific metadata preserved through
+            normalization.
+        provenance: Original source provenance preserved
+            through normalization.
+        extractor: Identifier of the extractor that produced
+            the content.
+        location: Optional location reference (page, byte
+            range, etc.).
     """
 
     source_name: str
     content: str
     external_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    provenance: dict[str, Any] = field(default_factory=dict)
+    extractor: str | None = None
+    location: Any = None
 
 
 @runtime_checkable
@@ -139,3 +155,121 @@ class ListDocumentSource:
             )
             for document in self._documents
         ]
+
+
+class DocumentSourceConnector:
+    """Adapt a legacy source to connector pagination.
+
+    Legacy empty lists are ambiguous: the adapter must trust their historical
+    meaning, except FileDocumentSource whose missing-file behavior is detected
+    separately. The source is loaded once per traversal so pages share a snapshot.
+    """
+
+    def __init__(self, source: DocumentSource) -> None:
+        self.source = source
+        self._documents: list[RawDocument] = []
+        self._scan: LoadResult | None = None
+
+    async def _start(self) -> LoadResult:
+        from ragit.ingestion.connector_core import (  # noqa: PLC0415
+            LoadResult,
+            SourceStatus,
+            _error_record,
+        )
+
+        try:
+            if isinstance(self.source, FileDocumentSource):
+                # Read directly: legacy load() deliberately hides FileNotFoundError.
+                content = await asyncio.to_thread(self.source._read)
+                loaded = [RawDocument(Path(self.source._path).name, content)]
+            else:
+                loaded = await self.source.load()
+        except FileNotFoundError as exc:
+            return LoadResult(
+                status=SourceStatus.NOT_FOUND, errors=[_error_record(exc)], complete=False
+            )
+        except PermissionError as exc:
+            return LoadResult(
+                status=SourceStatus.INACCESSIBLE, errors=[_error_record(exc)], complete=False
+            )
+        except Exception as exc:
+            return LoadResult(
+                status=SourceStatus.ERROR, errors=[_error_record(exc)], complete=False
+            )
+        return loaded if isinstance(loaded, LoadResult) else LoadResult(loaded)
+
+    async def load_page(self, *, cursor: Any = None, limit: int | None = None) -> LoadResult:
+        from ragit.ingestion.connector_core import (  # noqa: PLC0415
+            LoadResult,
+            SourceStatus,
+            _error_record,
+        )
+
+        if limit is not None and limit < 1:
+            raise ValueError("limit must be positive")
+        if cursor is None:
+            result = await self._start()
+            if not result.authoritative:
+                return result
+            self._documents = list(result)
+            self._scan = result
+        try:
+            offset = 0 if cursor is None else int(cursor)
+            if offset < 0 or offset > len(self._documents):
+                raise ValueError("Invalid adapter cursor")
+        except (TypeError, ValueError) as exc:
+            return LoadResult(
+                status=SourceStatus.ERROR, errors=[_error_record(exc)], complete=False
+            )
+        end = len(self._documents) if limit is None else offset + limit
+        documents = self._documents[offset:end]
+        has_more = end < len(self._documents)
+        return LoadResult(
+            documents,
+            cursor=cursor,
+            has_more=has_more,
+            next_cursor=str(end) if has_more else None,
+            total_items=len(documents),
+            skipped=self._scan.skipped if self._scan is not None and cursor is None else [],
+            metadata=self._scan.metadata if self._scan is not None else {},
+            checkpoint=self._scan.checkpoint if self._scan is not None else None,
+        )
+
+    async def discover(self, *, cursor: Any = None, limit: int | None = None) -> DiscoveryPage:
+        from ragit.ingestion.connector_core import DiscoveryPage, SourceItem  # noqa: PLC0415
+
+        page = await self.load_page(cursor=cursor, limit=limit)
+        return DiscoveryPage(
+            [SourceItem(source_name=doc.source_name, external_id=doc.external_id) for doc in page],
+            cursor=cursor,
+            next_cursor=page.next_cursor,
+            has_more=page.has_more,
+            complete=page.complete,
+            status=page.status,
+            errors=page.errors,
+            skipped=page.skipped,
+        )
+
+    async def load(self, *, cursor: Any = None, limit: int | None = None) -> LoadResult:
+        from ragit.ingestion.connector_core import collect_pages  # noqa: PLC0415
+
+        if cursor is not None:
+            return await self.load_page(cursor=cursor, limit=limit)
+        return await collect_pages(self, page_size=limit)
+
+
+class ConnectorDocumentSource:
+    """Preserve LoadResult authority information at the legacy source boundary."""
+
+    def __init__(self, connector: SourceConnector) -> None:
+        self.connector = connector
+
+    @property
+    def extractor(self) -> Any:
+        return getattr(self.connector, "extractor", None)
+
+    async def load(self) -> LoadResult:
+        return await self.connector.load()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.connector, name)

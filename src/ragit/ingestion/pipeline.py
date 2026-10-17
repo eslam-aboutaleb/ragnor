@@ -37,6 +37,7 @@ from ragit.config import RagSettings
 from ragit.embeddings.base import EmbeddingFunction
 from ragit.embeddings.dimensions import get_embedding_dimension
 from ragit.ingestion.sources import DocumentSource, RawDocument
+from ragit.ingestion.connector_core import LoadResult
 from ragit.ingestion.versioning import (
     IngestionSnapshot,
     build_snapshot,
@@ -140,8 +141,9 @@ class IngestionPipeline:
         self._version_id_key = version_id_key
         self._source_id_key = source_id_key
         self._sql_factory = sql_factory
+        self._last_load_result = None
 
-    async def run(  # noqa: PLR0913
+    async def run(  # noqa: PLR0913, PLR0911
         self,
         source: DocumentSource,
         version_store: VersionStore,
@@ -190,7 +192,21 @@ class IngestionPipeline:
             The number of chunks stored, or the stored
             chunk count when the source was unchanged.
         """
-        documents = await source.load()
+        if hasattr(source, "load"):
+            loaded = await source.load()
+        else:
+            loaded = source
+        if isinstance(loaded, LoadResult):
+            documents = list(loaded)
+            self._last_load_result = loaded
+            if not loaded.authoritative:
+                logger.warning(
+                    "Non-authoritative source scan; skipping ingestion without mutation."
+                )
+                return 0
+        else:
+            documents = list(loaded) if not isinstance(loaded, list) else loaded
+            self._last_load_result = None
 
         sql_factory = None
         if lock_key is not None:
@@ -213,7 +229,14 @@ class IngestionPipeline:
             return 0
 
         source_hash = compute_source_hash(documents)
-        current_snapshot = build_snapshot(source_hash, self._settings, self._chunker)
+        extractor = getattr(source, "extractor", None)
+        if extractor is None and documents and documents[0].extractor:
+            first_ext = documents[0].extractor
+            if all(doc.extractor == first_ext for doc in documents):
+                extractor = first_ext
+        current_snapshot = build_snapshot(
+            source_hash, self._settings, self._chunker, extractor=extractor
+        )
 
         # Prepare phase: no transaction, no lock. The
         # read-only snapshot check runs on a short-lived
@@ -419,9 +442,20 @@ class IngestionPipeline:
         every chunk with the document it actually came from.
         """
         chunks: list[Chunk] = []
-        for document in documents:
+        for index, document in enumerate(documents):
             document_chunks = self._chunker.chunk(document.content)
             for chunk in document_chunks:
+                if len(documents) > 1:
+                    chunk.id = f"document_{index}:{chunk.id}"
+                chunk.metadata = {**document.metadata, **chunk.metadata}
                 chunk.metadata["source"] = document.source_name
+                if document.external_id is not None:
+                    chunk.metadata["external_id"] = document.external_id
+                if document.provenance:
+                    chunk.metadata["provenance"] = dict(document.provenance)
+                if document.location is not None:
+                    chunk.metadata["location"] = document.location
+                if document.extractor is not None:
+                    chunk.metadata["extractor"] = document.extractor
             chunks.extend(document_chunks)
         return chunks
