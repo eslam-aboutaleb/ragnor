@@ -24,7 +24,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, field
 from typing import Any
 
 from ragit.chunking.base import Chunker
@@ -34,6 +35,44 @@ from ragit.ingestion.sources import RawDocument
 
 RETRIEVAL_SCHEMA_VERSION = "v1"
 """Version of the retrieval schema the snapshots carry."""
+
+
+def safe_config(value: Any) -> Any:
+    """Copy JSON configuration only, omitting secrets and arbitrary objects.
+
+    Never use repr/default=str: clients and credentials may expose secrets there.
+    """
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {
+            key: safe_config(item)
+            for key, item in value.items()
+            if isinstance(key, str)
+            and key.lower() not in {"token", "headers", "cookies"}
+            and not key.lower().endswith("_token")
+            and not any(
+                part in key.lower()
+                for part in (
+                    "secret",
+                    "password",
+                    "credential",
+                    "authorization",
+                    "api_key",
+                    "apikey",
+                )
+            )
+            and isinstance(item, (str, bool, int, float, dict, list, tuple, type(None)))
+        }
+    if isinstance(value, (list, tuple)):
+        return [
+            safe_config(item)
+            for item in value
+            if isinstance(item, (str, bool, int, float, dict, list, tuple, type(None)))
+        ]
+    return None
 
 
 @dataclass
@@ -57,6 +96,9 @@ class IngestionSnapshot:
     chunk_size: int
     overlap: int
     retrieval_schema_version: str
+    extractor_id: str = "none"
+    extractor_version: str = "0"
+    extractor_options: dict[str, Any] = field(default_factory=dict)
 
 
 def snapshot_matches(
@@ -99,24 +141,35 @@ def compute_source_hash(documents: list[RawDocument]) -> str:
     Returns:
         SHA-256 hex digest of the canonical manifest.
     """
-    manifest = {
-        "documents": [
-            {
-                "source_name": doc.source_name,
-                "external_id": doc.external_id,
-                "content_hash": hashlib.sha256(doc.content.encode("utf-8")).hexdigest(),
-            }
-            for doc in documents
-        ],
-    }
+    entries = []
+    for doc in documents:
+        entry = {
+            "source_name": doc.source_name,
+            "external_id": doc.external_id,
+            "content_hash": hashlib.sha256(doc.content.encode("utf-8")).hexdigest(),
+        }
+        if doc.extractor is not None:
+            entry["extractor"] = doc.extractor
+        if "extraction" in doc.metadata:
+            entry["extraction"] = safe_config(doc.metadata["extraction"])
+        if doc.location is not None:
+            entry["location"] = safe_config(doc.location)
+        if doc.provenance:
+            entry["provenance"] = safe_config(doc.provenance)
+        entries.append(entry)
+    manifest = {"documents": entries}
     canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def build_snapshot(
+def build_snapshot(  # noqa: PLR0913, PLR0917
     source_hash: str,
     settings: RagSettings,
     chunker: Chunker,
+    extractor: Any = None,
+    extractor_id: str | None = None,
+    extractor_version: str | None = None,
+    extractor_options: dict[str, Any] | None = None,
 ) -> IngestionSnapshot:
     """Build the current snapshot for ``source_hash``.
 
@@ -135,6 +188,14 @@ def build_snapshot(
         The snapshot describing this ingestion configuration.
     """
     config: dict[str, Any] = chunker.config
+    if extractor is not None:
+        extractor_id = (
+            extractor
+            if isinstance(extractor, str)
+            else getattr(extractor, "id", type(extractor).__name__)
+        )
+        extractor_version = getattr(extractor, "version", extractor_version)
+        extractor_options = getattr(extractor, "options", extractor_options)
     return IngestionSnapshot(
         source_hash=source_hash,
         embedding_model=settings.embedding_model,
@@ -143,4 +204,7 @@ def build_snapshot(
         chunk_size=int(config.get("chunk_size", 0)),
         overlap=int(config.get("overlap", 0)),
         retrieval_schema_version=RETRIEVAL_SCHEMA_VERSION,
+        extractor_id=extractor_id or "none",
+        extractor_version=extractor_version or "0",
+        extractor_options=safe_config(extractor_options or {}),
     )

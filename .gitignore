@@ -7,3 +7,4 @@ dist/
 .ruff_cache/
 .kilo/
 .coverage
+.DS_Store

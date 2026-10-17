@@ -25,6 +25,9 @@ test = [
     "pytest-asyncio>=0.24",
     "aiosqlite>=0.20",
     "sqlalchemy[asyncio]>=2.0.30",
+    "pypdf>=5,<7",
+    "pathspec>=0.12,<1",
+    "httpx>=0.28,<1",
 ]
 litellm = [
     "litellm>=1.84",
@@ -44,10 +47,13 @@ chroma = [
 faiss = [
     "faiss-cpu>=1.8",
 ]
-# The extra names "pdf" and "web" are reserved for
-# future loader/serving integrations.
+pdf = ["pypdf>=5,<7"]
+directory = ["pathspec>=0.12,<1"]
+watch = ["watchfiles>=0.24"]
+web = ["httpx>=0.28,<1"]
+object-storage = ["boto3>=1.34"]
 all = [
-    "ragit-toolkit[litellm,pgvector,qdrant,chroma,faiss]",
+    "ragit-toolkit[litellm,pgvector,qdrant,chroma,faiss,pdf,directory,watch,web,object-storage]",
 ]
 
 [tool.setuptools.packages.find]

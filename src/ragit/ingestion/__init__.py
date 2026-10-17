@@ -12,6 +12,12 @@ from ragit.ingestion.sources import (
     FileDocumentSource,
     RawDocument,
 )
+from ragit.ingestion import connectors
+from ragit.ingestion.connectors import (
+    DirectoryConnector,
+    LoadResult,
+    SourceConnector,
+)
 from ragit.ingestion.versioning import (
     RETRIEVAL_SCHEMA_VERSION,
     IngestionSnapshot,
@@ -30,15 +36,24 @@ def __getattr__(name: str):
 
 
 __all__ = [
+    "DirectoryConnector",
     "DocumentSource",
     "FileDocumentSource",
     "IngestionPipeline",
     "IngestionSnapshot",
     "RETRIEVAL_SCHEMA_VERSION",
     "RawDocument",
+    "LoadResult",
+    "SourceConnector",
     "VersionRecord",
     "VersionStore",
     "advisory_lock",
     "build_snapshot",
     "snapshot_matches",
 ]
+
+
+# Re-export the explicitly declared connector API without wildcard imports.
+for _name in connectors.__all__:
+    globals()[_name] = getattr(connectors, _name)
+__all__ = list(dict.fromkeys([*__all__, *connectors.__all__]))
