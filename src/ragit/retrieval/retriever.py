@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 from ragit.config import RagSettings
 from ragit.embeddings import get_embedding_dimension, get_embedding_function
+from ragit.retrieval.types import RetrievalRequest, RetrievalResponse
 from ragit.stores import get_vector_store
 from ragit.types import SearchResult
 from ragit.validation import validate_identifier
@@ -150,30 +151,6 @@ class HybridRetriever:
                 delegates to the strategy. When omitted (the
                 default), the embedder and the hybrid store
                 are built from ``settings`` and ``spec``.
-
-        Composition example -- a table-backed store wrapped
-        in a strategy and injected::
-
-            from ragit.retrieval import HybridRetriever, RetrieverSpec
-            from ragit.retrieval.strategies import HybridRetrieval
-            from ragit.stores import get_vector_store
-
-            store = get_vector_store(
-                table_name=spec.table_name,
-                id_field=spec.id_field,
-                embedding_dim=embedding_dim,
-                settings=settings,
-                session_factory=my_session_factory,
-                embedding_fn=embedder,
-            )
-            strategy = HybridRetrieval(
-                vector_index=store,
-                lexical_index=store,
-                embedder=embedder,
-            )
-            retriever = HybridRetriever(
-                spec=spec, settings=settings, strategy=strategy
-            )
         """
         self._spec = spec
         self._settings = settings
@@ -198,72 +175,101 @@ class HybridRetriever:
 
     async def retrieve(  # noqa: PLR0913
         self,
-        query: str,
+        query: str | RetrievalRequest,
         n_results: int = 5,
         distance_threshold: float | None = None,
         strict: bool = False,
+        candidate_k: int | None = None,
         **filters: Any,
     ) -> list[SearchResult]:
         """Retrieve documents matching ``query``.
 
-        Orchestrates the two-stage retrieval pipeline:
-          1. Embeds the query using the configured embedding function.
-          2. Delegates to the vector store's ``hybrid_search`` method,
-             which executes parallel vector similarity and PostgreSQL
-             full-text search CTEs and merges results via Reciprocal
-             Rank Fusion.
-
-        When a strategy was injected, the query is delegated
-        to the strategy instead (the strategy owns its
-        capability dependencies).
-
         Args:
-            query: The natural-language search query.
+            query: The natural-language search query or a typed
+                :class:`~ragit.retrieval.types.RetrievalRequest`.
             n_results: Maximum number of candidates to fetch.
             distance_threshold: Maximum L2 distance for the vector
                 search part. When ``None``, falls back to
                 ``settings.rag_distance_threshold``.
-            strict: The swallow/raise contract. When ``False``
-                (the default), store failures are logged and
-                swallowed into an empty result list; when
-                ``True``, failures raise
-                :class:`ragit.types.RetrievalError`, so a real
-                storage outage is distinguishable from a
-                legitimate empty result. Passed through to the
-                store on the legacy path and to the strategy
-                when one is injected -- failure behavior is
-                uniform across both paths.
-            **filters: Additional equality filters applied to both
-                search stages (e.g., ``tenant_id="..."``).
+            strict: When ``True``, store failures raise
+                :class:`ragit.types.RetrievalError`.
+            candidate_k: Optional candidate count for initial stages.
+            **filters: Additional equality filters.
 
         Returns:
             Search results sorted by RRF score.
         """
+        if isinstance(query, RetrievalRequest):
+            req = query
+            query_str = req.query
+            n_results = req.final_k
+            candidate_k = req.candidate_k
+            if req.threshold is not None:
+                distance_threshold = req.threshold
+            strict = req.strict
+            merged_filters = dict(req.filters)
+            if req.isolation_scope is not None:
+                merged_filters[req.scope_field] = req.isolation_scope
+            merged_filters.update(filters)
+            filters = merged_filters
+        else:
+            query_str = query
+
         if distance_threshold is None:
             distance_threshold = self._settings.rag_distance_threshold
 
         if self._strategy is not None:
+            kwargs = dict(filters)
+            if candidate_k is not None:
+                kwargs["candidate_k"] = candidate_k
             rows = await self._strategy.retrieve(
-                query=query,
+                query=query_str,
                 n_results=n_results,
                 threshold=distance_threshold,
                 text_field=self._spec.text_field,
                 metadata_fields=self._spec.metadata_fields,
                 strict=strict,
-                **filters,
+                **kwargs,
             )
         else:
-            embeddings = await self._embed_fn([query])
+            effective_n = (
+                candidate_k if candidate_k is not None and candidate_k > n_results else n_results
+            )
+            embeddings = await self._embed_fn([query_str])
             query_embedding = embeddings[0]
 
             rows = await self._store.hybrid_search(
-                query=query,
+                query=query_str,
                 embedding=query_embedding,
-                n_results=n_results,
+                n_results=effective_n,
                 threshold=distance_threshold,
                 text_field=self._spec.text_field,
                 metadata_fields=self._spec.metadata_fields,
                 strict=strict,
                 **filters,
             )
+            rows = rows[:n_results]
         return [_to_search_result(row) for row in rows]
+
+    async def retrieve_typed(
+        self,
+        request: RetrievalRequest,
+    ) -> RetrievalResponse:
+        """Execute retrieval and return a typed :class:`RetrievalResponse`."""
+        if self._strategy is not None:
+            if hasattr(self._strategy, "retrieve_typed"):
+                return await self._strategy.retrieve_typed(request)
+            rows = await self._strategy.retrieve(request)
+            return RetrievalResponse.from_dicts(
+                rows,
+                query=request.query,
+                candidate_k=request.get_candidate_k(),
+                final_k=request.final_k,
+            )
+        results = await self.retrieve(request)
+        return RetrievalResponse.from_dicts(
+            as_dicts(results),
+            query=request.query,
+            candidate_k=request.get_candidate_k(),
+            final_k=request.final_k,
+        )

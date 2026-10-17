@@ -31,12 +31,12 @@ store = get_vector_store(
     embedding_dim=1536,
     session_factory=my_session_factory,
     embedding_fn=embedder,
-    metric="cosine",                  # or settings carrying rag_distance_metric
+    metric="cosine",  # or settings carrying rag_distance_metric
 )
 
-resolve_distance_metric("COSINE")                       # "cosine"
-resolve_distance_metric(None, my_settings)              # reads rag_distance_metric
-resolve_distance_metric(None)                           # "l2"
+resolve_distance_metric("COSINE")  # "cosine"
+resolve_distance_metric(None, my_settings)  # reads rag_distance_metric
+resolve_distance_metric(None)  # "l2"
 ```
 
 Cosine support per built-in backend:
@@ -69,9 +69,9 @@ from ragit.stores import PgVectorStore
 
 store = PgVectorStore(
     table_name="policy_chunks",
-    embedding_dim=1536,                 # required
-    session_factory=my_session_factory, # or settings.database_url
-    embedding_fn=embedder,              # auto-embed queries
+    embedding_dim=1536,  # required
+    session_factory=my_session_factory,  # or settings.database_url
+    embedding_fn=embedder,  # auto-embed queries
 )
 ```
 
@@ -85,11 +85,11 @@ Production vector search on a Qdrant server. Requires the `qdrant` extra (`pip i
 from ragit.stores import QdrantStore
 
 store = QdrantStore(
-    table_name="policy_chunks",       # Qdrant collection name
-    embedding_dim=1536,               # required
-    url="http://localhost:6333",      # or settings.database_url
-    api_key="...",                    # optional, for authenticated servers
-    embedding_fn=embedder,            # auto-embed queries
+    table_name="policy_chunks",  # Qdrant collection name
+    embedding_dim=1536,  # required
+    url="http://localhost:6333",  # or settings.database_url
+    api_key="...",  # optional, for authenticated servers
+    embedding_fn=embedder,  # auto-embed queries
     # client=my_client,               # or inject a pre-built AsyncQdrantClient
 )
 ```
@@ -104,9 +104,9 @@ Embedded or server Chroma. Requires the `chroma` extra (`pip install -e ".[chrom
 from ragit.stores import ChromaStore
 
 store = ChromaStore(
-    table_name="policy_chunks",       # Chroma collection name
-    embedding_dim=1536,               # required
-    embedding_fn=embedder,            # auto-embed queries
+    table_name="policy_chunks",  # Chroma collection name
+    embedding_dim=1536,  # required
+    embedding_fn=embedder,  # auto-embed queries
     # path="./chroma_db",             # PersistentClient; omitted -> EphemeralClient
     # client=my_client,               # or inject a pre-built client
 )
@@ -122,9 +122,9 @@ In-process exact L2 index — no server, nothing persisted. Requires the `faiss`
 from ragit.stores import FaissStore
 
 store = FaissStore(
-    table_name="policy_chunks",       # logical name (logging only)
-    embedding_dim=1536,               # required
-    embedding_fn=embedder,            # auto-embed queries
+    table_name="policy_chunks",  # logical name (logging only)
+    embedding_dim=1536,  # required
+    embedding_fn=embedder,  # auto-embed queries
     # index=my_index,                 # or inject a pre-built IndexIDMap
 )
 ```

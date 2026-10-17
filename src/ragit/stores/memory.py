@@ -93,9 +93,23 @@ class InMemoryVectorStore(HybridVectorStore):
         self._records: dict[str, dict[str, Any]] = {}
         self._embeddings: dict[str, list[float]] = {}
 
+    @property
+    def capabilities(self) -> Any:
+        """Declared store capabilities."""
+        from ragit.retrieval.capabilities import DEFAULT_MEMORY_CAPABILITIES  # noqa: PLC0415
+
+        return DEFAULT_MEMORY_CAPABILITIES
+
     def _matches_filters(self, record: dict[str, Any], filters: dict[str, Any]) -> bool:
-        """Return whether ``record`` satisfies every equality filter."""
-        return all(record.get(key) == value for key, value in filters.items())
+        """Return whether ``record`` satisfies every equality or IN filter."""
+        for key, value in filters.items():
+            record_val = record.get(key)
+            if isinstance(value, (list, tuple, set, frozenset)):
+                if record_val not in value:
+                    return False
+            elif record_val != value:
+                return False
+        return True
 
     def _metadata_projection(
         self,
