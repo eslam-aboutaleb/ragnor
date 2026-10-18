@@ -19,8 +19,6 @@ jobs:
   sonarcloud:
     name: SonarCloud Scan
     runs-on: ubuntu-latest
-    env:
-      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
       - name: Checkout repository with full history
         uses: actions/checkout@v4
@@ -42,12 +40,14 @@ jobs:
 
       - name: Check SONAR_TOKEN availability
         id: check-token
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           if [ -z "$SONAR_TOKEN" ]; then
             echo "::warning::SONAR_TOKEN secret is not set. Skipping SonarCloud scan."
-            echo "has_token=false" >> $GITHUB_OUTPUT
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
           else
-            echo "has_token=true" >> $GITHUB_OUTPUT
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: SonarCloud Scan
