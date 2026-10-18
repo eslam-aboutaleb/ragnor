@@ -122,6 +122,8 @@ def compute_source_hash(documents: list[RawDocument]) -> str:
             entry["extractor"] = doc.extractor
         if "extraction" in doc.metadata:
             entry["extraction"] = safe_config(doc.metadata["extraction"])
+        if doc.metadata:
+            entry["metadata"] = safe_config(doc.metadata)
         if doc.location is not None:
             entry["location"] = safe_config(doc.location)
         if doc.provenance:
@@ -181,8 +183,16 @@ def build_snapshot(  # noqa: PLR0913, PLR0917
         profile_hash = embedding_profile.canonical_hash()
     return IngestionSnapshot(
         source_hash=source_hash,
-        embedding_model=settings.embedding_model,
-        embedding_dim=get_embedding_dimension(settings.embedding_model),
+        embedding_model=(
+            embedding_profile.model_id
+            if embedding_profile is not None
+            else settings.embedding_model
+        ),
+        embedding_dim=(
+            embedding_profile.dimension
+            if embedding_profile is not None
+            else get_embedding_dimension(settings.embedding_model)
+        ),
         chunker_version=chunker.version,
         chunk_size=int(config.get("chunk_size", 0)),
         overlap=int(config.get("overlap", 0)),

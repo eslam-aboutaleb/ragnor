@@ -649,6 +649,31 @@ class PgVectorStore(VectorStore):
             keyword_field="score",
         )
 
+    async def get_embeddings(self, ids: list[str], session: Any = None) -> dict[str, list[float]]:
+        if not ids:
+            return {}
+        import json  # noqa: PLC0415
+
+        placeholders = ", ".join(f":id_{i}" for i in range(len(ids)))
+        stmt = (
+            f"SELECT {self.id_field}, embedding FROM {self.table_name} "
+            f"WHERE {self.id_field} IN ({placeholders})"
+        )
+        params = {f"id_{i}": doc_id for i, doc_id in enumerate(ids)}
+        if session is None:
+            async with self._resolve_session_factory()() as owned:
+                rows = await self._sql.fetch_all(owned, stmt, params)
+        else:
+            rows = await self._sql.fetch_all(session, stmt, params)
+        return {
+            str(row[self.id_field]): (
+                json.loads(row["embedding"])
+                if isinstance(row["embedding"], str)
+                else list(row["embedding"])
+            )
+            for row in rows
+        }
+
     async def delete(
         self,
         ids: list[Any] | None = None,

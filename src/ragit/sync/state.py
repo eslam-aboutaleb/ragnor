@@ -8,6 +8,8 @@ and tracks collection generations.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, AbstractAsyncContextManager
 from dataclasses import dataclass
 import time
 from typing import Any, Protocol, runtime_checkable
@@ -79,6 +81,14 @@ class SyncStateStore(Protocol):
         """Persist a checkpoint guarded by the active fencing token."""
         ...
 
+    def fenced(self, token: FenceToken) -> AbstractAsyncContextManager[None]:
+        """Exclude lease takeover while committing, and reject invalid tokens.
+
+        Durable adapters must provide an equivalent transaction/advisory lock;
+        a separate token check followed by an unguarded write is insufficient.
+        """
+        ...
+
 
 class InMemorySyncStateStore:
     """Thread-safe and async-safe in-memory SyncStateStore."""
@@ -89,18 +99,27 @@ class InMemorySyncStateStore:
         self._generations: dict[str, int] = {}
         self._checkpoints: dict[str, dict[str, Any]] = {}
         self._lock = asyncio.Lock()
+        self._scope_locks: dict[str, asyncio.Lock] = {}
+        self._guarded: set[tuple[str, int]] = set()
+
+    @asynccontextmanager
+    async def fenced(self, token: FenceToken) -> AsyncIterator[None]:
+        async with self._scope_locks.setdefault(token.scope, asyncio.Lock()):
+            if not await self.validate_token(token):
+                raise ValueError("Expired or superseded fencing token")
+            self._guarded.add((token.scope, token.epoch))
+            try:
+                yield
+            finally:
+                self._guarded.discard((token.scope, token.epoch))
 
     async def acquire_lease(
         self, scope: str, owner: str, ttl_seconds: float = 30.0
     ) -> FenceToken | None:
-        async with self._lock:
+        async with self._scope_locks.setdefault(scope, asyncio.Lock()), self._lock:
             now = time.time()
             current_lease = self._leases.get(scope)
-            if (
-                current_lease is not None
-                and current_lease.is_valid(now)
-                and current_lease.owner != owner
-            ):
+            if current_lease is not None and current_lease.is_valid(now):
                 return None
 
             epoch = self._epochs.get(scope, 0) + 1
@@ -187,7 +206,7 @@ class InMemorySyncStateStore:
                 current is None
                 or current.owner != token.owner
                 or current.epoch != token.epoch
-                or not current.is_valid(now)
+                or (not current.is_valid(now) and (scope, token.epoch) not in self._guarded)
             ):
                 return False
             self._checkpoints[scope] = dict(checkpoint)

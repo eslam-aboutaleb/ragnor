@@ -443,6 +443,8 @@ async def test_stale_worker_cannot_activate_obsolete_revisions(
             source=[RawDocument(source_name="w1.txt", content="hi")],
         )
 
+    # A worker must release its existing lease before starting another run.
+    await state_store.release_lease(t2)
     # Worker 2 runs successfully
     report2 = await w2.run_sync(
         "tenant1",
@@ -569,7 +571,7 @@ async def test_outbox_integration_enqueues_idempotency_keys(
     assert report.success is True
     assert len(job_store.enqueued_payloads) == 1
     payload = job_store.enqueued_payloads[0]
-    expected_key = "tenant1:outbox_doc.txt:1:embed"
+    expected_key = "tenant1:outbox_doc.txt:1:e1:activate"
     assert payload["idempotency_key"] == expected_key
 
 

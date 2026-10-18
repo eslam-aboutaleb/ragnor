@@ -258,6 +258,8 @@ class InMemoryEmbeddingJobStore:
     async def enqueue(self, payload: dict[str, Any], session: Any = None) -> None:
         """Enqueue a new job payload."""
         job_id = payload.get("idempotency_key") or f"job-{len(self.jobs) + 1}"
+        if any(job.job_id == job_id for job in self.jobs):
+            return
         status = payload.get("status", "pending")
         job = JobPayload(
             job_id=job_id,
@@ -296,14 +298,8 @@ class InMemoryEmbeddingJobStore:
         job.completed_at = datetime.now(UTC)
 
     async def mark_failed(self, job: JobPayload, error: Exception) -> None:
-        """Mark job as failed or dead_letter."""
-        job.retry_count += 1
-        if job.retry_count >= job.max_attempts:
-            job.status = "dead_letter"
-            job.status_detail = str(error)
-        else:
-            job.status = "failed"
-            job.status_detail = str(error)
+        """Persist the transition already computed by process_pending_jobs."""
+        job.status_detail = job.status_detail or str(error)
 
     async def reclaim_stale(self, stale_after_seconds: float | None = None) -> int:
         """Reclaim stale jobs."""

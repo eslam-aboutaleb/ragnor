@@ -91,7 +91,7 @@ async def run_recipe() -> None:
     print("--- 1. Initializing Multi-Collection Setup ---")
     embedder = HashingEmbedder(dim=16)
 
-    # 1. Setup Collection 1: Official Product Documentation
+    # Setup Collection 1: Official Product Documentation
     docs_store = InMemoryVectorStore(
         table_name="docs_chunks", embedding_dim=16, embedding_fn=embedder
     )
@@ -131,7 +131,7 @@ async def run_recipe() -> None:
     ]
     await docs_store.upsert(docs_chunks)
 
-    # 2. Setup Collection 2: Production Incident Postmortems
+    # Setup Collection 2: Production Incident Postmortems
     incidents_store = InMemoryVectorStore(
         table_name="incident_chunks", embedding_dim=16, embedding_fn=embedder
     )
@@ -155,7 +155,7 @@ async def run_recipe() -> None:
     ]
     await incidents_store.upsert(incident_chunks)
 
-    # 3. Configure KnowledgeBridge with both collections
+    # Configure KnowledgeBridge with both collections
     snapshot_store = MemorySnapshotStore()
     source_lookup = SourceLookup(snapshot_store)
 

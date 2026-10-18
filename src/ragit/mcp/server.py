@@ -7,6 +7,7 @@ over MCP stdio or remote transports.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from ragit.tools.bridge import KnowledgeBridge
@@ -28,12 +29,14 @@ except (ImportError, ModuleNotFoundError):
         _MCPServerClass = None
 
 
-def create_mcp_server(
+def create_mcp_server(  # noqa: PLR0913
     bridge: KnowledgeBridge,
     name: str = "ragit-knowledge",
     *,
     enable_management_tools: bool = False,
     server_class: Any | None = None,
+    client_id: str | None = None,
+    client_id_provider: Callable[[], str | None] | None = None,
 ) -> Any:
     """Create and configure an MCP server instance wrapping a KnowledgeBridge.
 
@@ -63,7 +66,18 @@ def create_mcp_server(
 
     server = cls(name)
 
-    # 1. search_knowledge tool
+    def identity() -> str | None:
+        # The provider is trusted host code, never a model-supplied tool argument.
+        if client_id_provider is not None:
+            return client_id_provider()
+        try:
+            from mcp.server.auth.middleware.auth_context import get_access_token  # noqa: PLC0415
+        except ImportError:
+            return client_id
+        token = get_access_token()
+        return token.client_id if token is not None else client_id
+
+    # search_knowledge tool
     @server.tool(
         name="search_knowledge",
         description=(
@@ -74,7 +88,7 @@ def create_mcp_server(
     )
     async def search_knowledge(  # noqa: PLR0913, PLR0917
         query: str,
-        collection: str = "default",
+        collection: str = bridge.default_collection,
         filters: dict[str, Any] | None = None,
         candidate_k: int = 20,
         final_k: int = 5,
@@ -83,6 +97,7 @@ def create_mcp_server(
     ) -> dict[str, Any]:
         """Search knowledge collection with budget limits and tenant isolation."""
         bundle = await bridge.search_knowledge(
+            client_id=identity(),
             query=query,
             collection=collection,
             filters=filters,
@@ -93,7 +108,7 @@ def create_mcp_server(
         )
         return bundle.to_dict()
 
-    # 2. get_source tool
+    # get_source tool
     @server.tool(
         name="get_source",
         description=(
@@ -108,11 +123,12 @@ def create_mcp_server(
         start_offset: int | None = None,
         end_offset: int | None = None,
         max_span_length: int | None = None,
-        collection: str = "default",
+        collection: str = bridge.default_collection,
         scope: str | None = None,
     ) -> dict[str, Any]:
         """Fetch bounded source span for citation verification."""
         span_result = await bridge.get_source(
+            client_id=identity(),
             source_ref=source_ref,
             document_id=document_id,
             revision=revision,
@@ -124,7 +140,7 @@ def create_mcp_server(
         )
         return span_result.to_dict()
 
-    # 3. knowledge_status tool
+    # knowledge_status tool
     @server.tool(
         name="knowledge_status",
         description=(
@@ -133,18 +149,19 @@ def create_mcp_server(
         ),
     )
     async def knowledge_status(
-        collection: str = "default",
+        collection: str = bridge.default_collection,
         scope: str | None = None,
         include_expensive: bool = False,
     ) -> dict[str, Any]:
         """Retrieve sanitized status summary for a collection."""
         return await bridge.knowledge_status(
+            client_id=identity(),
             collection=collection,
             scope=scope,
             include_expensive=include_expensive,
         )
 
-    # 4. Opt-in management tools
+    # Opt-in management tools
     if enable_management_tools:
         if not bridge.allow_management:
             logger.warning(
@@ -167,6 +184,7 @@ def create_mcp_server(
         ) -> dict[str, Any]:
             """Ingest document batches into collection."""
             return await bridge.sync_collection(
+                client_id=identity(),
                 collection=collection,
                 source_id=source_id,
                 documents=documents,
@@ -188,6 +206,7 @@ def create_mcp_server(
         ) -> dict[str, Any]:
             """Revoke document from active search visibility."""
             return await bridge.revoke_document(
+                client_id=identity(),
                 collection=collection,
                 document_id=document_id,
                 source_id=source_id,

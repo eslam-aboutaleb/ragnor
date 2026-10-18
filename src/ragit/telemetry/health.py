@@ -479,7 +479,7 @@ class HealthChecker:
                     details=details,
                 )
 
-            if not is_authoritative or phase not in ("completed", "scan_complete"):
+            if not is_authoritative or phase != "completed":
                 return ComponentHealth(
                     name="sync_status",
                     state=HealthState.DEGRADED,

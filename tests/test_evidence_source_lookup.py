@@ -127,7 +127,7 @@ def test_scope_authorization_enforced() -> None:
             authorization_scope="marketing_dept",
             strict=True,
         )
-    assert "finance_dept" in str(exc_info.value)
+    assert "different scope" in str(exc_info.value)
 
 
 def test_bounded_span_offsets_and_max_length() -> None:

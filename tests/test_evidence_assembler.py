@@ -61,25 +61,27 @@ def test_exact_tokenizer_bundle_stays_within_budget() -> None:
     exact_tok = ExactTokenizerAdapter(lambda s: len(s.split()), name="word_count")
     assembler = EvidenceAssembler(tokenizer=exact_tok)
 
-    # Budget allows 15 evidence tokens
+    # Budget includes text, citations and context framing
     budget = ContextBudget(
-        total_budget=100,
+        total_budget=161,
         reserved_instructions=50,
         reserved_user_input=20,
         reserved_answer=15,
     )
-    assert budget.available_evidence_tokens == 15
+    assert budget.available_evidence_tokens == 76
 
     hits = [
         SearchHit(id="h1", document="word " * 6, score=0.9),  # 6 tokens
-        SearchHit(id="h2", document="word " * 7, score=0.8),  # 7 tokens -> running total 13
-        SearchHit(id="h3", document="word " * 5, score=0.7),  # 5 tokens -> would exceed 15!
+        SearchHit(id="h2", document="word " * 7, score=0.8),  # 7 text tokens
+        SearchHit(
+            id="h3", document="word " * 5, score=0.7
+        ),  # Framing plus this item exceeds the budget
     ]
 
     bundle = assembler.assemble(hits, budget)
     assert bundle.status == EvidenceStatus.SUCCESS
     assert len(bundle.items) == 2
-    assert bundle.total_tokens == 13
+    assert bundle.total_tokens == exact_tok.count_tokens(bundle.format_context()) == 76
     assert bundle.total_tokens <= budget.available_evidence_tokens
     assert bundle.is_truncated is True
 
@@ -171,7 +173,7 @@ def test_budget_truncation_preserves_provenance() -> None:
     assembler = EvidenceAssembler(tokenizer=exact_tok)
 
     # Room for only 1 hit
-    budget = ContextBudget(total_budget=10, reserved_instructions=0)
+    budget = ContextBudget(total_budget=80, reserved_instructions=0)
 
     hit1 = SearchHit(
         id="h1",
@@ -258,27 +260,27 @@ def test_malicious_source_instructions_remain_evidence_text() -> None:
 def test_distinct_statuses_for_edge_conditions() -> None:
     assembler = EvidenceAssembler()
 
-    # 1. Empty successful search
+    # Empty successful search
     budget = ContextBudget(total_budget=500)
     bundle_empty = assembler.assemble([], budget)
     assert bundle_empty.status == EvidenceStatus.EMPTY_SEARCH
     assert bundle_empty.can_answer is False
     assert bundle_empty.should_abstain is True
 
-    # 2. Backend failure
+    # Backend failure
     bundle_fail = assembler.assemble([], budget, backend_failure=True)
     assert bundle_fail.status == EvidenceStatus.BACKEND_FAILURE
     assert bundle_fail.can_answer is False
     assert bundle_fail.should_abstain is True
 
-    # 3. Stale index condition
+    # Stale index condition
     hits = [SearchHit(id="1", document="Some doc")]
     bundle_stale = assembler.assemble(hits, budget, is_stale_index=True)
     assert bundle_stale.status == EvidenceStatus.STALE_INDEX
     assert bundle_stale.can_answer is False
     assert bundle_stale.should_abstain is True
 
-    # 4. Insufficient budget (reserved tokens consume total)
+    # Insufficient budget (reserved tokens consume total)
     bad_budget = ContextBudget(total_budget=100, reserved_instructions=100)
     bundle_no_budget = assembler.assemble(hits, bad_budget)
     assert bundle_no_budget.status == EvidenceStatus.INSUFFICIENT_BUDGET
@@ -312,8 +314,8 @@ def test_optional_compressor_retains_verifiable_references() -> None:
     exact_tok = ExactTokenizerAdapter(lambda s: len(s.split()))
     assembler = EvidenceAssembler(tokenizer=exact_tok, compressor=MockCompressor())
 
-    # Room for 8 tokens
-    budget = ContextBudget(total_budget=8)
+    # Room for framing and a compressed 8-token excerpt
+    budget = ContextBudget(total_budget=60)
 
     long_hit = SearchHit(
         id="c_long",

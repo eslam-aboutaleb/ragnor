@@ -8,11 +8,19 @@ call this bridge rather than duplicating retrieval and authorization logic.
 from __future__ import annotations
 
 import logging
+import hashlib
+import inspect
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 from ragit.evidence.assembler import EvidenceAssembler
+from ragit.evidence.references import parse_source_reference
+from ragit.retrieval.retriever import HybridRetriever
+from ragit.retrieval.strategies import DenseRetrieval, HybridRetrieval, KeywordRetrieval
+from ragit.retrieval.types import RetrievalRequest
+from ragit.evidence.types import ScopeAuthorizationError
 from ragit.evidence.source_lookup import (
     BoundedSpanResult,
     MemorySnapshotStore,
@@ -54,6 +62,7 @@ class CollectionConfig:
     source_lookup: SourceLookup | None = None
     allowed_scopes: set[str] = field(default_factory=lambda: {"*"})
     metadata: dict[str, Any] = field(default_factory=dict)
+    scope_field: str | None = None
 
 
 class KnowledgeBridge:
@@ -102,6 +111,8 @@ class KnowledgeBridge:
         if collections:
             for name, item in collections.items():
                 if isinstance(item, CollectionConfig):
+                    if item.name != name:
+                        raise ValueError("Collection registry key must match its configured name")
                     self._collections[name] = item
                 else:
                     self._collections[name] = CollectionConfig(
@@ -123,6 +134,7 @@ class KnowledgeBridge:
         retriever: Any,
         source_lookup: SourceLookup | None = None,
         allowed_scopes: set[str] | None = None,
+        scope_field: str | None = None,
     ) -> None:
         """Register a new collection in the bridge."""
         validate_safe_identifier(name, "collection name")
@@ -130,26 +142,42 @@ class KnowledgeBridge:
             name=name,
             retriever=retriever,
             source_lookup=source_lookup or self.source_lookup,
-            allowed_scopes=allowed_scopes or {"*"},
+            allowed_scopes={"*"} if allowed_scopes is None else set(allowed_scopes),
+            scope_field=scope_field,
         )
 
     def _get_collection(self, collection_name: str) -> CollectionConfig:
         """Look up collection configuration or raise KeyError."""
         if collection_name in self._collections:
             return self._collections[collection_name]
-        if self._collections and self.default_collection in self._collections:
-            return self._collections[self.default_collection]
-        if self._collections and len(self._collections) == 1:
-            return next(iter(self._collections.values()))
         raise KeyError(
             f"Collection {collection_name!r} not found. "
             f"Available collections: {list(self._collections.keys())}"
         )
 
-    async def search_knowledge(  # noqa: PLR0913, PLR0917
+    def _authorize(
+        self, collection: str, scope: str | None, client_id: str | None
+    ) -> CollectionConfig:
+        cfg = self._get_collection(collection)
+        self.authorizer.enforce(client_id, cfg.name, scope)
+        if "*" not in cfg.allowed_scopes and scope not in cfg.allowed_scopes:
+            raise ScopeAuthorizationError("Collection does not permit the requested scope")
+        return cfg
+
+    @staticmethod
+    def _scope_field(cfg: CollectionConfig) -> str:
+        if cfg.scope_field is not None:
+            return cfg.scope_field
+        if isinstance(
+            cfg.retriever, (HybridRetriever, DenseRetrieval, HybridRetrieval, KeywordRetrieval)
+        ):
+            return "tenant_id"
+        return "scope" if hasattr(cfg.retriever, "_manifest_store") else "isolation_scope"
+
+    async def search_knowledge(  # noqa: PLR0913, PLR0917, PLR0915
         self,
         query: str,
-        collection: str = "default",
+        collection: str | None = None,
         filters: dict[str, Any] | None = None,
         candidate_k: int = 20,
         final_k: int = 5,
@@ -174,33 +202,70 @@ class KnowledgeBridge:
         Returns:
             Structured :class:`EvidenceBundle` with deduplicated, bounded evidence.
         """
-        # 1. Security validation on inputs
+        # Security validation on inputs
         validate_safe_string(query, "query")
+        collection = self.default_collection if collection is None else collection
         validate_safe_identifier(collection, "collection")
         if scope is not None:
             validate_safe_identifier(scope, "scope")
         validate_safe_filters(filters)
 
-        # 2. Scope authorization
-        self.authorizer.enforce(client_id, collection, scope)
-
-        cfg = self._get_collection(collection)
+        # Scope authorization
+        cfg = self._authorize(collection, scope, client_id)
         retriever = cfg.retriever
 
-        # 3. Retrieve candidates from retriever
+        # Retrieve candidates from retriever
         merged_filters = dict(filters or {})
+        scope_field = self._scope_field(cfg)
         if scope is not None:
-            merged_filters["isolation_scope"] = scope
+            merged_filters[scope_field] = scope
+        for count in (candidate_k, final_k):
+            if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+                raise ValueError("candidate_k and final_k must be positive integers")
 
         raw_results: Any = []
         try:
-            if hasattr(retriever, "retrieve"):
-                # HybridRetriever or typed retrieval strategy
+            if isinstance(
+                retriever, (HybridRetriever, DenseRetrieval, HybridRetrieval, KeywordRetrieval)
+            ):
+                threshold = distance_threshold
+                if threshold is None and not isinstance(retriever, HybridRetriever):
+                    threshold = 1.5
+                request = RetrievalRequest(
+                    query,
+                    final_k=candidate_k,
+                    candidate_k=candidate_k,
+                    threshold=threshold,
+                    filters=merged_filters,
+                    isolation_scope=scope,
+                    scope_field=scope_field,
+                    strict=True,
+                    metadata_fields=[
+                        "source_id",
+                        "document_id",
+                        "doc_id",
+                        "revision",
+                        "page",
+                        "section",
+                        "line",
+                        "title",
+                        "uri",
+                        "start_offset",
+                        "end_offset",
+                        "freshness",
+                        scope_field,
+                    ],
+                )
+                raw_results = (await retriever.retrieve_typed(request)).to_dicts()
+            elif hasattr(retriever, "retrieve"):
+                parameters = inspect.signature(retriever.retrieve).parameters
+                options = dict(merged_filters)
+                if "distance_threshold" in parameters:
+                    options["distance_threshold"] = distance_threshold
+                elif "threshold" in parameters and distance_threshold is not None:
+                    options["threshold"] = distance_threshold
                 raw_results = await retriever.retrieve(
-                    query=query,
-                    n_results=candidate_k,
-                    distance_threshold=distance_threshold,
-                    **merged_filters,
+                    query=query, n_results=candidate_k, **options
                 )
             elif hasattr(retriever, "hybrid_search"):
                 # VectorStore direct call
@@ -217,7 +282,9 @@ class KnowledgeBridge:
                     "start_offset",
                     "end_offset",
                     "freshness",
-                    "isolation_scope",
+                    scope_field,
+                    "doc_id",
+                    "provenance",
                 ]
                 if filters:
                     for k in filters:
@@ -229,6 +296,7 @@ class KnowledgeBridge:
                     n_results=candidate_k,
                     threshold=thresh,
                     metadata_fields=std_meta,
+                    strict=True,
                     **merged_filters,
                 )
 
@@ -252,7 +320,7 @@ class KnowledgeBridge:
                 status_detail=f"Backend retrieval failure: {exc}",
             )
 
-        # 4. Standardize candidate results into SearchHits
+        # Standardize candidate results into SearchHits
         hits: list[SearchHit] = []
         if isinstance(raw_results, Sequence):
             for res in raw_results:
@@ -265,7 +333,7 @@ class KnowledgeBridge:
                 elif isinstance(res, dict):
                     hits.append(SearchHit.from_dict(res))
 
-        # 5. Build budget
+        # Build budget
         if isinstance(budget_limit, ContextBudget):
             budget = budget_limit
         else:
@@ -274,7 +342,7 @@ class KnowledgeBridge:
                 max_evidence_items=final_k,
             )
 
-        # 6. Assemble evidence
+        # Assemble evidence
         return self.assembler.assemble(hits, budget=budget)
 
     async def get_source(  # noqa: PLR0913, PLR0917
@@ -283,7 +351,7 @@ class KnowledgeBridge:
         document_id: str | None = None,
         revision: str = "v1",
         location: dict[str, Any] | tuple[int, int] | None = None,
-        collection: str = "default",
+        collection: str | None = None,
         scope: str | None = None,
         client_id: str | None = None,
         start_offset: int | None = None,
@@ -311,39 +379,27 @@ class KnowledgeBridge:
         if document_id is not None:
             validate_safe_identifier(document_id, "document_id")
         validate_safe_identifier(revision, "revision")
+        collection = self.default_collection if collection is None else collection
         validate_safe_identifier(collection, "collection")
         if scope is not None:
             validate_safe_identifier(scope, "scope")
 
-        self.authorizer.enforce(client_id, collection, scope)
-
-        cfg = self._get_collection(collection)
+        cfg = self._authorize(collection, scope, client_id)
         lookup = cfg.source_lookup or self.source_lookup
 
-        # Parse source_ref if document_id is not provided
         resolved_source_id = source_ref
         resolved_doc_id = document_id
         resolved_revision = revision
-
-        if resolved_doc_id is None:
-            if "@" in source_ref and ":" in source_ref:
-                # Format: source_id@revision:document_id
-                parts = source_ref.split("@", 1)
-                resolved_source_id = parts[0]
-                rev_doc = parts[1].split(":", 1)
-                resolved_revision = rev_doc[0]
-                resolved_doc_id = rev_doc[1]
-            elif ":" in source_ref:
-                # Format: source_id:document_id
-                parts = source_ref.split(":", 1)
-                resolved_source_id = parts[0]
-                resolved_doc_id = parts[1]
-            else:
-                resolved_doc_id = source_ref
+        parsed_start = parsed_end = None
+        if document_id is None:
+            (resolved_source_id, resolved_doc_id, parsed_revision, parsed_start, parsed_end) = (
+                parse_source_reference(source_ref)
+            )
+            resolved_revision = parsed_revision or revision
 
         # Parse location parameters
-        start = start_offset
-        end = end_offset
+        start = parsed_start if start_offset is None else start_offset
+        end = parsed_end if end_offset is None else end_offset
 
         if isinstance(location, tuple) and len(location) == 2:
             start = location[0]
@@ -368,7 +424,7 @@ class KnowledgeBridge:
 
     async def knowledge_status(
         self,
-        collection: str = "default",
+        collection: str | None = None,
         scope: str | None = None,
         client_id: str | None = None,
         include_expensive: bool = False,
@@ -386,13 +442,12 @@ class KnowledgeBridge:
         Returns:
             Sanitized dictionary containing state, document counts, and component health.
         """
+        collection = self.default_collection if collection is None else collection
         validate_safe_identifier(collection, "collection")
         if scope is not None:
             validate_safe_identifier(scope, "scope")
 
-        self.authorizer.enforce(client_id, collection, scope)
-
-        cfg = self._get_collection(collection)
+        cfg = self._authorize(collection, scope, client_id)
         retriever = cfg.retriever
 
         # Run health check if checker is available
@@ -452,7 +507,7 @@ class KnowledgeBridge:
     # Management Operations (Opt-in, Permission-Gated)
     # -------------------------------------------------------------------------
 
-    async def sync_collection(  # noqa: PLR0913
+    async def sync_collection(  # noqa: PLR0913, PLR0915
         self,
         collection: str,
         source_id: str,
@@ -473,14 +528,13 @@ class KnowledgeBridge:
                 "Enable them explicitly with allow_management=True."
             )
 
+        collection = self.default_collection if collection is None else collection
         validate_safe_identifier(collection, "collection")
         validate_safe_string(source_id, "source_id")
         if scope is not None:
             validate_safe_identifier(scope, "scope")
 
-        self.authorizer.enforce(client_id, collection, scope)
-
-        cfg = self._get_collection(collection)
+        cfg = self._authorize(collection, scope, client_id)
         retriever = cfg.retriever
         lookup = cfg.source_lookup or self.source_lookup
 
@@ -491,42 +545,75 @@ class KnowledgeBridge:
         # Also register snapshots in source lookup for immutable citation tracking
         snapshot_store = getattr(lookup, "_store", None)
 
+        normalized: list[dict[str, Any]] = []
+        snapshots: list[SnapshotRecord] = []
+        scope_field = self._scope_field(cfg)
         for doc in documents:
-            doc_id = getattr(doc, "id", None) or doc.get("id") if isinstance(doc, dict) else ""
-            text = (
-                getattr(doc, "text", None)
-                or getattr(doc, "document", None)
-                or (doc.get("text") or doc.get("document") if isinstance(doc, dict) else "")
-            )
-            revision = (
-                getattr(doc, "revision", None)
-                or (doc.get("revision") if isinstance(doc, dict) else None)
-                or "v1"
-            )
-            metadata = (
-                getattr(doc, "metadata", None)
-                or (doc.get("metadata") if isinstance(doc, dict) else {})
-                or {}
-            )
-
-            validate_safe_identifier(str(doc_id), "document id")
+            row = dict(doc) if isinstance(doc, Mapping) else vars(doc).copy()
+            doc_id = str(row.get("id") or row.get("external_id") or row.get("source_name") or "")
+            text = row.get("text", row.get("document", row.get("content", "")))
+            metadata = dict(row.get("metadata") or {})
+            revision = str(row.get("revision") or metadata.get("revision") or "v1")
+            parent_id = str(metadata.get("document_id") or doc_id)
+            validate_safe_identifier(doc_id, "document id")
             validate_safe_string(text, "document text")
-            validate_safe_identifier(str(revision), "document revision")
+            validate_safe_identifier(revision, "document revision")
+            for key in {scope_field, "tenant_id", "scope", "isolation_scope"}:
+                if key in metadata and metadata[key] != scope:
+                    raise ScopeAuthorizationError(
+                        "Document ownership conflicts with authorized scope"
+                    )
+            if "source_id" in metadata and metadata["source_id"] != source_id:
+                raise ScopeAuthorizationError("Document source conflicts with authorized source")
+            metadata.update(source_id=source_id, document_id=parent_id, revision=revision)
+            if scope is not None:
+                metadata[scope_field] = scope
+            key = json.dumps([cfg.name, scope, source_id, doc_id], separators=(",", ":"))
+            normalized.append(
+                {
+                    **row,
+                    "id": hashlib.sha256(key.encode()).hexdigest(),
+                    "text": text,
+                    "metadata": metadata,
+                }
+            )
+            snapshots.append(SnapshotRecord(source_id, parent_id, revision, text, scope, metadata))
 
-            if snapshot_store is not None and hasattr(snapshot_store, "put"):
-                snapshot = SnapshotRecord(
-                    source_id=source_id,
-                    document_id=str(doc_id),
-                    revision=str(revision),
-                    content=text,
-                    isolation_scope=scope,
-                    metadata=dict(metadata),
-                )
-                snapshot_store.put(snapshot)
+        # Validate all immutable revisions before mutating vectors or snapshots.
+        pending: dict[tuple[str, str], SnapshotRecord] = {}
+        for snapshot in snapshots:
+            identity = (snapshot.document_id, snapshot.revision)
+            previous = pending.get(identity)
+            if previous is not None and (
+                previous.content != snapshot.content or previous.metadata != snapshot.metadata
+            ):
+                raise ValueError("Conflicting document revisions in the same batch")
+            pending[identity] = snapshot
+            if snapshot_store is not None:
+                if hasattr(snapshot_store, "get_scoped"):
+                    existing = snapshot_store.get_scoped(
+                        source_id, snapshot.document_id, snapshot.revision, scope
+                    )
+                else:
+                    existing = snapshot_store.get(
+                        source_id, snapshot.document_id, snapshot.revision
+                    )
+                if (
+                    existing is not None
+                    and existing.isolation_scope == scope
+                    and (
+                        existing.content != snapshot.content
+                        or existing.metadata != snapshot.metadata
+                    )
+                ):
+                    raise ValueError("Cannot replace an immutable document revision")
 
         if hasattr(store, "upsert"):
-            await store.upsert(documents)
-            ingested_count = len(documents)
+            await store.upsert(normalized)
+            ingested_count = len(normalized)
+        if snapshot_store is not None:
+            for snapshot in snapshots:
+                snapshot_store.put(snapshot)
 
         return {
             "status": "success",
@@ -556,23 +643,24 @@ class KnowledgeBridge:
                 "Enable them explicitly with allow_management=True."
             )
 
+        collection = self.default_collection if collection is None else collection
         validate_safe_identifier(collection, "collection")
         validate_safe_identifier(document_id, "document_id")
         validate_safe_string(source_id, "source_id")
         if scope is not None:
             validate_safe_identifier(scope, "scope")
 
-        self.authorizer.enforce(client_id, collection, scope)
-
-        cfg = self._get_collection(collection)
+        cfg = self._authorize(collection, scope, client_id)
         retriever = cfg.retriever
         store = getattr(retriever, "store", retriever)
 
+        lookup = cfg.source_lookup or self.source_lookup
+        lookup.revoke(source_id, document_id, scope)
         deleted_count = 0
         if hasattr(store, "delete"):
-            filters: dict[str, Any] = {"document_id": document_id}
+            filters: dict[str, Any] = {"document_id": document_id, "source_id": source_id}
             if scope is not None:
-                filters["isolation_scope"] = scope
+                filters[self._scope_field(cfg)] = scope
             deleted_count = await store.delete(filters=filters)
 
         return {

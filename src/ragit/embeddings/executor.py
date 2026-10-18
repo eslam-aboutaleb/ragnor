@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import inspect
 import math
 import random
 import re
@@ -247,6 +248,20 @@ class EmbeddingExecutor:
         """The profile this executor enforces."""
         return self._profile
 
+    async def __call__(self, texts: list[str]) -> list[list[float]]:
+        vectors, _ = await self.embed(texts)
+        return vectors
+
+    async def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        mode = TaskMode.DOCUMENT if self._profile.task_mode != TaskMode.SYMMETRIC else None
+        vectors, _ = await self.embed(texts, task_mode=mode)
+        return vectors
+
+    async def embed_query(self, text: str | list[str]) -> list[float]:
+        mode = TaskMode.QUERY if self._profile.task_mode != TaskMode.SYMMETRIC else None
+        vectors, _ = await self.embed([text] if isinstance(text, str) else text, task_mode=mode)
+        return vectors[0]
+
     async def embed(
         self,
         texts: list[str],
@@ -354,7 +369,7 @@ class EmbeddingExecutor:
                 metrics.total_retry_count += 1
 
             try:
-                vectors = await self._call_provider(batch)
+                vectors = await self._call_provider(batch, task_mode)
                 _validate_response(batch, vectors, self._profile)
                 metrics.embed_calls += 1
                 metrics.cache_misses += len(batch)
@@ -397,15 +412,28 @@ class EmbeddingExecutor:
         # Should be unreachable.
         raise EmbeddingTransientError("Retry loop exited unexpectedly.")
 
-    async def _call_provider(self, batch: list[str]) -> list[list[float]]:
+    async def _call_provider(self, batch: list[str], task_mode: TaskMode) -> list[list[float]]:
         """Call the wrapped embedding function under semaphore and timeout."""
+
+        async def invoke() -> list[list[float]]:
+            parameters = inspect.signature(self._fn).parameters
+            if "task_mode" in parameters:
+                return await self._fn(batch, task_mode=task_mode)
+            if task_mode == TaskMode.DOCUMENT and hasattr(self._fn, "embed_documents"):
+                return await self._fn.embed_documents(batch)
+            if task_mode == TaskMode.QUERY and hasattr(self._fn, "embed_query"):
+                return [await self._fn.embed_query(text) for text in batch]
+            if task_mode != TaskMode.SYMMETRIC:
+                raise EmbeddingPermanentError("Provider does not support the requested task_mode")
+            return await self._fn(batch)
+
         async with self._semaphore:
             if self._timeout_seconds > 0:
                 return await asyncio.wait_for(
-                    self._fn(batch),
+                    invoke(),
                     timeout=self._timeout_seconds,
                 )
-            return await self._fn(batch)
+            return await invoke()
 
     def _backoff_delay(self, attempt: int, last_exc: BaseException | None) -> float:
         """Compute the back-off delay for *attempt* (1-indexed)."""

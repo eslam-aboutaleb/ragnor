@@ -48,7 +48,7 @@ class SyncRetriever:
     ) -> list[dict[str, Any]]:
         """Perform hybrid search with mandatory active generation and tombstone filtering."""
         # Ensure mandatory metadata fields for generation and tombstone validation
-        system_fields = ["doc_id", "scope", "generation", "active"]
+        system_fields = ["doc_id", "scope", "generation", "active", *filters]
         if metadata_fields is None:
             effective_fields = system_fields
         else:
@@ -69,19 +69,15 @@ class SyncRetriever:
             **filters,
         )
 
+        # Read one manifest snapshot so a collection commit cannot be observed halfway.
+        records = {record.document_id: record for record in await self._manifest_store.list(scope)}
         filtered: list[dict[str, Any]] = []
         for res in results:
             meta = res.get("metadata") or {}
             doc_id = meta.get("doc_id")
-            if not doc_id and res.get("id"):
-                parts = str(res["id"]).split(":")
-                if len(parts) >= 3 and parts[0] == scope:
-                    doc_id = parts[1]
-
-            if not doc_id:
+            if not doc_id or meta.get("scope") != scope or meta.get("active") is not True:
                 continue
-
-            rec = await self._manifest_store.get(scope, doc_id)
+            rec = records.get(doc_id)
             if rec is None:
                 continue
 
@@ -91,11 +87,11 @@ class SyncRetriever:
 
             # Ensure generation matches currently active generation
             chunk_gen = meta.get("generation")
-            if chunk_gen is not None and rec.active_generation != chunk_gen:
+            if rec.active_generation != chunk_gen:
                 continue
 
             # Ensure chunk ID is actually in the active chunk list
-            if res.get("id") and rec.chunk_ids and res["id"] not in rec.chunk_ids:
+            if res.get("id") not in rec.chunk_ids:
                 continue
 
             # If caller didn't ask for system fields, project only what was requested

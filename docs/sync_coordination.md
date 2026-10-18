@@ -38,19 +38,20 @@ This document defines the architecture, coordination algorithm, backend consiste
    - Chunks and embeds added or changed documents in bounded batches (`batch_size`).
    - Assigns unique generation-scoped IDs (`{scope}:{doc_id}:g{staged_gen}:{chunk_index}`).
    - Upserts chunks to the vector store with `active=False` (staging).
-   - Marks manifest record status as `STAGED`. Staged chunks remain completely invisible to readers.
-   - Re-uses the outbox pattern (`EmbeddingJobStore`) with idempotency keys (`{scope}:{doc_id}:{staged_gen}:embed`) for worker convergence.
+   - Chunk IDs also include the lease epoch and a unique attempt identifier. A delayed write from an expired worker cannot overwrite another attempt's vectors.
+   - Leaves the committed manifest unchanged while preparing a generation. Staged chunks remain invisible to readers; an update failure preserves the old active content and fingerprints.
+   - Metadata-only updates copy stored vectors into a new generation without invoking the embedding provider. Text and chunk locations are retained, and removed metadata keys disappear from the new payloads.
+   - Enqueues optional `pending` outbox reconciliation jobs with epoch-specific idempotency keys and exact chunk IDs. The host's `JobProcessor` must check manifest membership before acting on a job: abandoned attempts must never be activated by replaying a stale job.
 
 5. **Fencing Verification & Activation**:
-   - Re-verifies the fencing token (`state_store.validate_token`). If the lease expired or another worker acquired a higher epoch, the worker aborts (`StaleWorkerError`), preventing stale workers from activating obsolete revisions.
+   - Renews the lease during preparation and enters `state_store.fenced(token)` before publishing visibility. This context rejects stale workers and excludes lease takeover for the duration of the commit; a separate token check followed by an unguarded write is insufficient.
    - **Document-Level Activation (Default)**:
-     - Activates each successfully staged document independently using Compare-And-Swap (CAS) on `ManifestRecord.fence_token`.
-     - Flips vector store chunks to `active=True`.
+     - Publishes successfully prepared vectors with `active=True`, then commits their exact IDs in the manifest using Compare-And-Swap (CAS). Readers reject prepublished vectors whose IDs are absent from the committed manifest.
      - One failing or broken document does not block unrelated document updates.
    - **Collection-Level Activation (Opt-In)**:
      - For policy releases needing all-or-nothing visibility.
-     - Advances collection generation atomically (`state_store.advance_generation`).
-     - If any document fails embedding or validation, collection generation is not advanced and staging data remains unactivated.
+     - Publishes all changed vectors, then atomically switches all affected manifest records with `compare_and_swap_many`. Readers use one manifest snapshot per search. The collection generation counter is advanced within the same fenced commit context.
+     - If preparation fails, neither committed manifests nor the collection generation change. Retrying compares against the last committed fingerprints and prepares the update again.
 
 6. **Authoritative Tombstone Enforcement**:
    - Evaluated **only** when scan coverage is authoritative (`authoritative=True`, no errors, no pagination interruptions).
@@ -58,8 +59,8 @@ This document defines the architecture, coordination algorithm, backend consiste
    - Authoritatively deleted documents are transitioned to `status=TOMBSTONED` and `active_generation=0`.
 
 7. **Checkpoints, Async Garbage Collection & Lease Release**:
-   - Saves final sync checkpoint with summary statistics.
-   - Asynchronously triggers garbage collection (`vector_store.delete(ids=retired_chunk_ids)`).
+   - Saves scan authority, errors, observation time and the last successful sync time with summary statistics. An interrupted or failed scan is not reported as an identical successful scan.
+   - Cleans up retired and abandoned attempt IDs (`vector_store.delete(ids=retired_chunk_ids)`). Physical cleanup failures can be retried; manifest checks continue to enforce visibility.
    - Releases the scoped lease.
 
 ---
@@ -88,3 +89,11 @@ This document defines the architecture, coordination algorithm, backend consiste
     1. Query filter: `scope == scope` AND `active == True`.
     2. Defense-in-depth manifest check: Candidates whose document is `TOMBSTONED`, `FAILED`, or whose generation does not match `rec.active_generation` are **immediately dropped**.
   - **Zero-Trust Privacy Guarantee**: Even if physical deletion in the underlying vector store is asynchronous, delayed, or retrying after network errors, revoked or deleted data is **never** served to readers.
+
+## Host adapter requirements
+
+Custom `SyncStateStore` adapters must implement `fenced(token)` using a durable transaction or lock shared by every lease-acquisition path. The context must prevent a new epoch from acquiring ownership while a manifest commit is in progress. `ManifestStore.compare_and_swap_many(updates)` must validate all expected record versions and publish all records atomically, or publish none. The coordinator fails before mutation when these capabilities are absent.
+
+Vector stores used for metadata-only synchronization must implement `get_embeddings(ids, session=None) -> dict[str, list[float]]`. All built-in stores provide it. A failed or incomplete vector fetch leaves the committed document untouched. Durable manifest adapters should return independent record values rather than mutable references to stored state.
+
+The coordinator accepts legacy `DocumentSource` objects, connectors, document sequences and `LoadResult` values. Complete pagination from the beginning can establish authority; a resumed, interrupted, failed or incremental observation cannot authorize absence-based deletion, even when the caller passes `is_authoritative=True`. Multiple artifacts with the same parent ID must carry distinct locations, such as PDF page numbers.

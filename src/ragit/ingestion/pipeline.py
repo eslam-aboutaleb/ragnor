@@ -35,7 +35,6 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from ragit.chunking.base import Chunker
 from ragit.config import RagSettings
 from ragit.embeddings.base import EmbeddingFunction
-from ragit.embeddings.dimensions import get_embedding_dimension
 from ragit.ingestion.sources import DocumentSource, RawDocument
 from ragit.ingestion.connector_core import LoadResult
 from ragit.ingestion.versioning import (
@@ -235,7 +234,11 @@ class IngestionPipeline:
             if all(doc.extractor == first_ext for doc in documents):
                 extractor = first_ext
         current_snapshot = build_snapshot(
-            source_hash, self._settings, self._chunker, extractor=extractor
+            source_hash,
+            self._settings,
+            self._chunker,
+            extractor=extractor,
+            embedding_profile=getattr(self._embedder, "profile", None),
         )
 
         # Prepare phase: no transaction, no lock. The
@@ -270,7 +273,7 @@ class IngestionPipeline:
         # and outside the advisory lock: a slow remote call
         # must not hold either open.
         embeddings = await self._embedder([chunk.text for chunk in chunks])
-        embedding_dim = get_embedding_dimension(self._settings.embedding_model)
+        embedding_dim = current_snapshot.embedding_dim
         documents_to_upsert: list[dict[str, Any]] = []
         for chunk, embedding in zip(chunks, embeddings, strict=True):
             validate_embedding(embedding, expected_dim=embedding_dim, label="chunk embedding")
