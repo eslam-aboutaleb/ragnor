@@ -1,0 +1,4 @@
+name: Ragit security and quality
+
+queries:
+  - uses: security-and-quality

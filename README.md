@@ -779,6 +779,18 @@ RAGIT_TEST_DATABASE_URL="postgresql+asyncpg://user:pass@localhost/ragit_test" \
 
 ---
 
+### Continuous integration
+
+[CI](.github/workflows/ci.yml) inherits Python quality, security analysis, and workflow validation from
+[ci-workflows](https://github.com/eslam-aboutaleb/ci-workflows), pinned to a reviewed commit SHA.
+The Python call explicitly uses pip and the package's `test` extra on Python 3.11 and 3.12.
+It requires Ruff lint/format checks, at least 85% coverage of `src/ragit`, and valid wheel/sdist metadata.
+
+Ragit's optional backend matrix also runs in CI. `CI Status Check` requires the shared jobs and
+every backend job to succeed. SonarCloud runs through its dedicated workflow.
+GitHub Actions Dependabot updates cover the shared workflow references; review a dependency update
+and its resulting checks before adopting a new revision.
+
 ## Project structure
 
 ```
