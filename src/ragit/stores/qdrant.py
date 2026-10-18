@@ -475,6 +475,18 @@ class QdrantStore(HybridVectorStore):
         except Exception as exc:
             return handle_count_error(self.table_name, exc, strict, logger)
 
+    async def get_embeddings(self, ids: list[str], session: Any = None) -> dict[str, list[float]]:
+        if not ids:
+            return {}
+        await self._ensure_collection()
+        points = await self._resolve_client().retrieve(
+            collection_name=self.table_name,
+            ids=[_point_id(doc_id) for doc_id in ids],
+            with_vectors=True,
+            with_payload=True,
+        )
+        return {str(point.payload[self.id_field]): list(point.vector) for point in points}
+
     async def delete(
         self,
         ids: list[Any] | None = None,

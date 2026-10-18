@@ -20,6 +20,8 @@ ragit is a RAG _subsystem_, not an application. so **any** host application can 
 - [Embeddings](#embeddings)
 - [Vector stores](#vector-stores)
 - [Vector-store guide](docs/vector-stores.md)
+- [Sync coordination and adapter requirements](docs/sync_coordination.md)
+- [Knowledge bridge, evidence budgets, and MCP identity](docs/tool-bridge.md)
 - [Hybrid retrieval](#hybrid-retrieval)
 - [Ingestion](#ingestion)
 - [Job outbox and drainer](#job-outbox-and-drainer)

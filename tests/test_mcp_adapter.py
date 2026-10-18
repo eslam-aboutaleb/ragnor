@@ -61,6 +61,18 @@ class MockEmbedder:
         return self.embed(query)
 
 
+def _tool_payload(result: Any) -> dict[str, Any]:
+    """Normalize the public call_tool response from either supported SDK API."""
+    if hasattr(result, "content"):
+        assert not result.is_error
+        content = result.content
+    elif isinstance(result, tuple):
+        content, _ = result
+    else:
+        content = result
+    return json.loads(content[0].text)
+
+
 @pytest.fixture
 def test_bridge() -> KnowledgeBridge:
     embedder = MockEmbedder(dim=4)
@@ -131,11 +143,11 @@ async def test_mock_mcp_server_call_tools(test_bridge: KnowledgeBridge) -> None:
         server_class=MockMCPServer,
     )
 
-    # 1. knowledge_status
+    # knowledge_status
     status = await server.call_tool("knowledge_status", {"collection": "default"})
     assert status["is_healthy"] is True
 
-    # 2. get_source
+    # get_source
     span = await server.call_tool(
         "get_source",
         {
@@ -149,7 +161,7 @@ async def test_mock_mcp_server_call_tools(test_bridge: KnowledgeBridge) -> None:
     assert span["status"] == "success"
     assert "Chapter 1: MCP" in span["text"]
 
-    # 3. search_knowledge
+    # search_knowledge
     bundle = await server.call_tool(
         "search_knowledge",
         {"query": "MCP Guide", "candidate_k": 3},
@@ -194,9 +206,7 @@ async def test_real_mcp_call_knowledge_status(test_bridge: KnowledgeBridge) -> N
     """Calling knowledge_status through real MCP returns sanitized status."""
     server = create_mcp_server(test_bridge, name="test-ragit")
     res = await server.call_tool("knowledge_status", {"collection": "default"})
-    assert not res.is_error
-    text_content = res.content[0].text
-    status_data = json.loads(text_content)
+    status_data = _tool_payload(res)
     assert status_data["collection"] == "default"
     assert status_data["is_healthy"] is True
 
@@ -215,8 +225,7 @@ async def test_real_mcp_call_get_source(test_bridge: KnowledgeBridge) -> None:
             "end_offset": 20,
         },
     )
-    assert not res.is_error
-    span_data = json.loads(res.content[0].text)
+    span_data = _tool_payload(res)
     assert span_data["status"] == "success"
     assert "Chapter 1: MCP" in span_data["text"]
 
@@ -242,8 +251,7 @@ async def test_real_mcp_call_search_knowledge(test_bridge: KnowledgeBridge) -> N
         "search_knowledge",
         {"query": "MCP Server Adapter", "candidate_k": 3},
     )
-    assert not res.is_error
-    bundle_data = json.loads(res.content[0].text)
+    bundle_data = _tool_payload(res)
     assert bundle_data["status"] == "success"
     assert len(bundle_data["items"]) >= 1
     assert "MCP Server Adapter" in bundle_data["items"][0]["text"]

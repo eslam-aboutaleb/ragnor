@@ -342,6 +342,11 @@ class InMemoryVectorStore(HybridVectorStore):
 
         logger.info("Upserted %d documents to in-memory store %s.", len(documents), self.table_name)
 
+    async def get_embeddings(self, ids: list[str], session: Any = None) -> dict[str, list[float]]:
+        return {
+            doc_id: list(self._embeddings[doc_id]) for doc_id in ids if doc_id in self._embeddings
+        }
+
     async def delete(
         self,
         ids: list[Any] | None = None,

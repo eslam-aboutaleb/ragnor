@@ -79,6 +79,7 @@ class _RecordingEmbedder:
         return await self._embedder(texts)
 
     async def embed_query(self, text: str) -> list[float]:
+        self.calls.append([text])
         return await self._embedder.embed_query(text)
 
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:

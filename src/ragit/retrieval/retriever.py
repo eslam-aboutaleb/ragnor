@@ -26,12 +26,18 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from ragit.config import RagSettings
 from ragit.embeddings import get_embedding_dimension, get_embedding_function
 from ragit.retrieval.types import RetrievalRequest, RetrievalResponse
+from ragit.retrieval.capabilities import get_backend_capabilities
+from ragit.retrieval.strategies import (
+    _coerce_request,
+    _validate_scope_defense_in_depth,
+    _query_vector,
+)
 from ragit.stores import get_vector_store
 from ragit.telemetry.events import EventKind, NullEventSink, TelemetryEvent
 from ragit.types import SearchResult
@@ -165,7 +171,12 @@ class HybridRetriever:
             self._embed_fn = get_embedding_function(settings)
             embedding_dim = spec.embedding_dim
             if embedding_dim is None:
-                embedding_dim = get_embedding_dimension(settings.embedding_model)
+                profile = getattr(self._embed_fn, "profile", None)
+                embedding_dim = (
+                    profile.dimension
+                    if profile is not None
+                    else get_embedding_dimension(settings.embedding_model)
+                )
             self._store = get_vector_store(
                 table_name=spec.table_name,
                 id_field=spec.id_field,
@@ -206,55 +217,23 @@ class HybridRetriever:
         """
         t0 = time.perf_counter()
         if isinstance(query, RetrievalRequest):
-            req = query
-            query_str = req.query
-            n_results = req.final_k
-            candidate_k = req.candidate_k
-            if req.threshold is not None:
-                distance_threshold = req.threshold
-            strict = req.strict
-            merged_filters = dict(req.filters)
-            if req.isolation_scope is not None:
-                merged_filters[req.scope_field] = req.isolation_scope
-            merged_filters.update(filters)
-            filters = merged_filters
+            req = replace(query, filters={**query.filters, **filters})
         else:
-            query_str = query
-
-        if distance_threshold is None:
-            distance_threshold = self._settings.rag_distance_threshold
-
-        if self._strategy is not None:
-            kwargs = dict(filters)
-            if candidate_k is not None:
-                kwargs["candidate_k"] = candidate_k
-            rows = await self._strategy.retrieve(
-                query=query_str,
-                n_results=n_results,
-                threshold=distance_threshold,
-                text_field=self._spec.text_field,
-                metadata_fields=self._spec.metadata_fields,
-                strict=strict,
-                **kwargs,
+            req, _ = _coerce_request(
+                query,
+                n_results,
+                {
+                    **filters,
+                    "candidate_k": candidate_k,
+                    "threshold": distance_threshold,
+                    "strict": strict,
+                    "text_field": self._spec.text_field,
+                    "metadata_fields": self._spec.metadata_fields,
+                },
             )
-        else:
-            effective_n = (
-                candidate_k if candidate_k is not None and candidate_k > n_results else n_results
-            )
-            embeddings = await self._embed_fn([query_str])
-            query_embedding = embeddings[0]
-
-            rows = await self._store.hybrid_search(
-                query=query_str,
-                embedding=query_embedding,
-                n_results=effective_n,
-                threshold=distance_threshold,
-                text_field=self._spec.text_field,
-                metadata_fields=self._spec.metadata_fields,
-                strict=strict,
-                **filters,
-            )
-            rows = rows[:n_results]
+        rows = await self._retrieve_rows(req)
+        n_results = req.final_k
+        candidate_k = req.get_candidate_k()
 
         duration_ms = (time.perf_counter() - t0) * 1000.0
         results = [_to_search_result(row) for row in rows]
@@ -272,24 +251,63 @@ class HybridRetriever:
         )
         return results
 
-    async def retrieve_typed(
-        self,
-        request: RetrievalRequest,
-    ) -> RetrievalResponse:
-        """Execute retrieval and return a typed :class:`RetrievalResponse`."""
+    async def _retrieve_rows(self, request: RetrievalRequest) -> list[dict[str, Any]]:
+        fields = list(request.metadata_fields)
+        if request.isolation_scope is not None:
+            fields.append(request.scope_field)
+        if request.expected_generation is not None:
+            fields.append("generation")
+        req = replace(
+            request,
+            threshold=(
+                request.threshold
+                if request.threshold is not None
+                else self._settings.rag_distance_threshold
+            ),
+            metadata_fields=list(dict.fromkeys(fields)),
+        )
         if self._strategy is not None:
             if hasattr(self._strategy, "retrieve_typed"):
-                return await self._strategy.retrieve_typed(request)
-            rows = await self._strategy.retrieve(request)
-            return RetrievalResponse.from_dicts(
-                rows,
-                query=request.query,
-                candidate_k=request.get_candidate_k(),
-                final_k=request.final_k,
+                response = await self._strategy.retrieve_typed(req)
+                rows = response.to_dicts()
+            else:
+                caps = get_backend_capabilities(self._strategy)
+                caps.validate_constraints(req.mandatory_capabilities)
+                caps.validate_filters(req.effective_filters())
+                rows = await self._strategy.retrieve(
+                    query=req.query,
+                    n_results=req.final_k,
+                    candidate_k=req.get_candidate_k(),
+                    threshold=req.threshold,
+                    text_field=req.text_field,
+                    metadata_fields=req.metadata_fields,
+                    session=req.session,
+                    strict=req.strict,
+                    **req.effective_filters(),
+                )
+        else:
+            caps = get_backend_capabilities(self._store)
+            caps.validate_constraints(req.mandatory_capabilities)
+            caps.validate_filters(req.effective_filters())
+            query_vector = await _query_vector(self._embed_fn, req.query)
+            rows = await self._store.hybrid_search(
+                query=req.query,
+                embedding=query_vector,
+                n_results=req.get_candidate_k(),
+                threshold=req.threshold,
+                text_field=req.text_field,
+                metadata_fields=req.metadata_fields,
+                session=req.session,
+                strict=req.strict,
+                **req.effective_filters(),
             )
-        results = await self.retrieve(request)
+        return _validate_scope_defense_in_depth(rows, req)[: req.final_k]
+
+    async def retrieve_typed(self, request: RetrievalRequest) -> RetrievalResponse:
+        """Execute the same constrained path while preserving reranker scores."""
+        rows = await self._retrieve_rows(request)
         return RetrievalResponse.from_dicts(
-            as_dicts(results),
+            rows,
             query=request.query,
             candidate_k=request.get_candidate_k(),
             final_k=request.final_k,

@@ -328,7 +328,9 @@ class DirectoryConnector:
                         reason = "non_recursive"
                     elif not is_dir:
                         suffix = Path(name).suffix.lower().lstrip(".")
-                        media_type = mimetypes.guess_type(name)[0] or ""
+                        media_type = mimetypes.guess_type(name)[0] or (
+                            "text/markdown" if suffix in {"md", "markdown"} else ""
+                        )
                         if self.include and not _matches(rel, self.include):
                             reason = "excluded"
                         elif self.extensions and suffix not in self.extensions:

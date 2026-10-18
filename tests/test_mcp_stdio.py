@@ -16,6 +16,7 @@ from ragit.tools.bridge import KnowledgeBridge
 @pytest.fixture
 def mock_bridge() -> MagicMock:
     bridge = MagicMock(spec=KnowledgeBridge)
+    bridge.default_collection = "default"
     mock_bundle = MagicMock()
     mock_bundle.to_dict.return_value = {
         "items": [
@@ -69,7 +70,13 @@ async def test_run_stdio_server_fallback_to_builtin(mock_bridge: MagicMock) -> N
         patch("ragit.mcp.stdio._run_builtin_stdio_loop", new_callable=AsyncMock) as mock_loop,
     ):
         await run_stdio_server(mock_bridge, name="test-server", enable_management_tools=True)
-        mock_loop.assert_awaited_once_with(mock_bridge, name="test-server", enable_management=True)
+        mock_loop.assert_awaited_once_with(
+            mock_bridge,
+            name="test-server",
+            enable_management=True,
+            client_id=None,
+            client_id_provider=None,
+        )
 
 
 @pytest.mark.asyncio

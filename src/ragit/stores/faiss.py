@@ -381,6 +381,11 @@ class FaissStore(HybridVectorStore):
             validate_identifier(key, "filter key")
         return sum(1 for record in self._records.values() if self._matches_filters(record, filters))
 
+    async def get_embeddings(self, ids: list[str], session: Any = None) -> dict[str, list[float]]:
+        return {
+            doc_id: list(self._embeddings[doc_id]) for doc_id in ids if doc_id in self._embeddings
+        }
+
     async def delete(
         self,
         ids: list[Any] | None = None,

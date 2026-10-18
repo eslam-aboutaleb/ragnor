@@ -129,17 +129,20 @@ def _validate_scope_defense_in_depth(
     req: RetrievalRequest,
 ) -> list[dict[str, Any]]:
     """Validate that every result belongs to the requested isolation scope."""
-    if req.isolation_scope is None:
-        return results
-
     validated: list[dict[str, Any]] = []
     for row in results:
         meta = row.get("metadata") or {}
-        row_scope = meta.get(req.scope_field) or row.get(req.scope_field)
-        if row_scope is not None and row_scope != req.isolation_scope:
+        row_scope = meta.get(req.scope_field, row.get(req.scope_field))
+        scope_invalid = req.isolation_scope is not None and row_scope != req.isolation_scope
+        generation_invalid = (
+            req.expected_generation is not None
+            and meta.get("generation") != req.expected_generation
+        )
+        if scope_invalid or generation_invalid:
             msg = (
                 f"Scope violation: result {row.get('id')!r} belongs to scope "
-                f"{row_scope!r}, expected {req.isolation_scope!r}."
+                f"{row_scope!r}, expected {req.isolation_scope!r}; "
+                f"generation {meta.get('generation')!r}, expected {req.expected_generation!r}."
             )
             logger.warning(msg)
             if req.strict:
@@ -147,6 +150,15 @@ def _validate_scope_defense_in_depth(
             continue
         validated.append(row)
     return validated
+
+
+def _required_metadata(req: RetrievalRequest) -> list[str]:
+    fields = list(req.metadata_fields)
+    if req.isolation_scope is not None:
+        fields.append(req.scope_field)
+    if req.expected_generation is not None:
+        fields.append("generation")
+    return list(dict.fromkeys(fields))
 
 
 def _prepare_retrieval(backend: Any, req: RetrievalRequest) -> dict[str, Any]:
@@ -169,6 +181,12 @@ def _dedupe_and_finalize(
             deduped.append(r)
     validated = _validate_scope_defense_in_depth(deduped, req)
     return validated[: req.final_k]
+
+
+async def _query_vector(embedder: EmbeddingFunction, query: str) -> list[float]:
+    if hasattr(embedder, "embed_query"):
+        return await embedder.embed_query(query)
+    return (await embedder([query]))[0]
 
 
 async def _expand_queries(query: str, transformer: QueryTransformer | None) -> list[str]:
@@ -247,13 +265,13 @@ class DenseRetrieval(_BaseRetrievalStrategy):
             candidate_k = req.get_candidate_k()
 
             for q in queries:
-                embeddings = await self._embedder([q])
+                query_vector = await _query_vector(self._embedder, q)
                 results = await self._vector_index.vector_search(
-                    embedding=embeddings[0],
+                    embedding=query_vector,
                     n_results=candidate_k,
                     threshold=req.threshold,
                     text_field=req.text_field,
-                    metadata_fields=req.metadata_fields,
+                    metadata_fields=_required_metadata(req),
                     session=req.session,
                     **effective_filters,
                 )
@@ -302,7 +320,7 @@ class KeywordRetrieval(_BaseRetrievalStrategy):
                     query=q,
                     n_results=candidate_k,
                     text_field=req.text_field,
-                    metadata_fields=req.metadata_fields,
+                    metadata_fields=_required_metadata(req),
                     session=req.session,
                     **effective_filters,
                 )
@@ -367,13 +385,13 @@ class HybridRetrieval(_BaseRetrievalStrategy):
             all_fused: list[dict[str, Any]] = []
 
             for q in queries:
-                embeddings = await self._embedder([q])
+                query_vector = await _query_vector(self._embedder, q)
                 vector_results = await self._vector_index.vector_search(
-                    embedding=embeddings[0],
+                    embedding=query_vector,
                     n_results=candidate_k,
                     threshold=req.threshold,
                     text_field=req.text_field,
-                    metadata_fields=req.metadata_fields,
+                    metadata_fields=_required_metadata(req),
                     session=req.session,
                     **effective_filters,
                 )
@@ -381,7 +399,7 @@ class HybridRetrieval(_BaseRetrievalStrategy):
                     query=q,
                     n_results=candidate_k,
                     text_field=req.text_field,
-                    metadata_fields=req.metadata_fields,
+                    metadata_fields=_required_metadata(req),
                     session=req.session,
                     **effective_filters,
                 )

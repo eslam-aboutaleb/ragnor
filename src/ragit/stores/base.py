@@ -212,6 +212,10 @@ class VectorStore(ABC):
     session and commits where the operation is transactional.
     """
 
+    async def get_embeddings(self, ids: list[str], session: Any = None) -> dict[str, list[float]]:
+        """Fetch vectors for generation copies without invoking an embedding provider."""
+        raise NotImplementedError("Store does not support embedding fetch for metadata updates")
+
     @abstractmethod
     async def hybrid_search(  # noqa: PLR0913, PLR0917
         self,

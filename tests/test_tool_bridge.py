@@ -146,7 +146,7 @@ async def test_search_knowledge_rejects_unsafe_inputs(bridge: KnowledgeBridge) -
 
 async def test_search_knowledge_budget_enforcement(bridge: KnowledgeBridge) -> None:
     """ContextBudget limits the number of assembled evidence items."""
-    budget = ContextBudget(total_budget=50, max_evidence_items=1)
+    budget = ContextBudget(total_budget=250, max_evidence_items=1)
     bundle = await bridge.search_knowledge(
         query="ram memory",
         scope="tenant_a",

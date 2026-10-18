@@ -8,6 +8,7 @@ source diversity balancing, and provenance tracking.
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from collections import defaultdict
 from collections.abc import Sequence
 from typing import Any, Protocol, runtime_checkable
@@ -271,7 +272,7 @@ class EvidenceAssembler:
             An :class:`~ragit.evidence.types.EvidenceBundle` carrying selected
             evidence items and execution status.
         """
-        # 1. Check backend failure
+        # Check backend failure
         if backend_failure or backend_status in (
             "failure",
             "error",
@@ -287,7 +288,7 @@ class EvidenceAssembler:
                 ),
             )
 
-        # 2. Check stale index
+        # Check stale index
         if is_stale_index or backend_status == EvidenceStatus.STALE_INDEX:
             return EvidenceBundle(
                 items=[],
@@ -297,7 +298,7 @@ class EvidenceAssembler:
                 status_detail="Retrieved results originate from a stale index generation.",
             )
 
-        # 3. Check budget validity
+        # Check budget validity
         if not budget.is_valid:
             return EvidenceBundle(
                 items=[],
@@ -310,7 +311,7 @@ class EvidenceAssembler:
                 ),
             )
 
-        # 4. Coerce input hits
+        # Coerce input hits
         parsed_hits = self._coerce_hits(hits)
         if not parsed_hits or backend_status == EvidenceStatus.EMPTY_SEARCH:
             return EvidenceBundle(
@@ -321,19 +322,17 @@ class EvidenceAssembler:
                 status_detail="Search completed successfully but returned zero results.",
             )
 
-        # 5. Deduplicate exact chunks
+        # Deduplicate exact chunks
         deduped_hits, dropped_duplicates = self._deduplicate(parsed_hits)
 
-        # 6. Merge overlapping same-source spans
+        # Merge overlapping same-source spans
         merged_hits, merged_spans = self._merge_spans(deduped_hits)
 
-        # 7. Balance source diversity
+        # Rank within each source before interleaving; preserve diversity during selection.
+        merged_hits.sort(key=lambda x: x.score if x.score is not None else -999.0, reverse=True)
         balanced_hits = self._balance_source_diversity(merged_hits)
 
-        # 8. Sort candidates by score descending
-        balanced_hits.sort(key=lambda x: x.score if x.score is not None else -999.0, reverse=True)
-
-        # 9. Budget selection and optional compression
+        # Budget selection and optional compression
         available_tokens = budget.available_evidence_tokens
         running_tokens = 0
         selected_items: list[EvidenceItem] = []
@@ -369,22 +368,37 @@ class EvidenceAssembler:
                 merged_chunk_ids=hit.metadata.get("merged_chunk_ids", [hit.id]),
             )
 
-            # Optional compression hook if compressor is supplied
-            if self.compressor is not None and (running_tokens + token_count > available_tokens):
-                target_room = available_tokens - running_tokens
+            item.citation_label = f"[{len(selected_items) + 1}]"
+            rendered_tokens = self._rendered_tokens([*selected_items, item], budget)
+            if self.compressor is not None and rendered_tokens > available_tokens:
+                framing_tokens = max(0, rendered_tokens - token_count)
+                target_room = available_tokens - framing_tokens
                 if target_room > 0:
                     try:
-                        compressed = self.compressor.compress(item, target_tokens=target_room)
-                        compressed_tokens = self.tokenizer.count_tokens(compressed.text)
-                        if compressed_tokens <= target_room:
-                            item = compressed
-                            token_count = compressed_tokens
+                        compressed = self.compressor.compress(
+                            deepcopy(item), target_tokens=target_room
+                        )
+                        provenance = (
+                            "source_id",
+                            "document_id",
+                            "revision",
+                            "start_offset",
+                            "end_offset",
+                        )
+                        if any(
+                            getattr(compressed, key) != getattr(item, key) for key in provenance
+                        ):
+                            raise ValueError("Compressor changed evidence provenance")
+                        compressed.citation_label = item.citation_label
+                        compressed.token_count = self.tokenizer.count_tokens(compressed.text)
+                        item = compressed
+                        rendered_tokens = self._rendered_tokens([*selected_items, item], budget)
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("Evidence compression failed: %s", exc)
 
-            if running_tokens + token_count <= available_tokens:
+            if rendered_tokens <= available_tokens:
                 selected_items.append(item)
-                running_tokens += token_count
+                running_tokens = rendered_tokens
             else:
                 is_truncated = True
 
@@ -401,7 +415,7 @@ class EvidenceAssembler:
                 status_detail="Candidate evidence items exceeded available context budget.",
             )
 
-        # 10. Assign deterministic citation labels: [1], [2], ...
+        # Assign deterministic citation labels: [1], [2], ...
         for idx, item in enumerate(selected_items, start=1):
             item.citation_label = f"[{idx}]"
 
@@ -415,3 +429,7 @@ class EvidenceAssembler:
             merged_spans_count=merged_spans,
             status_detail=None,
         )
+
+    def _rendered_tokens(self, items: list[EvidenceItem], budget: ContextBudget) -> int:
+        context = EvidenceBundle(items, EvidenceStatus.SUCCESS, 0, budget).format_context()
+        return self.tokenizer.count_tokens(context)

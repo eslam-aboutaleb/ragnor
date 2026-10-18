@@ -222,10 +222,10 @@ def build_upsert_record(
         id_field: doc_id,
         text_field: doc[text_field],
     }
-    if extra_fields:
-        record.update(extra_fields)
     for key, value in doc.get("metadata", {}).items():
         record[key] = value
+    if extra_fields:
+        record.update(extra_fields)
     return record
 
 
@@ -253,7 +253,7 @@ def validate_upsert_documents(  # noqa: PLR0913, PLR0917
         for doc in documents:
             if dimension is not None:
                 validate_embedding(
-                    doc["embedding"],
+                    doc[embedding_field],
                     expected_dim=dimension,
                     label="document embedding",
                 )

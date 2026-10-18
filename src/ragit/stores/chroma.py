@@ -372,6 +372,20 @@ class ChromaStore(HybridVectorStore):
         except Exception as exc:
             return handle_count_error(self.table_name, exc, strict, logger)
 
+    async def get_embeddings(self, ids: list[str], session: Any = None) -> dict[str, list[float]]:
+        if not ids:
+            return {}
+        records = await asyncio.to_thread(
+            self._resolve_collection().get, ids=ids, include=["embeddings"]
+        )
+        vectors = records.get("embeddings")
+        if vectors is None:
+            return {}
+        return {
+            str(doc_id): list(vector)
+            for doc_id, vector in zip(records["ids"], vectors, strict=True)
+        }
+
     async def delete(
         self,
         ids: list[Any] | None = None,

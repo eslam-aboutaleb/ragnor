@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 from ragit.types import RetrievalError, SearchResult
+from ragit.evidence.references import source_reference
 
 logger = logging.getLogger(__name__)
 
@@ -336,10 +337,9 @@ class EvidenceItem:
         Durable identity comes from source, document, and revision, NOT ephemeral
         labels such as [1].
         """
-        offsets = (
-            f"[{self.start_offset}:{self.end_offset}]" if self.start_offset is not None else ""
+        return source_reference(
+            self.source_id, self.document_id, self.revision, self.start_offset, self.end_offset
         )
-        return f"{self.source_id}@{self.revision}:{self.document_id}{offsets}"
 
     def to_dict(self) -> dict[str, Any]:
         """Convert item to a structured dictionary representation."""
@@ -373,7 +373,7 @@ class EvidenceBundle:
     Attributes:
         items: Selected evidence items ordered by presentation/relevance.
         status: EvidenceStatus indicating assembly result.
-        total_tokens: Sum of tokens of all included items.
+        total_tokens: Tokens in the complete formatted evidence context, including framing.
         budget: The ContextBudget used for assembly.
         is_truncated: Whether candidate evidence was omitted due to budget limits.
         dropped_duplicates_count: Number of duplicate chunks omitted.

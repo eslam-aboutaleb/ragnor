@@ -289,7 +289,9 @@ async def test_retriever_telemetry() -> None:
     spec = RetrieverSpec(table_name="test_table")
     settings = _FakeSettings()
 
-    mock_strategy = AsyncMock()
+    from ragit.retrieval.strategies import RetrievalStrategy
+
+    mock_strategy = AsyncMock(spec=RetrievalStrategy)
     mock_strategy.retrieve.return_value = [
         {"id": "doc1", "document": "Hello", "metadata": {}, "_rrf_score": 0.8}
     ]

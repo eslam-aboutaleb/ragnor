@@ -11,6 +11,7 @@ Enforces:
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -67,20 +68,59 @@ class MemorySnapshotStore:
     """In-memory implementation of :class:`SnapshotStore`."""
 
     def __init__(self) -> None:
-        self._snapshots: dict[tuple[str, str, str], SnapshotRecord] = {}
+        self._snapshots: dict[tuple[str, str, str, str | None], SnapshotRecord] = {}
+        self._revoked: set[tuple[str, str, str | None]] = set()
 
     def put(self, snapshot: SnapshotRecord) -> None:
         """Save a snapshot record."""
-        key = (snapshot.source_id, snapshot.document_id, snapshot.revision)
-        self._snapshots[key] = snapshot
+        key = (
+            snapshot.source_id,
+            snapshot.document_id,
+            snapshot.revision,
+            snapshot.isolation_scope,
+        )
+        existing = self._snapshots.get(key)
+        if existing is not None:
+            if existing.content != snapshot.content or existing.metadata != snapshot.metadata:
+                raise ValueError("Cannot replace an immutable document revision")
+            return
+        self._snapshots[key] = deepcopy(snapshot)
 
     def get(self, source_id: str, document_id: str, revision: str) -> SnapshotRecord | None:
         """Get snapshot by source, document, and revision."""
-        return self._snapshots.get((source_id, document_id, revision))
+        matches = [
+            record
+            for key, record in self._snapshots.items()
+            if key[:3] == (source_id, document_id, revision)
+        ]
+        if len(matches) > 1:
+            raise ScopeAuthorizationError("Snapshot lookup requires an isolation scope")
+        return deepcopy(matches[0]) if matches else None
+
+    def get_scoped(
+        self, source_id: str, document_id: str, revision: str, scope: str | None
+    ) -> SnapshotRecord | None:
+        """Select an exact scoped revision, or an explicitly public revision."""
+        for candidate_scope in (scope, None):
+            key = (source_id, document_id, revision, candidate_scope)
+            if key in self._snapshots:
+                return deepcopy(self._snapshots[key])
+        return None
+
+    def revoke(self, source_id: str, document_id: str, scope: str | None) -> None:
+        """Retain historical bytes while denying access to every revision."""
+        self._revoked.add((source_id, document_id, scope))
+
+    def is_revoked(self, source_id: str, document_id: str, scope: str | None) -> bool:
+        return (source_id, document_id, scope) in self._revoked or (
+            source_id,
+            document_id,
+            None,
+        ) in self._revoked
 
     def has_revision(self, source_id: str, document_id: str, revision: str) -> bool:
         """Check if revision exists."""
-        return (source_id, document_id, revision) in self._snapshots
+        return any(key[:3] == (source_id, document_id, revision) for key in self._snapshots)
 
 
 @dataclass
@@ -143,7 +183,19 @@ class SourceLookup:
             default_max_span_length: Maximum allowed character length for returned spans.
         """
         self._store = snapshot_store
+        self._validate_span_limit(default_max_span_length)
         self.default_max_span_length = default_max_span_length
+
+    @staticmethod
+    def _validate_span_limit(limit: int) -> None:
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+            raise ValueError("max_span_length must be a positive integer")
+
+    def revoke(self, source_id: str, document_id: str, scope: str | None) -> None:
+        """Persist revocation through a store supporting document access control."""
+        if not all(hasattr(self._store, method) for method in ("revoke", "is_revoked")):
+            raise TypeError("Snapshot store must implement revoke and is_revoked for management")
+        self._store.revoke(source_id, document_id, scope)
 
     def lookup_span(  # noqa: PLR0913, PLR0917
         self,
@@ -175,9 +227,38 @@ class SourceLookup:
             RevisionUnavailableError: If exact revision is not retained and strict=True.
             ScopeAuthorizationError: If scope check fails and strict=True.
         """
-        snapshot = self._store.get(source_id, document_id, revision)
+        span_limit = self.default_max_span_length if max_span_length is None else max_span_length
+        self._validate_span_limit(span_limit)
+        span_limit = min(span_limit, self.default_max_span_length)
+        try:
+            if hasattr(self._store, "is_revoked") and self._store.is_revoked(
+                source_id, document_id, authorization_scope
+            ):
+                raise ScopeAuthorizationError("Document access has been revoked")
+            if hasattr(self._store, "get_scoped"):
+                snapshot = self._store.get_scoped(
+                    source_id, document_id, revision, authorization_scope
+                )
+                if snapshot is None and self._store.has_revision(source_id, document_id, revision):
+                    raise ScopeAuthorizationError("Document revision belongs to a different scope")
+            else:
+                snapshot = self._store.get(source_id, document_id, revision)
+        except ScopeAuthorizationError:
+            if strict:
+                raise
+            return BoundedSpanResult(
+                source_id,
+                document_id,
+                revision,
+                "",
+                0,
+                0,
+                0,
+                False,
+                EvidenceStatus.BACKEND_FAILURE,
+            )
 
-        # 1. Historical revision availability check
+        # Historical revision availability check
         if snapshot is None:
             msg = (
                 f"Historical revision {revision!r} is unavailable for document {document_id!r} "
@@ -198,7 +279,7 @@ class SourceLookup:
                 status=EvidenceStatus.REVISION_UNAVAILABLE,
             )
 
-        # 2. Scope authorization check
+        # Scope authorization check
         if snapshot.isolation_scope is not None and snapshot.isolation_scope != authorization_scope:
             msg = (
                 f"Scope authorization failure for {document_id!r}: document scope is "
@@ -219,10 +300,9 @@ class SourceLookup:
                 status=EvidenceStatus.BACKEND_FAILURE,
             )
 
-        # 3. Extract bounded span
+        # Extract bounded span
         content = snapshot.content
         doc_len = len(content)
-        span_limit = max_span_length or self.default_max_span_length
 
         start = max(0, start_offset) if start_offset is not None else 0
         end = min(doc_len, end_offset) if end_offset is not None else doc_len

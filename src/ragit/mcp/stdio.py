@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import sys
+from collections.abc import Callable
 
 from ragit.mcp.server import _MCPServerClass, create_mcp_server
 from ragit.tools.bridge import KnowledgeBridge
@@ -22,6 +23,8 @@ async def run_stdio_server(
     *,
     name: str = "ragit-knowledge",
     enable_management_tools: bool = False,
+    client_id: str | None = None,
+    client_id_provider: Callable[[], str | None] | None = None,
 ) -> None:
     """Run MCP server over standard input and standard output.
 
@@ -38,19 +41,29 @@ async def run_stdio_server(
             bridge=bridge,
             name=name,
             enable_management_tools=enable_management_tools,
+            client_id=client_id,
+            client_id_provider=client_id_provider,
         )
         if hasattr(server, "run_stdio_async"):
             await server.run_stdio_async()
             return
 
     # Lightweight built-in JSON-RPC stdio loop (zero external dependencies)
-    await _run_builtin_stdio_loop(bridge, name=name, enable_management=enable_management_tools)
+    await _run_builtin_stdio_loop(
+        bridge,
+        name=name,
+        enable_management=enable_management_tools,
+        client_id=client_id,
+        client_id_provider=client_id_provider,
+    )
 
 
 async def _run_builtin_stdio_loop(
     bridge: KnowledgeBridge,
     name: str,
     enable_management: bool,
+    client_id: str | None = None,
+    client_id_provider: Callable[[], str | None] | None = None,
 ) -> None:
     """Zero-dependency JSON-RPC 2.0 stdio protocol handler."""
     loop = asyncio.get_running_loop()
@@ -66,7 +79,7 @@ async def _run_builtin_stdio_loop(
                 "type": "object",
                 "properties": {
                     "query": {"type": "string"},
-                    "collection": {"type": "string", "default": "default"},
+                    "collection": {"type": "string", "default": bridge.default_collection},
                     "filters": {"type": "object"},
                     "candidate_k": {"type": "integer", "default": 20},
                     "final_k": {"type": "integer", "default": 5},
@@ -87,7 +100,7 @@ async def _run_builtin_stdio_loop(
                     "revision": {"type": "string", "default": "v1"},
                     "start_offset": {"type": "integer"},
                     "end_offset": {"type": "integer"},
-                    "collection": {"type": "string", "default": "default"},
+                    "collection": {"type": "string", "default": bridge.default_collection},
                     "scope": {"type": "string"},
                 },
                 "required": ["source_ref"],
@@ -99,7 +112,7 @@ async def _run_builtin_stdio_loop(
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "collection": {"type": "string", "default": "default"},
+                    "collection": {"type": "string", "default": bridge.default_collection},
                     "scope": {"type": "string"},
                 },
             },
@@ -141,6 +154,13 @@ async def _run_builtin_stdio_loop(
             elif method == "tools/call":
                 tool_name = params.get("name")
                 arguments = params.get("arguments", {})
+                # Override any untrusted identity in raw JSON-RPC arguments.
+                arguments = {
+                    **arguments,
+                    "client_id": (
+                        client_id_provider() if client_id_provider is not None else client_id
+                    ),
+                }
 
                 if tool_name == "search_knowledge":
                     res = await bridge.search_knowledge(**arguments)

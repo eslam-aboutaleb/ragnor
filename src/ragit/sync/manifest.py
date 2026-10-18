@@ -8,6 +8,7 @@ lifecycle status, chunk IDs, and observation timestamps.
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
@@ -97,6 +98,10 @@ class ManifestStore(Protocol):
         """Delete a record from the manifest store entirely."""
         ...
 
+    async def compare_and_swap_many(self, updates: list[tuple[ManifestRecord, int]]) -> bool:
+        """Atomically commit a collection of records, or change none of them."""
+        ...
+
 
 class InMemoryManifestStore:
     """Thread-safe and async-safe in-memory ManifestStore implementation."""
@@ -110,14 +115,14 @@ class InMemoryManifestStore:
             rec = self._records.get((scope, document_id))
             if rec is None:
                 return None
-            return ManifestRecord(**rec.__dict__)
+            return deepcopy(rec)
 
     async def list(
         self, scope: str, status: ManifestStatus | str | None = None
     ) -> list[ManifestRecord]:
         async with self._lock:
             records = [
-                ManifestRecord(**rec.__dict__)
+                deepcopy(rec)
                 for (s, _), rec in self._records.items()
                 if s == scope and (status is None or rec.status == status)
             ]
@@ -126,7 +131,7 @@ class InMemoryManifestStore:
     async def put(self, record: ManifestRecord) -> None:
         async with self._lock:
             record.fence_token += 1
-            self._records[(record.scope, record.document_id)] = ManifestRecord(**record.__dict__)
+            self._records[(record.scope, record.document_id)] = deepcopy(record)
 
     async def compare_and_swap(self, record: ManifestRecord, expected_fence: int) -> bool:
         async with self._lock:
@@ -136,7 +141,21 @@ class InMemoryManifestStore:
             if current_fence != expected_fence:
                 return False
             record.fence_token = expected_fence + 1
-            self._records[key] = ManifestRecord(**record.__dict__)
+            self._records[key] = deepcopy(record)
+            return True
+
+    async def compare_and_swap_many(self, updates: list[tuple[ManifestRecord, int]]) -> bool:
+        async with self._lock:
+            keys = [(record.scope, record.document_id) for record, _ in updates]
+            if len(keys) != len(set(keys)):
+                raise ValueError("Duplicate document in manifest commit")
+            for record, expected in updates:
+                existing = self._records.get((record.scope, record.document_id))
+                if (existing.fence_token if existing is not None else 0) != expected:
+                    return False
+            for record, expected in updates:
+                record.fence_token = expected + 1
+                self._records[(record.scope, record.document_id)] = deepcopy(record)
             return True
 
     async def delete(self, scope: str, document_id: str) -> bool:
