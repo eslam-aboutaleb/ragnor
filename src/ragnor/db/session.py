@@ -14,8 +14,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from ragnor.db.sql_factory import SQLAlchemyFactory
-
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,4 +38,6 @@ def create_session_factory(database_url: str) -> SessionProvider:
         owns the engine's lifecycle; ragnor creates no module-level
         singletons.
     """
+    from ragnor.db.sql_factory import SQLAlchemyFactory  # noqa: PLC0415
+
     return SQLAlchemyFactory().create_session_factory(database_url)

@@ -31,7 +31,7 @@ from ragnor.chunking.base import Chunker
 from ragnor.config import RagSettings
 from ragnor.embeddings import get_embedding_dimension
 from ragnor.embeddings._safe_config import safe_config
-from ragnor.ingestion.sources import RawDocument
+from ragnor.ingestion.records import RawDocument
 
 RETRIEVAL_SCHEMA_VERSION = "v1"
 """Version of the retrieval schema the snapshots carry."""

@@ -15,46 +15,17 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from ragnor.ingestion.records import RawDocument
 from ragnor.types import Document
 
 if TYPE_CHECKING:
     from ragnor.ingestion.connector_core import DiscoveryPage, LoadResult, SourceConnector
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class RawDocument:
-    """A loaded document, before chunking.
-
-    Attributes:
-        source_name: Identifier recorded in chunk metadata
-            (typically the filename).
-        content: The full document text.
-        external_id: Optional identifier from the source
-            system (e.g., an object key or row id).
-        metadata: Source-specific metadata preserved through
-            normalization.
-        provenance: Original source provenance preserved
-            through normalization.
-        extractor: Identifier of the extractor that produced
-            the content.
-        location: Optional location reference (page, byte
-            range, etc.).
-    """
-
-    source_name: str
-    content: str
-    external_id: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
-    provenance: dict[str, Any] = field(default_factory=dict)
-    extractor: str | None = None
-    location: Any = None
 
 
 @runtime_checkable

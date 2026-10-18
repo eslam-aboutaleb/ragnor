@@ -11,7 +11,7 @@ from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import Any, Protocol, runtime_checkable
 
-from ragnor.ingestion.sources import RawDocument
+from ragnor.ingestion.records import RawDocument
 
 
 class SourceStatus(StrEnum):
@@ -283,7 +283,7 @@ def extract_documents(  # noqa: PLR0913, PLR0917
         PDFExtractor,
         TextExtractor,
     )
-    from ragnor.ingestion.versioning import safe_config  # noqa: PLC0415
+    from ragnor.embeddings._safe_config import safe_config  # noqa: PLC0415
 
     metadata = dict(metadata or {})
     provenance = dict(provenance or {})
