@@ -54,6 +54,8 @@ that repository, the top-level `publish.yml` workflow, and the `pypi` environmen
 3. Publish a GitHub release from a commit contained in `main`.
 4. The Publish workflow checks the name and tag, runs the complete qualification
    workflow, builds and validates the distributions, and publishes using PyPI OIDC.
+   The upload job runs in this repository's `publish.yml`; PyPI does not support
+   trusted publishing from a called shared workflow.
 
 Manual dispatch of **Publish** runs qualification without uploading to PyPI. Tag
 pushes alone do not publish, preventing duplicate uploads when creating a release.
