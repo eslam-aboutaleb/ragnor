@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from ragit.mcp.stdio import _run_builtin_stdio_loop, run_stdio_server
-from ragit.tools.bridge import KnowledgeBridge
+from ragnor.mcp.stdio import _run_builtin_stdio_loop, run_stdio_server
+from ragnor.tools.bridge import KnowledgeBridge
 
 
 @pytest.fixture
@@ -56,8 +56,8 @@ async def test_run_stdio_server_with_mcp_sdk(mock_bridge: MagicMock) -> None:
     mock_server.run_stdio_async = AsyncMock()
 
     with (
-        patch("ragit.mcp.stdio._MCPServerClass", object()),
-        patch("ragit.mcp.stdio.create_mcp_server", return_value=mock_server),
+        patch("ragnor.mcp.stdio._MCPServerClass", object()),
+        patch("ragnor.mcp.stdio.create_mcp_server", return_value=mock_server),
     ):
         await run_stdio_server(mock_bridge, name="test-server")
         mock_server.run_stdio_async.assert_awaited_once()
@@ -66,8 +66,8 @@ async def test_run_stdio_server_with_mcp_sdk(mock_bridge: MagicMock) -> None:
 @pytest.mark.asyncio
 async def test_run_stdio_server_fallback_to_builtin(mock_bridge: MagicMock) -> None:
     with (
-        patch("ragit.mcp.stdio._MCPServerClass", None),
-        patch("ragit.mcp.stdio._run_builtin_stdio_loop", new_callable=AsyncMock) as mock_loop,
+        patch("ragnor.mcp.stdio._MCPServerClass", None),
+        patch("ragnor.mcp.stdio._run_builtin_stdio_loop", new_callable=AsyncMock) as mock_loop,
     ):
         await run_stdio_server(mock_bridge, name="test-server", enable_management_tools=True)
         mock_loop.assert_awaited_once_with(

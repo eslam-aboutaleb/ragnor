@@ -3,7 +3,7 @@
 Parametrizes two fake host domains -- medical and legal -- with
 different settings, embedding models and dimensions, chunker
 strategies, table names, tsquery configs, and domain vocabulary,
-and proves every public ragit seam accepts them without any
+and proves every public ragnor seam accepts them without any
 domain-specific code in the library: the settings protocol, the
 embedding provider registry, the dimension registry, the chunker
 registry, the vector store registry, the in-memory store, the
@@ -31,10 +31,10 @@ from typing import Any
 
 import pytest
 
-import ragit
-from ragit.chunking import Chunker, SlidingWindowChunker, chunker_registry
-from ragit.config import RagSettings
-from ragit.embeddings import (
+import ragnor
+from ragnor.chunking import Chunker, SlidingWindowChunker, chunker_registry
+from ragnor.config import RagSettings
+from ragnor.embeddings import (
     FALLBACK_DIMENSION,
     EmbeddingFunction,
     embedding_registry,
@@ -42,7 +42,7 @@ from ragit.embeddings import (
     get_embedding_function,
     register_dimension,
 )
-from ragit.evaluation import (
+from ragnor.evaluation import (
     Difficulty,
     EvalConfig,
     EvalSample,
@@ -50,26 +50,26 @@ from ragit.evaluation import (
     evaluate_answer_heuristic,
     run_evaluation,
 )
-from ragit.ingestion import (
+from ragnor.ingestion import (
     IngestionPipeline,
     IngestionSnapshot,
     RawDocument,
     VersionRecord,
 )
-from ragit.retrieval import HybridRetriever, RetrieverSpec, as_dicts
-from ragit.stores import (
+from ragnor.retrieval import HybridRetriever, RetrieverSpec, as_dicts
+from ragnor.stores import (
     InMemoryVectorStore,
     PgVectorStore,
     VectorStore,
     get_vector_store,
     vector_store_registry,
 )
-from ragit.validation import validate_embedding
+from ragnor.validation import validate_embedding
 
 
 @dataclass(frozen=True)
 class DomainConfig:
-    """Everything a host domain configures ragit with."""
+    """Everything a host domain configures ragnor with."""
 
     name: str
     embedding_model: str
@@ -236,7 +236,7 @@ class DomainSettings:
     """Host settings satisfying the ``RagSettings`` protocol for one domain."""
 
     def __init__(self, config: DomainConfig) -> None:
-        """Initialize every field ragit reads at runtime."""
+        """Initialize every field ragnor reads at runtime."""
         self.embedding_model = config.embedding_model
         self.embedding_provider = config.embedding_provider
         self.rag_distance_threshold = config.distance_threshold
@@ -548,10 +548,10 @@ def _make_retrieval_fn(config: DomainConfig) -> RetrievalFunction:
 
 
 def _public_api_names() -> set[str]:
-    """Return every public name the ragit package and its submodules export."""
-    names = set(dir(ragit))
-    for module_info in pkgutil.iter_modules(ragit.__path__):
-        module = importlib.import_module(f"ragit.{module_info.name}")
+    """Return every public name the ragnor package and its submodules export."""
+    names = set(dir(ragnor))
+    for module_info in pkgutil.iter_modules(ragnor.__path__):
+        module = importlib.import_module(f"ragnor.{module_info.name}")
         names.update(getattr(module, "__all__", ()))
         names.update(name for name in dir(module) if not name.startswith("_"))
     return names
@@ -972,7 +972,7 @@ def test_pgvector_store_requires_embedding_dimension(config: DomainConfig) -> No
 
 
 def test_public_api_surface_has_no_domain_specific_symbols() -> None:
-    """No domain-specific symbols leak into the ragit public API surface."""
+    """No domain-specific symbols leak into the ragnor public API surface."""
     banned_terms = ("insurance", "medical", "legal", "policy", "financial", "banking")
     for name in _public_api_names():
         lowered = name.lower()

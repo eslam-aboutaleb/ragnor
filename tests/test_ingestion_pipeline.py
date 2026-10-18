@@ -1,4 +1,4 @@
-"""Tests for ragit.ingestion.pipeline.
+"""Tests for ragnor.ingestion.pipeline.
 
 Covers the ingestion orchestration extracted from
 ``_do_ingest``: snapshot comparison (skip when the
@@ -19,28 +19,28 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ragit.chunking.base import Chunker
-from ragit.db.sql_factory import SQLFactory
-from ragit.embeddings.base import EmbeddingFunction
-from ragit.embeddings.dimensions import register_dimension
-from ragit.ingestion import (
+from ragnor.chunking.base import Chunker
+from ragnor.db.sql_factory import SQLFactory
+from ragnor.embeddings.base import EmbeddingFunction
+from ragnor.embeddings.dimensions import register_dimension
+from ragnor.ingestion import (
     IngestionPipeline,
     IngestionSnapshot,
     VersionRecord,
     build_snapshot,
 )
-from ragit.ingestion.sources import RawDocument
-from ragit.ingestion.versioning import compute_source_hash
-from ragit.stores.base import VectorStore
-from ragit.types import Chunk
+from ragnor.ingestion.sources import RawDocument
+from ragnor.ingestion.versioning import compute_source_hash
+from ragnor.stores.base import VectorStore
+from ragnor.types import Chunk
 
-register_dimension("ragit-pipeline-test-model", 4)
+register_dimension("ragnor-pipeline-test-model", 4)
 
 
 class _FakeSettings:
     """Minimal settings object satisfying the RagSettings protocol."""
 
-    def __init__(self, embedding_model: str = "ragit-pipeline-test-model") -> None:
+    def __init__(self, embedding_model: str = "ragnor-pipeline-test-model") -> None:
         self.embedding_model = embedding_model
         self.rag_distance_threshold = 1.3
         self.vector_store_provider = "memory"
@@ -493,7 +493,7 @@ async def test_run_skips_when_snapshot_matches() -> None:
 async def test_run_reingests_when_source_hash_changes() -> None:
     stored_snapshot = IngestionSnapshot(
         source_hash="stale-hash",
-        embedding_model="ragit-pipeline-test-model",
+        embedding_model="ragnor-pipeline-test-model",
         embedding_dim=4,
         chunker_version="test-chunker-v1",
         chunk_size=600,
@@ -523,7 +523,7 @@ async def test_run_reingests_when_source_hash_changes() -> None:
 async def test_run_retires_the_old_version_before_creating_the_new_one() -> None:
     stored_snapshot = IngestionSnapshot(
         source_hash="stale-hash",
-        embedding_model="ragit-test-model",
+        embedding_model="ragnor-test-model",
         embedding_dim=4,
         chunker_version="test-chunker-v1",
         chunk_size=600,
@@ -899,6 +899,6 @@ def test_version_store_protocol_is_runtime_checkable() -> None:
     assert isinstance(_FakeVersionStore(), VectorStore) or True
     # The VersionStore protocol is runtime_checkable; the fake
     # implements every method of the protocol.
-    from ragit.ingestion import VersionStore
+    from ragnor.ingestion import VersionStore
 
     assert isinstance(_FakeVersionStore(), VersionStore)

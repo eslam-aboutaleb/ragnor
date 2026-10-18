@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ragit.embeddings.litellm import LitellmEmbeddingFunction, _cache_key
+from ragnor.embeddings.litellm import LitellmEmbeddingFunction, _cache_key
 
 
 def _mock_response(embeddings: list[list[float]]) -> MagicMock:
@@ -48,7 +48,7 @@ class TestLitellmEmbeddingFunctionDefaults:
         calls: list[tuple[list[str], dict[str, Any]]] = []
 
         with patch(
-            "ragit.embeddings.litellm.litellm.embedding",
+            "ragnor.embeddings.litellm.litellm.embedding",
             side_effect=_recording_embedding(calls),
         ) as mock_embed:
             first = await fn(["hello", "world"])
@@ -74,7 +74,7 @@ class TestLitellmEmbeddingFunctionDefaults:
         calls: list[tuple[list[str], dict[str, Any]]] = []
 
         with patch(
-            "ragit.embeddings.litellm.litellm.embedding",
+            "ragnor.embeddings.litellm.litellm.embedding",
             side_effect=_recording_embedding(calls),
         ):
             await fn(["hello"])
@@ -87,7 +87,7 @@ class TestLitellmEmbeddingFunctionDefaults:
     async def test_embed_query_returns_a_single_vector(self) -> None:
         fn = LitellmEmbeddingFunction(api_key="k", model_name="m")
 
-        with patch("ragit.embeddings.litellm.litellm.embedding") as mock_embed:
+        with patch("ragnor.embeddings.litellm.litellm.embedding") as mock_embed:
             mock_embed.return_value = _mock_response([_expected_vector("hello")])
             result = await fn.embed_query("hello")
 
@@ -97,7 +97,7 @@ class TestLitellmEmbeddingFunctionDefaults:
     async def test_embed_query_accepts_a_single_element_list(self) -> None:
         fn = LitellmEmbeddingFunction(api_key="k", model_name="m")
 
-        with patch("ragit.embeddings.litellm.litellm.embedding") as mock_embed:
+        with patch("ragnor.embeddings.litellm.litellm.embedding") as mock_embed:
             mock_embed.return_value = _mock_response([_expected_vector("hello")])
             result = await fn.embed_query(["hello"])
 
@@ -106,7 +106,7 @@ class TestLitellmEmbeddingFunctionDefaults:
     async def test_embed_documents_returns_one_vector_per_document(self) -> None:
         fn = LitellmEmbeddingFunction(api_key="k", model_name="m")
 
-        with patch("ragit.embeddings.litellm.litellm.embedding") as mock_embed:
+        with patch("ragnor.embeddings.litellm.litellm.embedding") as mock_embed:
             mock_embed.return_value = _mock_response([_expected_vector("a"), _expected_vector("b")])
             result = await fn.embed_documents(["a", "b"])
 
@@ -119,7 +119,7 @@ class TestLitellmEmbeddingFunctionCache:
         calls: list[tuple[list[str], dict[str, Any]]] = []
 
         with patch(
-            "ragit.embeddings.litellm.litellm.embedding",
+            "ragnor.embeddings.litellm.litellm.embedding",
             side_effect=_recording_embedding(calls),
         ) as mock_embed:
             first = await fn(["alpha", "beta"])
@@ -141,7 +141,7 @@ class TestLitellmEmbeddingFunctionCache:
         calls: list[tuple[list[str], dict[str, Any]]] = []
 
         with patch(
-            "ragit.embeddings.litellm.litellm.embedding",
+            "ragnor.embeddings.litellm.litellm.embedding",
             side_effect=_recording_embedding(calls),
         ) as mock_embed:
             await fn(["alpha"])
@@ -157,7 +157,7 @@ class TestLitellmEmbeddingFunctionCache:
         calls: list[tuple[list[str], dict[str, Any]]] = []
 
         with patch(
-            "ragit.embeddings.litellm.litellm.embedding",
+            "ragnor.embeddings.litellm.litellm.embedding",
             side_effect=_recording_embedding(calls),
         ):
             await fn(["alpha", "omega"])
@@ -185,7 +185,7 @@ class TestLitellmEmbeddingFunctionBatching:
         calls: list[tuple[list[str], dict[str, Any]]] = []
 
         with patch(
-            "ragit.embeddings.litellm.litellm.embedding",
+            "ragnor.embeddings.litellm.litellm.embedding",
             side_effect=_recording_embedding(calls),
         ) as mock_embed:
             result = await fn(texts)
@@ -204,7 +204,7 @@ class TestLitellmEmbeddingFunctionBatching:
         calls: list[tuple[list[str], dict[str, Any]]] = []
 
         with patch(
-            "ragit.embeddings.litellm.litellm.embedding",
+            "ragnor.embeddings.litellm.litellm.embedding",
             side_effect=_recording_embedding(calls),
         ):
             await fn(["a", "b", "c"])
@@ -219,7 +219,7 @@ class TestLitellmEmbeddingFunctionBatching:
         calls: list[tuple[list[str], dict[str, Any]]] = []
 
         with patch(
-            "ragit.embeddings.litellm.litellm.embedding",
+            "ragnor.embeddings.litellm.litellm.embedding",
             side_effect=_recording_embedding(calls),
         ) as mock_embed:
             await fn(["alpha", "beta"])

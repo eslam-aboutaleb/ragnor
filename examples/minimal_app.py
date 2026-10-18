@@ -1,6 +1,6 @@
-"""Minimal plug-and-play example: a FastAPI app on ragit.
+"""Minimal plug-and-play example: a FastAPI app on ragnor.
 
-This example uses ragit with **zero host-application code**: an
+This example uses ragnor with **zero host-application code**: an
 in-memory vector store (no database), a sliding-window
 chunker, a deterministic fake embedder (used unless
 ``OPENAI_API_KEY`` is set in the process environment),
@@ -8,8 +8,8 @@ and the ingestion pipeline over a bundled document.
 
 Install and run::
 
-    pip install -e libs/ragit fastapi uvicorn
-    python libs/ragit/examples/minimal_app.py
+    pip install -e libs/ragnor fastapi uvicorn
+    python libs/ragnor/examples/minimal_app.py
 
 Then query the search endpoint::
 
@@ -31,24 +31,24 @@ from typing import Any
 from fastapi import FastAPI
 
 _OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-"""API key captured before the ragit imports: importing ragit
+"""API key captured before the ragnor imports: importing ragnor
 imports litellm, which loads ``.env`` into ``os.environ`` at
 import time, so the key must be read first to reflect the real
 process environment."""
 
-from ragit.chunking import SlidingWindowChunker  # noqa: E402
-from ragit.embeddings import (  # noqa: E402
+from ragnor.chunking import SlidingWindowChunker  # noqa: E402
+from ragnor.embeddings import (  # noqa: E402
     FALLBACK_DIMENSION,
     EmbeddingFunction,
     LitellmEmbeddingFunction,
 )
-from ragit.ingestion import (  # noqa: E402
+from ragnor.ingestion import (  # noqa: E402
     FileDocumentSource,
     IngestionPipeline,
     IngestionSnapshot,
     VersionRecord,
 )
-from ragit.stores import InMemoryVectorStore  # noqa: E402
+from ragnor.stores import InMemoryVectorStore  # noqa: E402
 
 
 class ExampleSettings:
@@ -164,7 +164,7 @@ async def _lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="ragit minimal example", lifespan=_lifespan)
+app = FastAPI(title="ragnor minimal example", lifespan=_lifespan)
 
 
 @app.get("/search")

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ragit.telemetry.events import (
+from ragnor.telemetry.events import (
     CompositeEventSink,
     EventKind,
     LoggingEventSink,
@@ -142,14 +142,14 @@ def test_composite_event_sink() -> None:
 
 @pytest.mark.asyncio
 async def test_sync_coordinator_emits_telemetry() -> None:
-    from ragit.chunking.base import Chunker
-    from ragit.embeddings.dimensions import register_dimension
-    from ragit.ingestion.sources import RawDocument
-    from ragit.stores.memory import InMemoryVectorStore
-    from ragit.sync.coordinator import DefaultSyncCoordinator
-    from ragit.sync.manifest import InMemoryManifestStore
-    from ragit.sync.state import InMemorySyncStateStore
-    from ragit.types import Chunk
+    from ragnor.chunking.base import Chunker
+    from ragnor.embeddings.dimensions import register_dimension
+    from ragnor.ingestion.sources import RawDocument
+    from ragnor.stores.memory import InMemoryVectorStore
+    from ragnor.sync.coordinator import DefaultSyncCoordinator
+    from ragnor.sync.manifest import InMemoryManifestStore
+    from ragnor.sync.state import InMemorySyncStateStore
+    from ragnor.types import Chunk
 
     register_dimension("test-event-model", 4)
 
@@ -192,14 +192,14 @@ async def test_sync_coordinator_emits_telemetry() -> None:
 
 @pytest.mark.asyncio
 async def test_sync_coordinator_sync_failed_event() -> None:
-    from ragit.chunking.base import Chunker
-    from ragit.embeddings.dimensions import register_dimension
-    from ragit.ingestion.sources import RawDocument
-    from ragit.stores.memory import InMemoryVectorStore
-    from ragit.sync.coordinator import ActivationMode, DefaultSyncCoordinator
-    from ragit.sync.manifest import InMemoryManifestStore
-    from ragit.sync.state import InMemorySyncStateStore
-    from ragit.types import Chunk
+    from ragnor.chunking.base import Chunker
+    from ragnor.embeddings.dimensions import register_dimension
+    from ragnor.ingestion.sources import RawDocument
+    from ragnor.stores.memory import InMemoryVectorStore
+    from ragnor.sync.coordinator import ActivationMode, DefaultSyncCoordinator
+    from ragnor.sync.manifest import InMemoryManifestStore
+    from ragnor.sync.state import InMemorySyncStateStore
+    from ragnor.types import Chunk
 
     register_dimension("test-fail-model", 4)
 
@@ -236,8 +236,8 @@ async def test_sync_coordinator_sync_failed_event() -> None:
 
 @pytest.mark.asyncio
 async def test_embedding_executor_telemetry() -> None:
-    from ragit.embeddings.executor import EmbeddingExecutor
-    from ragit.embeddings.profile import EmbeddingProfile
+    from ragnor.embeddings.executor import EmbeddingExecutor
+    from ragnor.embeddings.profile import EmbeddingProfile
 
     profile = EmbeddingProfile(
         provider_id="test",
@@ -280,7 +280,7 @@ async def test_embedding_executor_telemetry() -> None:
 async def test_retriever_telemetry() -> None:
     from unittest.mock import AsyncMock
 
-    from ragit.retrieval.retriever import HybridRetriever, RetrieverSpec
+    from ragnor.retrieval.retriever import HybridRetriever, RetrieverSpec
 
     class _FakeSettings:
         rag_distance_threshold = 0.5
@@ -289,7 +289,7 @@ async def test_retriever_telemetry() -> None:
     spec = RetrieverSpec(table_name="test_table")
     settings = _FakeSettings()
 
-    from ragit.retrieval.strategies import RetrievalStrategy
+    from ragnor.retrieval.strategies import RetrievalStrategy
 
     mock_strategy = AsyncMock(spec=RetrievalStrategy)
     mock_strategy.retrieve.return_value = [

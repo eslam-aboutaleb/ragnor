@@ -1,6 +1,6 @@
-"""Tests for ragit.types.
+"""Tests for ragnor.types.
 
-The dataclasses in :mod:`ragit.types` are the canonical boundary
+The dataclasses in :mod:`ragnor.types` are the canonical boundary
 across chunking, embedding, storage, and retrieval. These tests pin
 their defaults, mutability semantics, and the typed retrieval error.
 """
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from ragit.types import (
+from ragnor.types import (
     Chunk,
     Document,
     RetrievalError,

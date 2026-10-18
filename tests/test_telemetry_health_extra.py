@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ragit.telemetry.health import HealthChecker, HealthState
+from ragnor.telemetry.health import HealthChecker, HealthState
 
 
 class _DummySettings:

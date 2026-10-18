@@ -1,4 +1,4 @@
-# Example document for the ragit minimal example.
+# Example document for the ragnor minimal example.
 
 ## Greeter Policy
 

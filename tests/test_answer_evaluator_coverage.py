@@ -1,8 +1,8 @@
-"""Coverage tests for ragit.evaluation.answer uncovered paths."""
+"""Coverage tests for ragnor.evaluation.answer uncovered paths."""
 
 from __future__ import annotations
 
-from ragit.evaluation.answer import (
+from ragnor.evaluation.answer import (
     _key_fact_recall,
     evaluate_answer_heuristic,
 )

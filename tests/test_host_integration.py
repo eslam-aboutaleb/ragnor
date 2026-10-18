@@ -2,7 +2,7 @@
 copy-paste starting point for any domain host application.
 
 (a) The template's settings class satisfies the ``RagSettings`` protocol, so
-any host settings class works with ragit's seams.
+any host settings class works with ragnor's seams.
 (b) The template's pipeline runs end to end against the in-memory store and
 the deterministic fake embedder with no external services — no network, no
 database, no API keys — so a copied template is immediately runnable offline.
@@ -19,9 +19,9 @@ if str(EXAMPLES_DIR) not in sys.path:
 
 import host_integration  # noqa: E402
 
-from ragit.config import RagSettings  # noqa: E402
-from ragit.embeddings import embedding_registry, get_embedding_function  # noqa: E402
-from ragit.stores import vector_store_registry  # noqa: E402
+from ragnor.config import RagSettings  # noqa: E402
+from ragnor.embeddings import embedding_registry, get_embedding_function  # noqa: E402
+from ragnor.stores import vector_store_registry  # noqa: E402
 
 
 def test_example_settings_satisfy_the_rag_settings_protocol() -> None:

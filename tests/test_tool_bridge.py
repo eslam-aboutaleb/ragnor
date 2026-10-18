@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from ragit.evidence.source_lookup import MemorySnapshotStore, SnapshotRecord, SourceLookup
-from ragit.evidence.types import ContextBudget, EvidenceStatus, ScopeAuthorizationError
-from ragit.tools.bridge import KnowledgeBridge
-from ragit.tools.security import RateLimitExceededError, RateLimiter, ScopeAuthorizer
-from ragit.tools.validation import SecurityValidationError
+from ragnor.evidence.source_lookup import MemorySnapshotStore, SnapshotRecord, SourceLookup
+from ragnor.evidence.types import ContextBudget, EvidenceStatus, ScopeAuthorizationError
+from ragnor.tools.bridge import KnowledgeBridge
+from ragnor.tools.security import RateLimitExceededError, RateLimiter, ScopeAuthorizer
+from ragnor.tools.validation import SecurityValidationError
 
 
 class MockRetriever:

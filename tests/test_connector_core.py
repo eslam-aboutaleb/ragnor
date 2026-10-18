@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from ragit.ingestion.connector_core import (
+from ragnor.ingestion.connector_core import (
     ChangeEvent,
     DiscoveryPage,
     LoadResult,
@@ -20,16 +20,16 @@ from ragit.ingestion.connector_core import (
     collect_pages,
     extract_documents,
 )
-from ragit.ingestion.pipeline import IngestionPipeline
-from ragit.ingestion.sources import (
+from ragnor.ingestion.pipeline import IngestionPipeline
+from ragnor.ingestion.sources import (
     ConnectorDocumentSource,
     DocumentSourceConnector,
     FileDocumentSource,
     ListDocumentSource,
     RawDocument,
 )
-from ragit.ingestion.versioning import build_snapshot, compute_source_hash
-from ragit.types import Chunk
+from ragnor.ingestion.versioning import build_snapshot, compute_source_hash
+from ragnor.types import Chunk
 
 
 def test_records_and_list_compatibility():
@@ -290,7 +290,7 @@ def test_extraction_failures_do_not_expose_provider_messages():
 
 
 def test_binary_skip_and_explicit_encoding():
-    from ragit.ingestion.extractors import TextExtractor
+    from ragnor.ingestion.extractors import TextExtractor
 
     binary = extract_documents(b"\x00\x01", "a.bin", None, {}, {})
     assert binary.authoritative

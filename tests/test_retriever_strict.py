@@ -14,8 +14,8 @@ from unittest.mock import patch
 
 import pytest
 
-from ragit.retrieval import HybridRetriever, RetrieverSpec
-from ragit.types import RetrievalError
+from ragnor.retrieval import HybridRetriever, RetrieverSpec
+from ragnor.types import RetrievalError
 
 
 class _FakeSettings:
@@ -104,11 +104,11 @@ def _retriever(store: Any) -> HybridRetriever:
     """Build a HybridRetriever whose embedder and store are injected."""
     with (
         patch(
-            "ragit.retrieval.retriever.get_embedding_function",
+            "ragnor.retrieval.retriever.get_embedding_function",
             return_value=_FakeEmbedder(),
         ),
         patch(
-            "ragit.retrieval.retriever.get_vector_store",
+            "ragnor.retrieval.retriever.get_vector_store",
             return_value=store,
         ),
     ):

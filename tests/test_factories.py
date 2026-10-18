@@ -28,22 +28,22 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from ragit.db.sql_factory import SQLAlchemyFactory, SQLFactory
-from ragit.embeddings.dimensions import register_dimension
-from ragit.ingestion import IngestionPipeline, IngestionSnapshot, VersionRecord
-from ragit.ingestion.sources import RawDocument
-from ragit.registry import Registry
-from ragit.stores import (
+from ragnor.db.sql_factory import SQLAlchemyFactory, SQLFactory
+from ragnor.embeddings.dimensions import register_dimension
+from ragnor.ingestion import IngestionPipeline, IngestionSnapshot, VersionRecord
+from ragnor.ingestion.sources import RawDocument
+from ragnor.registry import Registry
+from ragnor.stores import (
     InMemoryVectorStore,
     PgVectorStore,
     VectorStore,
     VectorStoreFactory,
     get_vector_store,
 )
-from ragit.stores.store_factory import RegistryVectorStoreFactory
-from ragit.types import Chunk
+from ragnor.stores.store_factory import RegistryVectorStoreFactory
+from ragnor.types import Chunk
 
-register_dimension("ragit-factories-test-model", 4)
+register_dimension("ragnor-factories-test-model", 4)
 
 SQLITE_URL = "sqlite+aiosqlite:///:memory:"
 SRC_DIR = str(Path(__file__).resolve().parents[1] / "src")
@@ -157,7 +157,7 @@ async def test_advisory_lock_cleanup_failure_logged_not_raised(caplog) -> None:
     # The block's outcome must surface, not the lock-cleanup
     # failure: ending the transaction closes the connection,
     # which releases a session-level advisory lock anyway.
-    with caplog.at_level(logging.WARNING, logger="ragit.db.sql_factory"):
+    with caplog.at_level(logging.WARNING, logger="ragnor.db.sql_factory"):
         async with factory.advisory_lock(session, "source-path"):
             pass
 
@@ -315,7 +315,7 @@ def test_create_backend_with_missing_dependency_raises_import_error() -> None:
     result = _run_with_sqlalchemy_blocked(
         "import sys\n"
         "sys.modules['sqlalchemy'] = None\n"
-        "from ragit.stores.store_factory import RegistryVectorStoreFactory\n"
+        "from ragnor.stores.store_factory import RegistryVectorStoreFactory\n"
         "from types import SimpleNamespace\n"
         "try:\n"
         "    RegistryVectorStoreFactory().create(\n"
@@ -359,7 +359,7 @@ class _FakeSettings:
     """Minimal settings object satisfying the RagSettings protocol."""
 
     def __init__(self) -> None:
-        self.embedding_model = "ragit-factories-test-model"
+        self.embedding_model = "ragnor-factories-test-model"
         self.rag_distance_threshold = 1.3
         self.vector_store_provider = "memory"
         self.openai_api_key = "test-key"
@@ -664,8 +664,8 @@ def test_factory_loads_backend_module_by_convention() -> None:
     ):
         result = _run_python(
             "from types import SimpleNamespace\n"
-            "from ragit.stores.store_factory import RegistryVectorStoreFactory\n"
-            "from ragit.stores.registry import vector_store_registry\n"
+            "from ragnor.stores.store_factory import RegistryVectorStoreFactory\n"
+            "from ragnor.stores.registry import vector_store_registry\n"
             f"assert {provider!r} not in vector_store_registry.list()\n"
             "store = RegistryVectorStoreFactory().create(\n"
             f"    settings=SimpleNamespace(vector_store_provider={provider!r}),\n"
@@ -681,7 +681,7 @@ def test_factory_loads_backend_module_by_convention() -> None:
 def test_core_modules_import_without_sqlalchemy() -> None:
     result = _run_with_sqlalchemy_blocked(
         "import sys; sys.modules['sqlalchemy'] = None; "
-        "import ragit.stores, ragit.ingestion; print('ok')"
+        "import ragnor.stores, ragnor.ingestion; print('ok')"
     )
 
     assert result.returncode == 0, result.stderr
@@ -692,9 +692,9 @@ def test_pgvector_store_access_requires_pgvector_extra() -> None:
     result = _run_with_sqlalchemy_blocked(
         "import sys\n"
         "sys.modules['sqlalchemy'] = None\n"
-        "import ragit.stores\n"
+        "import ragnor.stores\n"
         "try:\n"
-        "    ragit.stores.PgVectorStore\n"
+        "    ragnor.stores.PgVectorStore\n"
         "except ImportError as exc:\n"
         "    print(exc)\n"
     )

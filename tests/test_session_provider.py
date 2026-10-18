@@ -1,6 +1,6 @@
 """Session provider protocol and standalone session factory.
 
-Pins that :func:`ragit.db.session.create_session_factory`
+Pins that :func:`ragnor.db.session.create_session_factory`
 builds a working, protocol-conforming session factory against
 an in-memory SQLite database.
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import text
 
-from ragit.db.session import SessionProvider, create_session_factory
+from ragnor.db.session import SessionProvider, create_session_factory
 
 
 def test_create_session_factory_returns_session_provider():

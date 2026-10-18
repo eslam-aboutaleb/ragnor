@@ -1,17 +1,17 @@
 # Changelog
 
-All notable changes to ragit (published on PyPI as `ragit-toolkit`) are
+All notable changes to ragnor (published on PyPI as `ragnor`) are
 documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**Stability policy (pre-1.0).** While ragit is pre-1.0, additive API changes
+**Stability policy (pre-1.0).** While ragnor is pre-1.0, additive API changes
 ship in minor releases and are safe to adopt. Behavioral changes to the
 compatibility surface — the `VectorStore` ABC (`hybrid_search` / `count` /
 `upsert`), the `RagSettings` protocol, and the capability protocols
 (`VectorIndex` / `LexicalIndex` / `DocumentStore`) — require a minor version
-bump and a changelog entry here, so hosts pinning `ragit-toolkit==x.y.z` get a
+bump and a changelog entry here, so hosts pinning `ragnor==x.y.z` get a
 stability contract rather than a moving target.
 
 ## [Unreleased]
@@ -25,11 +25,11 @@ stability contract rather than a moving target.
   hosts can select it declaratively through the optional
   `rag_distance_metric` host settings field, and
   `get_vector_store(..., metric=...)` passes it through to the selected
-  backend. The new `ragit.metrics` module exposes `DistanceMetric`,
+  backend. The new `ragnor.metrics` module exposes `DistanceMetric`,
   `DEFAULT_DISTANCE_METRIC`, `SUPPORTED_DISTANCE_METRICS`,
   `resolve_distance_metric`, `cosine_similarity`, `cosine_distance`, and
   `normalize`. Under the cosine metric, distance is defined as
-  `1 - cosine_similarity`, which preserves ragit's existing "smaller is
+  `1 - cosine_similarity`, which preserves ragnor's existing "smaller is
   stricter" threshold semantics.
   - **Memory store** — true cosine similarity (dot product over vector norms,
     with a zero-vector guard) when the metric is `cosine`; the `l2` path is
@@ -38,7 +38,7 @@ stability contract rather than a moving target.
     never from user input: `l2` → `<->`, `cosine` → `<=>` (both exact, no
     pre-normalization needed). Threaded through `hybrid_search`,
     `vector_search`, and the constructor. Host-owned DDL must match: a cosine
-    index uses `vector_cosine_ops` instead of `vector_l2_ops` (ragit never
+    index uses `vector_cosine_ops` instead of `vector_l2_ops` (ragnor never
     creates indexes).
   - **FAISS store** — cosine ranking over normalized vectors, with distances
     reported as `l2² / 2` so ranking is identical to cosine.
@@ -61,5 +61,5 @@ stability contract rather than a moving target.
   cache and batching above shipped per plan, while classifying provider
   errors as transient or permanent stays host-side.
 
-[0.4.0]: https://github.com/eslam-aboutaleb/ragit/releases/tag/v0.4.0
-[Unreleased]: https://github.com/eslam-aboutaleb/ragit/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/eslam-aboutaleb/ragnor/releases/tag/v0.4.0
+[Unreleased]: https://github.com/eslam-aboutaleb/ragnor/compare/v0.4.0...HEAD

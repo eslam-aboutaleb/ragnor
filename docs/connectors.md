@@ -5,9 +5,9 @@ Connectors separate discovery from extraction and preserve the existing
 Install only the integrations you use:
 
 ```sh
-pip install 'ragit-toolkit[directory,pdf,web,object-storage]'
+pip install 'ragnor[directory,pdf,web,object-storage]'
 # Optional native filesystem notifications:
-pip install 'ragit-toolkit[watch]'
+pip install 'ragnor[watch]'
 ```
 
 HTML extraction uses the Python standard library; `pdf` installs `pypdf`,
@@ -26,7 +26,7 @@ loaded documents. `load()` and `load_all()` collect a snapshot from its beginnin
 `load_page()` reads only one bounded page.
 
 ```python
-from ragit.ingestion import DirectoryConnector
+from ragnor.ingestion import DirectoryConnector
 
 source = DirectoryConnector(
     "./knowledge",

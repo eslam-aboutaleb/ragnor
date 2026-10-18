@@ -1,5 +1,5 @@
 """
-Tests for the ragit pgvector store.
+Tests for the ragnor pgvector store.
 
 The store receives its session factory and embedding
 function through constructor injection instead of
@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ragit.stores.pgvector import PgVectorStore
+from ragnor.stores.pgvector import PgVectorStore
 
 
 def _mock_row(values: dict) -> MagicMock:
@@ -617,7 +617,7 @@ class TestPgVectorStoreCapabilities:
     """Capability split: vector_search, keyword_search, delete, get."""
 
     async def test_satisfies_capability_protocols(self) -> None:
-        from ragit.stores.base import (
+        from ragnor.stores.base import (
             DocumentStore,
             LexicalIndex,
             VectorIndex,

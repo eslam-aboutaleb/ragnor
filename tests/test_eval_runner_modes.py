@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-from ragit.evaluation.dataset import Difficulty, EvalSample
-from ragit.evaluation.runner import EvalConfig, run_evaluation
+from ragnor.evaluation.dataset import Difficulty, EvalSample
+from ragnor.evaluation.runner import EvalConfig, run_evaluation
 
 
 def _dataset() -> list[EvalSample]:

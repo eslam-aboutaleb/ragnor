@@ -1,6 +1,6 @@
-"""Coverage tests for the ragit vector store registry.
+"""Coverage tests for the ragnor vector store registry.
 
-The if/else provider chain is replaced by the ragit store
+The if/else provider chain is replaced by the ragnor store
 registry, so an unsupported provider surfaces as the
 registry's ``KeyError``.
 """
@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ragit.stores import InMemoryVectorStore, PgVectorStore, get_vector_store
+from ragnor.stores import InMemoryVectorStore, PgVectorStore, get_vector_store
 
 
 class TestVectorStore:

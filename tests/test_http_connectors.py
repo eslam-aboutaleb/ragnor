@@ -9,8 +9,8 @@ from email.utils import format_datetime
 
 import pytest
 
-from ragit.ingestion.connector_core import SourceConnector, SourceStatus
-from ragit.ingestion.http_connector import (
+from ragnor.ingestion.connector_core import SourceConnector, SourceStatus
+from ragnor.ingestion.http_connector import (
     ApiConnector,
     Credential,
     GenericHttpConnector,
@@ -18,7 +18,7 @@ from ragit.ingestion.http_connector import (
     HttpConnector,
     WebsiteConnector,
 )
-from ragit.ingestion.sources import RawDocument
+from ragnor.ingestion.sources import RawDocument
 
 httpx = pytest.importorskip("httpx")
 

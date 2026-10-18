@@ -19,8 +19,8 @@ import time
 
 import pytest
 
-from ragit.embeddings.cache import EmbeddingCache, EmbeddingCacheConfig
-from ragit.embeddings.profile import EmbeddingProfile, TaskMode
+from ragnor.embeddings.cache import EmbeddingCache, EmbeddingCacheConfig
+from ragnor.embeddings.profile import EmbeddingProfile, TaskMode
 
 
 def _make_profile(model_id: str = "model-a", dimension: int = 3) -> EmbeddingProfile:

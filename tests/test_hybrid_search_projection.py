@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ragit.stores.pgvector import PgVectorStore
+from ragnor.stores.pgvector import PgVectorStore
 
 
 def _mock_row(values: dict) -> MagicMock:

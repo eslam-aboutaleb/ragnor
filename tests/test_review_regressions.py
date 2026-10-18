@@ -10,26 +10,26 @@ from types import SimpleNamespace
 
 import pytest
 
-from ragit.chunking.markdown import MarkdownSectionChunker
-from ragit.chunking.sliding_window import SlidingWindowChunker
-from ragit.embeddings.dimensions import register_dimension
-from ragit.embeddings.executor import EmbeddingExecutor, EmbeddingPermanentError
-from ragit.embeddings.profile import EmbeddingProfile, TaskMode
-from ragit.evidence import ContextBudget, EvidenceAssembler, SearchHit
-from ragit.evidence.source_lookup import MemorySnapshotStore, SnapshotRecord, SourceLookup
-from ragit.evidence.tokenizer import ExactTokenizerAdapter
-from ragit.evidence.types import EvidenceStatus, ScopeAuthorizationError
-from ragit.ingestion.connector_core import LoadResult, extract_documents
-from ragit.ingestion.pipeline import IngestionPipeline, VersionRecord
-from ragit.ingestion.sources import ListDocumentSource, RawDocument
-from ragit.jobs.outbox import InMemoryEmbeddingJobStore, process_pending_jobs
-from ragit.mcp.server import create_mcp_server
-from ragit.retrieval.capabilities import CapabilityUnsupportedError
-from ragit.retrieval.retriever import HybridRetriever, RetrieverSpec
-from ragit.retrieval.strategies import DenseRetrieval, HybridRetrieval, KeywordRetrieval
-from ragit.retrieval.types import RetrievalRequest
-from ragit.stores.memory import InMemoryVectorStore
-from ragit.sync import (
+from ragnor.chunking.markdown import MarkdownSectionChunker
+from ragnor.chunking.sliding_window import SlidingWindowChunker
+from ragnor.embeddings.dimensions import register_dimension
+from ragnor.embeddings.executor import EmbeddingExecutor, EmbeddingPermanentError
+from ragnor.embeddings.profile import EmbeddingProfile, TaskMode
+from ragnor.evidence import ContextBudget, EvidenceAssembler, SearchHit
+from ragnor.evidence.source_lookup import MemorySnapshotStore, SnapshotRecord, SourceLookup
+from ragnor.evidence.tokenizer import ExactTokenizerAdapter
+from ragnor.evidence.types import EvidenceStatus, ScopeAuthorizationError
+from ragnor.ingestion.connector_core import LoadResult, extract_documents
+from ragnor.ingestion.pipeline import IngestionPipeline, VersionRecord
+from ragnor.ingestion.sources import ListDocumentSource, RawDocument
+from ragnor.jobs.outbox import InMemoryEmbeddingJobStore, process_pending_jobs
+from ragnor.mcp.server import create_mcp_server
+from ragnor.retrieval.capabilities import CapabilityUnsupportedError
+from ragnor.retrieval.retriever import HybridRetriever, RetrieverSpec
+from ragnor.retrieval.strategies import DenseRetrieval, HybridRetrieval, KeywordRetrieval
+from ragnor.retrieval.types import RetrievalRequest
+from ragnor.stores.memory import InMemoryVectorStore
+from ragnor.sync import (
     ActivationMode,
     DefaultSyncCoordinator,
     InMemoryManifestStore,
@@ -38,9 +38,9 @@ from ragit.sync import (
     StaleWorkerError,
     SyncRetriever,
 )
-from ragit.telemetry.health import HealthChecker, HealthState
-from ragit.tools.bridge import CollectionConfig, KnowledgeBridge
-from ragit.tools.security import ScopeAuthorizer
+from ragnor.telemetry.health import HealthChecker, HealthState
+from ragnor.tools.bridge import CollectionConfig, KnowledgeBridge
+from ragnor.tools.security import ScopeAuthorizer
 from tests.test_mcp_adapter import MockMCPServer
 
 
@@ -203,7 +203,7 @@ async def test_public_and_tenant_revisions_coexist_and_batch_conflicts_do_not_pu
 async def test_expired_worker_cannot_corrupt_winner_after_delayed_vector_write(env, monkeypatch):
     """R5: a write already in flight remains isolated when its lease is superseded."""
     clock = [1000.0]
-    monkeypatch.setattr("ragit.sync.state.time.time", lambda: clock[0])
+    monkeypatch.setattr("ragnor.sync.state.time.time", lambda: clock[0])
     entered, resume = asyncio.Event(), asyncio.Event()
     original_upsert = env.store.upsert
     first = True
@@ -280,7 +280,7 @@ async def test_collection_readers_keep_old_snapshot_until_atomic_publication(env
 async def test_fenced_commit_excludes_takeover_even_when_lease_expires(env, monkeypatch):
     """R5: a separate token check cannot substitute for the commit guard."""
     clock = [1000.0]
-    monkeypatch.setattr("ragit.sync.state.time.time", lambda: clock[0])
+    monkeypatch.setattr("ragnor.sync.state.time.time", lambda: clock[0])
     token = await env.state.acquire_lease("scope", "first", 1)
     async with env.state.fenced(token):
         clock[0] += 2
@@ -293,7 +293,7 @@ async def test_fenced_commit_excludes_takeover_even_when_lease_expires(env, monk
 
 async def test_long_preparation_renews_the_lease(env, monkeypatch):
     """The preparation phase stays eligible for activation after lease renewal."""
-    monkeypatch.setattr("ragit.sync.state.time.time", lambda: 1000.0)
+    monkeypatch.setattr("ragnor.sync.state.time.time", lambda: 1000.0)
     renewed = asyncio.Event()
     original_renew = env.state.renew_lease
 
@@ -375,7 +375,7 @@ async def test_metadata_update_changes_filters_without_reembedding(env):
 
 async def test_typed_request_keeps_generation_capabilities_session_and_projection(env, monkeypatch):
     """R9: constraints survive the public HybridRetriever adapter."""
-    import ragit.retrieval.retriever as module
+    import ragnor.retrieval.retriever as module
 
     monkeypatch.setattr(module, "get_embedding_function", lambda _: env.embedder)
     monkeypatch.setattr(module, "get_vector_store", lambda **_: env.store)
@@ -503,9 +503,9 @@ async def test_bridge_uses_real_retriever_threshold_and_scope_contract(env, monk
         strategy = kind(env.store)
     else:
         monkeypatch.setattr(
-            "ragit.retrieval.retriever.get_embedding_function", lambda _: env.embedder
+            "ragnor.retrieval.retriever.get_embedding_function", lambda _: env.embedder
         )
-        monkeypatch.setattr("ragit.retrieval.retriever.get_vector_store", lambda **_: env.store)
+        monkeypatch.setattr("ragnor.retrieval.retriever.get_vector_store", lambda **_: env.store)
         strategy = kind(RetrieverSpec("docs"), env.settings)
     bundle = await KnowledgeBridge(strategy).search_knowledge(
         "content", scope="A", distance_threshold=5

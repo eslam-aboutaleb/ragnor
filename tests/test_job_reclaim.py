@@ -1,6 +1,6 @@
-"""Tier B: stale-job reclaim for the ragit job outbox.
+"""Tier B: stale-job reclaim for the ragnor job outbox.
 
-The reclaim engine lives in ragit; these tests drive it
+The reclaim engine lives in ragnor; these tests drive it
 through the fake in-memory store. The host adapter's
 database behavior (real ``embedding_jobs`` rows,
 ``FOR UPDATE SKIP LOCKED``) remains covered by the host
@@ -19,7 +19,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from ragit.jobs.outbox import reclaim_stale_jobs
+from ragnor.jobs.outbox import reclaim_stale_jobs
 from tests.job_doubles import FakeJobStore
 
 

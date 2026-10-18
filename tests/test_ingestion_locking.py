@@ -1,4 +1,4 @@
-"""Tests for ragit.ingestion.locking.
+"""Tests for ragnor.ingestion.locking.
 
 Pins the advisory-lock contract extracted from
 ``ingest_policy``: lock/unlock SQL on the caller's
@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
-from ragit.ingestion import advisory_lock
+from ragnor.ingestion import advisory_lock
 
 
 class _ScriptedSession:

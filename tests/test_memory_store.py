@@ -19,14 +19,14 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from ragit.metrics import cosine_distance
-from ragit.stores._scoring import token_overlap as _token_overlap
-from ragit.stores.base import (
+from ragnor.metrics import cosine_distance
+from ragnor.stores._scoring import token_overlap as _token_overlap
+from ragnor.stores.base import (
     DocumentStore,
     LexicalIndex,
     VectorIndex,
 )
-from ragit.stores.memory import InMemoryVectorStore
+from ragnor.stores.memory import InMemoryVectorStore
 
 
 def _store(**kwargs: object) -> InMemoryVectorStore:
@@ -173,7 +173,7 @@ async def test_cosine_metric_ranks_by_reference_cosine_distance():
     With ``metric="cosine"`` the vector stage scores candidates with
     ``1 - cosine_similarity`` and drops candidates beyond the
     threshold, so the ordering and the reported distances must match
-    the helpers in :mod:`ragit.metrics`.
+    the helpers in :mod:`ragnor.metrics`.
     """
     store = _store(metric="cosine")
     documents = [

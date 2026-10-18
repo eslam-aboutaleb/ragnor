@@ -1,11 +1,11 @@
-"""Coverage tests for ragit.evaluation.retrieval uncovered paths."""
+"""Coverage tests for ragnor.evaluation.retrieval uncovered paths."""
 
 from __future__ import annotations
 
 import asyncio
 from unittest.mock import MagicMock
 
-from ragit.evaluation import RagEvaluationHarness
+from ragnor.evaluation import RagEvaluationHarness
 
 
 class TestEvaluation:

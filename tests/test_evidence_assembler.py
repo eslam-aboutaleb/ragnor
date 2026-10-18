@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 
-from ragit.evidence.assembler import EvidenceAssembler, EvidenceCompressor
-from ragit.evidence.tokenizer import ApproximateTokenizer, ExactTokenizerAdapter
-from ragit.evidence.types import (
+from ragnor.evidence.assembler import EvidenceAssembler, EvidenceCompressor
+from ragnor.evidence.tokenizer import ApproximateTokenizer, ExactTokenizerAdapter
+from ragnor.evidence.types import (
     ContextBudget,
     EvidenceItem,
     EvidenceStatus,

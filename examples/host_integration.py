@@ -1,6 +1,6 @@
-"""Host-application integration template for ragit.
+"""Host-application integration template for ragnor.
 
-This example wires ragit's seams the way a host application
+This example wires ragnor's seams the way a host application
 does: a domain embedding provider registered through
 ``embedding_registry``, a custom vector backend registered
 through ``vector_store_registry`` (backed by a shared
@@ -26,9 +26,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ragit.chunking import MarkdownSectionChunker, SlidingWindowChunker
-from ragit.config import RagSettings
-from ragit.embeddings import (
+from ragnor.chunking import MarkdownSectionChunker, SlidingWindowChunker
+from ragnor.config import RagSettings
+from ragnor.embeddings import (
     FALLBACK_DIMENSION,
     EmbeddingFunction,
     embedding_registry,
@@ -36,16 +36,16 @@ from ragit.embeddings import (
     get_embedding_function,
     register_dimension,
 )
-from ragit.evaluation import LabeledQuery, RetrievalMetrics, RagEvaluationHarness
-from ragit.ingestion import (
+from ragnor.evaluation import LabeledQuery, RetrievalMetrics, RagEvaluationHarness
+from ragnor.ingestion import (
     DocumentSource,
     FileDocumentSource,
     IngestionPipeline,
     IngestionSnapshot,
     VersionRecord,
 )
-from ragit.retrieval import HybridRetriever, RetrieverSpec, as_dicts
-from ragit.stores import (
+from ragnor.retrieval import HybridRetriever, RetrieverSpec, as_dicts
+from ragnor.stores import (
     InMemoryVectorStore,
     VectorStore,
     get_vector_store,
@@ -63,7 +63,7 @@ register_dimension(DOMAIN_EMBEDDING_MODEL, FALLBACK_DIMENSION)
 class DomainSettings:
     """Domain settings satisfying the :class:`RagSettings` protocol.
 
-    ragit ships no concrete settings base: the
+    ragnor ships no concrete settings base: the
     :class:`RagSettings` protocol is the contract, and a host
     subclasses its own settings base (e.g. pydantic
     ``BaseSettings``) and adds these fields. Override the

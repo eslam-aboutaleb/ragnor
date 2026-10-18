@@ -9,7 +9,7 @@ from io import BytesIO
 
 import pytest
 
-from ragit.ingestion.extractors import HTMLExtractor, PDFExtractor, TextExtractor
+from ragnor.ingestion.extractors import HTMLExtractor, PDFExtractor, TextExtractor
 
 
 def make_pdf(*pages: str | None, compressed: bool = False) -> bytes:
@@ -86,7 +86,7 @@ def test_pdf_missing_dependency_is_actionable(monkeypatch: pytest.MonkeyPatch) -
         return original_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", import_without_pypdf)
-    with pytest.raises(ImportError, match=r"install 'ragit-toolkit\[pdf\]' or 'pypdf'"):
+    with pytest.raises(ImportError, match=r"install 'ragnor\[pdf\]' or 'pypdf'"):
         PDFExtractor().extract_pages(b"not parsed without dependency")
     assert TextExtractor().extract(b"still usable") == "still usable"
 
@@ -96,7 +96,7 @@ def test_importing_extractors_does_not_import_pypdf() -> None:
         [
             sys.executable,
             "-c",
-            "import ragit.ingestion.extractors; import sys; assert 'pypdf' not in sys.modules",
+            "import ragnor.ingestion.extractors; import sys; assert 'pypdf' not in sys.modules",
         ],
         check=False,
         capture_output=True,

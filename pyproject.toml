@@ -3,7 +3,7 @@ requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ragit-toolkit"
+name = "ragnor"
 version = "0.4.0"
 description = "Domain-agnostic RAG toolkit: embeddings, chunking, vector stores, retrieval, ingestion, evaluation, and jobs."
 readme = "README.md"
@@ -17,6 +17,11 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
+
+[project.urls]
+Homepage = "https://github.com/eslam-aboutaleb/ragnor"
+Repository = "https://github.com/eslam-aboutaleb/ragnor"
+Issues = "https://github.com/eslam-aboutaleb/ragnor/issues"
 
 [project.optional-dependencies]
 test = [
@@ -59,7 +64,7 @@ rerank = ["litellm>=1.84"]
 opentelemetry = ["opentelemetry-api>=1.20"]
 mcp = ["mcp>=1.0.0"]
 all = [
-    "ragit-toolkit[litellm,pgvector,qdrant,chroma,faiss,pdf,directory,watch,web,object-storage,rerank,opentelemetry,mcp]",
+    "ragnor[litellm,pgvector,qdrant,chroma,faiss,pdf,directory,watch,web,object-storage,rerank,opentelemetry,mcp]",
 ]
 
 
@@ -103,6 +108,6 @@ ignore = [
 # (every identifier passes validate_identifier; every value is a
 # bound parameter). Same per-file exemption as the backend's
 # pre-extraction pgvector_store.py.
-"src/ragit/stores/pgvector.py" = [
+"src/ragnor/stores/pgvector.py" = [
     "S608",
 ]

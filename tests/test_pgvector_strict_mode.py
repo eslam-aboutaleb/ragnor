@@ -2,7 +2,7 @@
 
 Default mode preserves the historical swallow-and-return-empty
 behavior (the frozen error contract); ``strict=True`` raises
-:class:`ragit.types.RetrievalError` so a failed search can no
+:class:`ragnor.types.RetrievalError` so a failed search can no
 longer masquerade as "no results".
 """
 
@@ -14,9 +14,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ragit.db.session import create_session_factory
-from ragit.stores.pgvector import PgVectorStore
-from ragit.types import RetrievalError
+from ragnor.db.session import create_session_factory
+from ragnor.stores.pgvector import PgVectorStore
+from ragnor.types import RetrievalError
 
 
 def _failing_factory() -> MagicMock:
@@ -29,17 +29,17 @@ def _failing_factory() -> MagicMock:
 def _test_database_url() -> str | None:
     """Return the dedicated test database URL, if configured.
 
-    Database-backed tests run only when ``RAGIT_TEST_DATABASE_URL``
+    Database-backed tests run only when ``RAGNOR_TEST_DATABASE_URL``
     names a database (env var or repo ``.env``).
     """
-    url = os.environ.get("RAGIT_TEST_DATABASE_URL")
+    url = os.environ.get("RAGNOR_TEST_DATABASE_URL")
     if url:
         return url
     env_file = Path(__file__).resolve().parents[3] / ".env"
     if not env_file.exists():
         return None
     for raw in env_file.read_text(encoding="utf-8").splitlines():
-        if raw.strip().startswith("RAGIT_TEST_DATABASE_URL="):
+        if raw.strip().startswith("RAGNOR_TEST_DATABASE_URL="):
             return raw.strip().split("=", 1)[1].strip().strip('"').strip("'")
     return None
 
@@ -107,9 +107,9 @@ async def test_hybrid_search_strict_nonexistent_table_raises():
     """
     database_url = _test_database_url()
     if database_url is None:
-        pytest.skip("RAGIT_TEST_DATABASE_URL is not set")
+        pytest.skip("RAGNOR_TEST_DATABASE_URL is not set")
     store = PgVectorStore(
-        table_name="ragit_03_nonexistent_table",
+        table_name="ragnor_03_nonexistent_table",
         id_field="id",
         embedding_dim=1536,
         session_factory=create_session_factory(database_url),
@@ -138,9 +138,9 @@ async def test_count_strict_nonexistent_table_raises():
     """strict=True count against a nonexistent table raises RetrievalError."""
     database_url = _test_database_url()
     if database_url is None:
-        pytest.skip("RAGIT_TEST_DATABASE_URL is not set")
+        pytest.skip("RAGNOR_TEST_DATABASE_URL is not set")
     store = PgVectorStore(
-        table_name="ragit_03_nonexistent_table",
+        table_name="ragnor_03_nonexistent_table",
         id_field="id",
         embedding_dim=1536,
         session_factory=create_session_factory(database_url),

@@ -6,10 +6,10 @@ import json
 from typing import Any
 import pytest
 
-from ragit.evidence.source_lookup import MemorySnapshotStore, SnapshotRecord, SourceLookup
-from ragit.mcp.server import _MCPServerClass, create_mcp_server
-from ragit.stores.memory import InMemoryVectorStore
-from ragit.tools.bridge import KnowledgeBridge
+from ragnor.evidence.source_lookup import MemorySnapshotStore, SnapshotRecord, SourceLookup
+from ragnor.mcp.server import _MCPServerClass, create_mcp_server
+from ragnor.stores.memory import InMemoryVectorStore
+from ragnor.tools.bridge import KnowledgeBridge
 
 
 class MockTool:
@@ -102,7 +102,7 @@ def test_create_mcp_server_raises_when_no_sdk(
     test_bridge: KnowledgeBridge, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """create_mcp_server raises friendly ImportError when mcp extra is not available."""
-    monkeypatch.setattr("ragit.mcp.server._MCPServerClass", None)
+    monkeypatch.setattr("ragnor.mcp.server._MCPServerClass", None)
     with pytest.raises(ImportError, match="requires the 'mcp' package"):
         create_mcp_server(test_bridge, server_class=None)
 
@@ -111,7 +111,7 @@ async def test_mock_mcp_server_tool_registration(test_bridge: KnowledgeBridge) -
     """Mock MCP server registers read tools by default, and management tools when enabled."""
     server_read = create_mcp_server(
         test_bridge,
-        name="test-ragit",
+        name="test-ragnor",
         enable_management_tools=False,
         server_class=MockMCPServer,
     )
@@ -125,7 +125,7 @@ async def test_mock_mcp_server_tool_registration(test_bridge: KnowledgeBridge) -
 
     server_mgmt = create_mcp_server(
         test_bridge,
-        name="test-ragit",
+        name="test-ragnor",
         enable_management_tools=True,
         server_class=MockMCPServer,
     )
@@ -139,7 +139,7 @@ async def test_mock_mcp_server_call_tools(test_bridge: KnowledgeBridge) -> None:
     """Mock MCP server executes search, get_source, and knowledge_status calls."""
     server = create_mcp_server(
         test_bridge,
-        name="test-ragit",
+        name="test-ragnor",
         server_class=MockMCPServer,
     )
 
@@ -174,7 +174,7 @@ async def test_real_mcp_server_registers_read_tools_by_default(
     test_bridge: KnowledgeBridge,
 ) -> None:
     """Official MCP server by default only exposes read tools, not management tools."""
-    server = create_mcp_server(test_bridge, name="test-ragit", enable_management_tools=False)
+    server = create_mcp_server(test_bridge, name="test-ragnor", enable_management_tools=False)
     tools = await server.list_tools()
     tool_names = [t.name for t in tools]
 
@@ -190,7 +190,7 @@ async def test_real_mcp_server_registers_management_tools_when_enabled(
     test_bridge: KnowledgeBridge,
 ) -> None:
     """When enable_management_tools=True, sync and deletion tools are registered."""
-    server = create_mcp_server(test_bridge, name="test-ragit", enable_management_tools=True)
+    server = create_mcp_server(test_bridge, name="test-ragnor", enable_management_tools=True)
     tools = await server.list_tools()
     tool_names = [t.name for t in tools]
 
@@ -204,7 +204,7 @@ async def test_real_mcp_server_registers_management_tools_when_enabled(
 @pytest.mark.skipif(_MCPServerClass is None, reason="Requires 'mcp' extra")
 async def test_real_mcp_call_knowledge_status(test_bridge: KnowledgeBridge) -> None:
     """Calling knowledge_status through real MCP returns sanitized status."""
-    server = create_mcp_server(test_bridge, name="test-ragit")
+    server = create_mcp_server(test_bridge, name="test-ragnor")
     res = await server.call_tool("knowledge_status", {"collection": "default"})
     status_data = _tool_payload(res)
     assert status_data["collection"] == "default"
@@ -214,7 +214,7 @@ async def test_real_mcp_call_knowledge_status(test_bridge: KnowledgeBridge) -> N
 @pytest.mark.skipif(_MCPServerClass is None, reason="Requires 'mcp' extra")
 async def test_real_mcp_call_get_source(test_bridge: KnowledgeBridge) -> None:
     """Calling get_source through real MCP returns authorized span."""
-    server = create_mcp_server(test_bridge, name="test-ragit")
+    server = create_mcp_server(test_bridge, name="test-ragnor")
     res = await server.call_tool(
         "get_source",
         {
@@ -246,7 +246,7 @@ async def test_real_mcp_call_search_knowledge(test_bridge: KnowledgeBridge) -> N
         ],
     )
 
-    server = create_mcp_server(test_bridge, name="test-ragit")
+    server = create_mcp_server(test_bridge, name="test-ragnor")
     res = await server.call_tool(
         "search_knowledge",
         {"query": "MCP Server Adapter", "candidate_k": 3},

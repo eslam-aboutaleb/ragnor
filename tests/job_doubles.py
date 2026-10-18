@@ -1,8 +1,8 @@
-"""In-memory doubles for the ragit job outbox tests.
+"""In-memory doubles for the ragnor job outbox tests.
 
 Shared by the evaluation/jobs test modules: a fake
-:class:`~ragit.jobs.outbox.EmbeddingJobStore` and
-:class:`~ragit.jobs.outbox.JobProcessor` that prove
+:class:`~ragnor.jobs.outbox.EmbeddingJobStore` and
+:class:`~ragnor.jobs.outbox.JobProcessor` that prove
 the job engine has no host dependency.
 """
 
@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from ragit.jobs.outbox import JobPayload, claim_jobs
+from ragnor.jobs.outbox import JobPayload, claim_jobs
 
 
 class FakeJobStore:

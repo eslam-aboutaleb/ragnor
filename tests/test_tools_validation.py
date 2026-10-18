@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ragit.tools.validation import (
+from ragnor.tools.validation import (
     SecurityValidationError,
     validate_safe_filters,
     validate_safe_identifier,

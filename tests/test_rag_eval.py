@@ -1,5 +1,5 @@
 """
-Tests for the RAG evaluation subsystem (ragit):
+Tests for the RAG evaluation subsystem (ragnor):
   - Heuristic & LLM-as-judge answer evaluation
   - RAG evaluation harness & metrics
   - Evaluation runner (retrieval-only & end-to-end)
@@ -18,23 +18,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from ragit.evaluation.answer import (
+from ragnor.evaluation.answer import (
     _key_fact_recall,
     _normalize_text,
     _token_overlap,
     evaluate_answer_heuristic,
     evaluate_answer_llm,
 )
-from ragit.evaluation.dataset import (
+from ragnor.evaluation.dataset import (
     Difficulty,
     EvalSample,
 )
-from ragit.evaluation.retrieval import (
+from ragnor.evaluation.retrieval import (
     LabeledQuery,
     RagEvaluationHarness,
     RetrievalMetrics,
 )
-from ragit.evaluation.runner import (
+from ragnor.evaluation.runner import (
     EvalConfig,
     run_evaluation,
 )
