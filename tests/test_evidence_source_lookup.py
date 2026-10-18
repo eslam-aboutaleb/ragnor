@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from ragit.evidence.source_lookup import (
+from ragnor.evidence.source_lookup import (
     MemorySnapshotStore,
     SnapshotRecord,
     SourceLookup,
 )
-from ragit.evidence.types import (
+from ragnor.evidence.types import (
     EvidenceStatus,
     RevisionUnavailableError,
     ScopeAuthorizationError,

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 
-from ragit.retrieval.scores import RawScore, ScoreKind
-from ragit.retrieval.types import RetrievedDocument
+from ragnor.retrieval.scores import RawScore, ScoreKind
+from ragnor.retrieval.types import RetrievedDocument
 
 
 def test_score_kinds_and_ordering_semantics() -> None:

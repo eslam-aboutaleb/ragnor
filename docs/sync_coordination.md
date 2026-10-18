@@ -1,6 +1,6 @@
 # Sync Coordination, Consistency Guarantees, and Deletion Privacy
 
-This document defines the architecture, coordination algorithm, backend consistency levels, and privacy guarantees of `ragit`'s sync subsystem (`ragit.sync`).
+This document defines the architecture, coordination algorithm, backend consistency levels, and privacy guarantees of `ragnor`'s sync subsystem (`ragnor.sync`).
 
 ---
 
@@ -67,7 +67,7 @@ This document defines the architecture, coordination algorithm, backend consiste
 
 ## 3. Backend Consistency Levels (No Cross-Database Atomicity)
 
-`ragit` explicitly does **not** promise cross-database atomicity between independent vector stores and relational/manifest databases. Two-phase commit (2PC) is not implemented. Instead, consistency and convergence are guaranteed through generation fencing, CAS activation, and zero-trust retrieval filtering.
+`ragnor` explicitly does **not** promise cross-database atomicity between independent vector stores and relational/manifest databases. Two-phase commit (2PC) is not implemented. Instead, consistency and convergence are guaranteed through generation fencing, CAS activation, and zero-trust retrieval filtering.
 
 | Backend | Transactionality | Write Visibility & Consistency | Fencing / Concurrency Support |
 | :--- | :--- | :--- | :--- |

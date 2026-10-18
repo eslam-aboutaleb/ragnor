@@ -1,4 +1,4 @@
-"""Unit tests for ragit.validation."""
+"""Unit tests for ragnor.validation."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import math
 
 import pytest
 
-from ragit.validation import validate_embedding, validate_identifier
+from ragnor.validation import validate_embedding, validate_identifier
 
 
 def test_validate_identifier_accepts_safe_identifiers() -> None:

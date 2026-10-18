@@ -6,8 +6,8 @@ import io
 
 import pytest
 
-from ragit.ingestion.connector_core import SourceStatus
-from ragit.ingestion.object_connector import ObjectStorageConnector
+from ragnor.ingestion.connector_core import SourceStatus
+from ragnor.ingestion.object_connector import ObjectStorageConnector
 
 
 class Client:

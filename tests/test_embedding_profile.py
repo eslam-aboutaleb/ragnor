@@ -17,8 +17,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ragit.embeddings.dimensions import register_dimension
-from ragit.embeddings.profile import (
+from ragnor.embeddings.dimensions import register_dimension
+from ragnor.embeddings.profile import (
     DistanceMetric,
     EmbeddingProfile,
     NormalizationMode,
@@ -28,7 +28,7 @@ from ragit.embeddings.profile import (
     profiles_require_reindex,
     validate_profile_at_startup,
 )
-from ragit.ingestion.versioning import IngestionSnapshot, build_snapshot
+from ragnor.ingestion.versioning import IngestionSnapshot, build_snapshot
 
 
 def _make_profile(**overrides) -> EmbeddingProfile:

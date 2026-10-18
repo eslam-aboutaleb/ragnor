@@ -23,7 +23,7 @@ from typing import Any
 
 import pytest
 
-from ragit.embeddings.executor import (
+from ragnor.embeddings.executor import (
     EmbeddingExecutor,
     EmbeddingPermanentError,
     EmbeddingResponseError,
@@ -31,7 +31,7 @@ from ragit.embeddings.executor import (
     _classify_exception,
     _validate_response,
 )
-from ragit.embeddings.profile import EmbeddingProfile
+from ragnor.embeddings.profile import EmbeddingProfile
 
 
 def _make_profile(dimension: int = 3) -> EmbeddingProfile:

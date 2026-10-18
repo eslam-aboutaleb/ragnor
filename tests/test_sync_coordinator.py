@@ -19,20 +19,20 @@ from __future__ import annotations
 from typing import Any
 import pytest
 
-from ragit.chunking.base import Chunker
-from ragit.embeddings.dimensions import register_dimension
-from ragit.ingestion.connector_core import LoadResult, SourceStatus
-from ragit.ingestion.sources import RawDocument
-from ragit.stores.memory import InMemoryVectorStore
-from ragit.sync.coordinator import (
+from ragnor.chunking.base import Chunker
+from ragnor.embeddings.dimensions import register_dimension
+from ragnor.ingestion.connector_core import LoadResult, SourceStatus
+from ragnor.ingestion.sources import RawDocument
+from ragnor.stores.memory import InMemoryVectorStore
+from ragnor.sync.coordinator import (
     ActivationMode,
     DefaultSyncCoordinator,
     LeaseAcquisitionError,
 )
-from ragit.sync.manifest import InMemoryManifestStore, ManifestStatus
-from ragit.sync.retrieval import SyncRetriever
-from ragit.sync.state import InMemorySyncStateStore
-from ragit.types import Chunk
+from ragnor.sync.manifest import InMemoryManifestStore, ManifestStatus
+from ragnor.sync.retrieval import SyncRetriever
+from ragnor.sync.state import InMemorySyncStateStore
+from ragnor.types import Chunk
 
 TEST_MODEL = "test-sync-model"
 register_dimension(TEST_MODEL, 4)

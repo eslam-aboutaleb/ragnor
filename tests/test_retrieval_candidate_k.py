@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from ragit.retrieval.strategies import HybridRetrieval
-from ragit.retrieval.types import RetrievalRequest, ScopeViolationError
+from ragnor.retrieval.strategies import HybridRetrieval
+from ragnor.retrieval.types import RetrievalRequest, ScopeViolationError
 
 
 class SpyIndex:

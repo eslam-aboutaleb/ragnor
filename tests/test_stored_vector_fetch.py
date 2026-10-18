@@ -5,10 +5,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from ragit.stores.chroma import ChromaStore
-from ragit.stores.faiss import FaissStore
-from ragit.stores.pgvector import PgVectorStore
-from ragit.stores.qdrant import QdrantStore, _point_id
+from ragnor.stores.chroma import ChromaStore
+from ragnor.stores.faiss import FaissStore
+from ragnor.stores.pgvector import PgVectorStore
+from ragnor.stores.qdrant import QdrantStore, _point_id
 from tests.test_vector_backends import _FakeFaissIndex
 
 

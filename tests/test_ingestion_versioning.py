@@ -1,4 +1,4 @@
-"""Tests for ragit.ingestion.versioning."""
+"""Tests for ragnor.ingestion.versioning."""
 
 from __future__ import annotations
 
@@ -6,15 +6,15 @@ import hashlib
 
 import pytest
 
-from ragit.chunking import MarkdownSectionChunker, SlidingWindowChunker
-from ragit.embeddings.dimensions import register_dimension
-from ragit.ingestion import (
+from ragnor.chunking import MarkdownSectionChunker, SlidingWindowChunker
+from ragnor.embeddings.dimensions import register_dimension
+from ragnor.ingestion import (
     IngestionSnapshot,
     build_snapshot,
     snapshot_matches,
 )
-from ragit.ingestion.sources import RawDocument
-from ragit.ingestion.versioning import compute_source_hash
+from ragnor.ingestion.sources import RawDocument
+from ragnor.ingestion.versioning import compute_source_hash
 
 
 class _FakeSettings:
@@ -89,10 +89,10 @@ def test_build_snapshot_reads_settings_and_chunker() -> None:
 
 
 def test_build_snapshot_resolves_the_dimension_for_the_model() -> None:
-    register_dimension("ragit-test-dimension-model", 7)
+    register_dimension("ragnor-test-dimension-model", 7)
     chunker = MarkdownSectionChunker(SlidingWindowChunker(), source_name="policy.md")
 
-    snapshot = build_snapshot("the-hash", _FakeSettings("ragit-test-dimension-model"), chunker)
+    snapshot = build_snapshot("the-hash", _FakeSettings("ragnor-test-dimension-model"), chunker)
 
     assert snapshot.embedding_dim == 7
 

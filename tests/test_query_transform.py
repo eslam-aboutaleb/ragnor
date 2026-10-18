@@ -6,12 +6,12 @@ import asyncio
 
 import pytest
 
-from ragit.retrieval.query_transform import (
+from ragnor.retrieval.query_transform import (
     BoundedQueryTransformer,
     QueryTransformer,
 )
-from ragit.retrieval.strategies import HybridRetrieval
-from ragit.retrieval.types import RetrievalRequest
+from ragnor.retrieval.strategies import HybridRetrieval
+from ragnor.retrieval.types import RetrievalRequest
 
 
 class EchoTransformer:

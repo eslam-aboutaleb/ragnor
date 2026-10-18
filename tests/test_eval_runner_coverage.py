@@ -1,4 +1,4 @@
-"""Coverage tests for ragit.evaluation.runner uncovered paths.
+"""Coverage tests for ragnor.evaluation.runner uncovered paths.
 
 The runner takes its retrieval function and dataset as
 injected dependencies, so the tests inject fakes instead
@@ -12,11 +12,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from ragit.evaluation.dataset import (
+from ragnor.evaluation.dataset import (
     Difficulty,
     EvalSample,
 )
-from ragit.evaluation.runner import (
+from ragnor.evaluation.runner import (
     EvalConfig,
     _run_answer_eval,
     _run_retrieval_eval,
@@ -50,12 +50,12 @@ class TestEvalRunner:
 
     @pytest.mark.asyncio
     async def test_run_answer_eval_no_generated_answer(self):
-        from ragit.evaluation.answer import evaluate_answer_heuristic
+        from ragnor.evaluation.answer import evaluate_answer_heuristic
 
         sample = _sample()
         per_sample = [{"context": "", "chunks_found": 0}]
         with patch(
-            "ragit.evaluation.runner.evaluate_answer_heuristic",
+            "ragnor.evaluation.runner.evaluate_answer_heuristic",
             wraps=evaluate_answer_heuristic,
         ):
             metrics, details = await _run_answer_eval(
@@ -109,7 +109,7 @@ class TestEvalRunner:
             total_queries: int = 1
             errors: int = 0
 
-        with patch("ragit.evaluation.runner._run_retrieval_eval") as mock_retrieval:
+        with patch("ragnor.evaluation.runner._run_retrieval_eval") as mock_retrieval:
             mock_retrieval.return_value = (FakeMetrics(), [{}])
             result = await run_evaluation(
                 EvalConfig(mode="retrieval-only"),
@@ -120,7 +120,7 @@ class TestEvalRunner:
 
     @pytest.mark.asyncio
     async def test_run_answer_eval_llm_judge(self):
-        from ragit.evaluation.answer import AnswerScore
+        from ragnor.evaluation.answer import AnswerScore
 
         sample = _sample()
         per_sample = [{"context": "some context", "chunks_found": 1}]
@@ -135,7 +135,7 @@ class TestEvalRunner:
         )
 
         with patch(
-            "ragit.evaluation.runner.evaluate_answer_llm",
+            "ragnor.evaluation.runner.evaluate_answer_llm",
             new_callable=AsyncMock,
             return_value=llm_score,
         ):
@@ -154,7 +154,7 @@ class TestEvalRunner:
         per_sample = [{"context": "", "chunks_found": 0}]
 
         with patch(
-            "ragit.evaluation.runner.evaluate_answer_heuristic",
+            "ragnor.evaluation.runner.evaluate_answer_heuristic",
             side_effect=Exception("eval failed"),
         ):
             metrics, details = await _run_answer_eval(
@@ -168,7 +168,7 @@ class TestEvalRunner:
     def test_eval_runner_main_cli(self):
         with patch("sys.argv", ["eval_runner", "--mode", "retrieval-only"]):
             with patch(
-                "ragit.evaluation.runner.run_evaluation",
+                "ragnor.evaluation.runner.run_evaluation",
                 new_callable=AsyncMock,
             ) as mock_run:
 
@@ -197,7 +197,7 @@ class TestEvalRunner:
             ],
         ):
             with patch(
-                "ragit.evaluation.runner.run_evaluation",
+                "ragnor.evaluation.runner.run_evaluation",
                 new_callable=AsyncMock,
             ) as mock_run:
 
@@ -227,7 +227,7 @@ class TestEvalRunner:
             ],
         ):
             with patch(
-                "ragit.evaluation.runner.run_evaluation",
+                "ragnor.evaluation.runner.run_evaluation",
                 new_callable=AsyncMock,
             ) as mock_run:
 

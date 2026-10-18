@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 
-from ragit.retrieval.scores import ScoreKind
-from ragit.retrieval.types import (
+from ragnor.retrieval.scores import ScoreKind
+from ragnor.retrieval.types import (
     RetrievalRequest,
     RetrievalResponse,
     RetrievedDocument,
     ScopeViolationError,
 )
-from ragit.types import SearchResult
+from ragnor.types import SearchResult
 
 
 def test_retrieval_request_creation_and_defaults() -> None:
@@ -153,7 +153,7 @@ def test_retrieval_response_bidirectional_bridge() -> None:
 
 
 def test_scope_violation_error_inheritance() -> None:
-    from ragit.types import RetrievalError
+    from ragnor.types import RetrievalError
 
     err = ScopeViolationError("Scope mismatch")
     assert isinstance(err, RetrievalError)

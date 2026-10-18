@@ -5,7 +5,7 @@ a backend module that exists but fails to import (the factory
 wraps the driver's ImportError with an install hint), the lazy
 ``__getattr__`` re-raise when a backend's driver is missing,
 and the AttributeError for unknown attributes on
-``ragit.stores``.
+``ragnor.stores``.
 """
 
 from __future__ import annotations
@@ -17,11 +17,11 @@ from typing import Any
 
 import pytest
 
-import ragit.stores
-from ragit.stores.store_factory import RegistryVectorStoreFactory
+import ragnor.stores
+from ragnor.stores.store_factory import RegistryVectorStoreFactory
 
-BROKEN_MODULE = "ragit.stores.broken"
-QDRANT_MODULE = "ragit.stores.qdrant"
+BROKEN_MODULE = "ragnor.stores.broken"
+QDRANT_MODULE = "ragnor.stores.qdrant"
 
 
 def test_load_builtin_provider_wraps_driver_import_error() -> None:
@@ -47,7 +47,7 @@ def test_load_builtin_provider_wraps_driver_import_error() -> None:
             RegistryVectorStoreFactory()._load_builtin_provider("broken")
 
     message = str(exc_info.value)
-    assert "ragit[broken]" in message
+    assert "ragnor[broken]" in message
     assert "No module named 'qdrant_client'" in message
 
 
@@ -63,11 +63,11 @@ def test_lazy_backend_import_error_includes_install_hint() -> None:
     with pytest.MonkeyPatch.context() as monkeypatch:
         monkeypatch.setattr(importlib, "import_module", fake_import_module)
 
-        with pytest.raises(ImportError, match=r"ragit\[qdrant\]"):
-            ragit.stores.QdrantStore  # noqa: B018
+        with pytest.raises(ImportError, match=r"ragnor\[qdrant\]"):
+            ragnor.stores.QdrantStore  # noqa: B018
 
 
 def test_unknown_backend_attribute_raises_attribute_error() -> None:
-    """Unknown attributes on ragit.stores raise AttributeError."""
+    """Unknown attributes on ragnor.stores raise AttributeError."""
     with pytest.raises(AttributeError, match="has no attribute"):
-        ragit.stores.NoSuchBackend  # noqa: B018
+        ragnor.stores.NoSuchBackend  # noqa: B018

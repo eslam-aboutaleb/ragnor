@@ -17,25 +17,25 @@ from typing import Any
 
 import pytest
 
-from ragit.config import RagSettings
-from ragit.metrics import (
+from ragnor.config import RagSettings
+from ragnor.metrics import (
     DistanceMetric,
     cosine_distance,
     cosine_similarity,
     normalize,
 )
-from ragit.registry import Registry
-from ragit.stores import (
+from ragnor.registry import Registry
+from ragnor.stores import (
     DEFAULT_DISTANCE_METRIC,
     SUPPORTED_DISTANCE_METRICS,
     VectorStore,
     get_vector_store,
     resolve_distance_metric,
 )
-from ragit.stores.chroma import ChromaStore
-from ragit.stores.memory import InMemoryVectorStore
-from ragit.stores.qdrant import QdrantStore
-from ragit.stores.store_factory import RegistryVectorStoreFactory
+from ragnor.stores.chroma import ChromaStore
+from ragnor.stores.memory import InMemoryVectorStore
+from ragnor.stores.qdrant import QdrantStore
+from ragnor.stores.store_factory import RegistryVectorStoreFactory
 
 
 class _Settings:
@@ -339,7 +339,7 @@ class TestMetricThroughTheFactories:
             pass
 
         monkeypatch.setattr(
-            "ragit.stores.registry.RegistryVectorStoreFactory",
+            "ragnor.stores.registry.RegistryVectorStoreFactory",
             lambda: RegistryVectorStoreFactory(
                 registry=registry, default_provider="strict-backend"
             ),

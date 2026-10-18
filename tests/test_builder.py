@@ -1,4 +1,4 @@
-"""Tests for the RagitBuilder high-level convenience API.
+"""Tests for the RagnorBuilder high-level convenience API.
 
 Covers the builder's offline defaults (in-memory store,
 sliding-window chunker, in-memory version store, null session
@@ -16,23 +16,23 @@ from typing import Any
 
 import pytest
 
-from ragit.builder import (
+from ragnor.builder import (
     BuilderSettings,
     InMemoryVersionStore,
-    Ragit,
-    RagitBuilder,
+    Ragnor,
+    RagnorBuilder,
 )
-from ragit.chunking.base import Chunker
-from ragit.config import RagSettings
-from ragit.ingestion.pipeline import IngestionPipeline
-from ragit.ingestion.sources import (
+from ragnor.chunking.base import Chunker
+from ragnor.config import RagSettings
+from ragnor.ingestion.pipeline import IngestionPipeline
+from ragnor.ingestion.sources import (
     DocumentSource,
     ListDocumentSource,
     RawDocument,
 )
-from ragit.retrieval.retriever import HybridRetriever
-from ragit.stores.memory import InMemoryVectorStore
-from ragit.types import Chunk, Document, SearchResult
+from ragnor.retrieval.retriever import HybridRetriever
+from ragnor.stores.memory import InMemoryVectorStore
+from ragnor.types import Chunk, Document, SearchResult
 
 
 class _HashingEmbedder:
@@ -132,7 +132,7 @@ async def test_list_document_source_maps_documents() -> None:
 @pytest.mark.asyncio
 async def test_local_build_ingest_search_round_trip() -> None:
     embedder = _HashingEmbedder(dim=8)
-    rag = await RagitBuilder.local(embedder, embedding_dim=8).build()
+    rag = await RagnorBuilder.local(embedder, embedding_dim=8).build()
 
     count = await rag.ingest(
         [
@@ -160,7 +160,7 @@ async def test_second_identical_ingest_is_noop() -> None:
     embedder = _RecordingEmbedder(_HashingEmbedder(dim=8))
     store = InMemoryVectorStore(embedding_dim=8, embedding_fn=embedder)
     version_store = InMemoryVersionStore(store)
-    rag = await RagitBuilder.local(
+    rag = await RagnorBuilder.local(
         embedder,
         embedding_dim=8,
         store=store,
@@ -187,7 +187,7 @@ async def test_changed_content_reingests_and_deletes_retired_chunks() -> None:
     embedder = _HashingEmbedder(dim=8)
     store = InMemoryVectorStore(embedding_dim=8, embedding_fn=embedder)
     version_store = InMemoryVersionStore(store)
-    rag = await RagitBuilder.local(
+    rag = await RagnorBuilder.local(
         embedder,
         embedding_dim=8,
         store=store,
@@ -228,7 +228,7 @@ async def test_component_overrides_are_honored() -> None:
     embedder = _RecordingEmbedder(_HashingEmbedder(dim=8))
     store = InMemoryVectorStore(table_name="custom_table", embedding_dim=8, embedding_fn=embedder)
     chunker = _MarkerChunker()
-    rag = await RagitBuilder.local(
+    rag = await RagnorBuilder.local(
         embedder,
         embedding_dim=8,
         chunker=chunker,
@@ -259,7 +259,7 @@ async def test_with_methods_override_components() -> None:
     embedder = _HashingEmbedder(dim=8)
     store = InMemoryVectorStore(embedding_dim=8, embedding_fn=embedder)
     builder = (
-        RagitBuilder.local(None)
+        RagnorBuilder.local(None)
         .with_embedder(embedder)
         .with_store(store)
         .with_chunker(_MarkerChunker())
@@ -274,16 +274,16 @@ async def test_with_methods_override_components() -> None:
 @pytest.mark.asyncio
 async def test_build_without_embedder_raises_value_error() -> None:
     with pytest.raises(ValueError, match="no embedder"):
-        await RagitBuilder().build()
+        await RagnorBuilder().build()
 
     with pytest.raises(ValueError, match="no embedder"):
-        await RagitBuilder.local(None).build()
+        await RagnorBuilder.local(None).build()
 
 
 @pytest.mark.asyncio
 async def test_purge_on_empty_removes_all_chunks() -> None:
     embedder = _HashingEmbedder(dim=8)
-    rag = await RagitBuilder.local(embedder, embedding_dim=8).build()
+    rag = await RagnorBuilder.local(embedder, embedding_dim=8).build()
 
     await rag.ingest(
         [
@@ -299,8 +299,8 @@ async def test_purge_on_empty_removes_all_chunks() -> None:
 
 @pytest.mark.asyncio
 async def test_facade_exposes_low_level_seams() -> None:
-    rag = await RagitBuilder.local(_HashingEmbedder(dim=8), embedding_dim=8).build()
-    assert isinstance(rag, Ragit)
+    rag = await RagnorBuilder.local(_HashingEmbedder(dim=8), embedding_dim=8).build()
+    assert isinstance(rag, Ragnor)
     assert isinstance(rag.store, InMemoryVectorStore)
     assert isinstance(rag.pipeline, IngestionPipeline)
     assert isinstance(rag.retriever, HybridRetriever)

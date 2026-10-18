@@ -18,12 +18,12 @@ import math
 import re
 from typing import Any
 
-from ragit.evidence.assembler import EvidenceAssembler
-from ragit.evidence.source_lookup import MemorySnapshotStore, SourceLookup
-from ragit.evidence.tokenizer import ApproximateTokenizer
-from ragit.evidence.types import ContextBudget, EvidenceBundle, SearchHit
-from ragit.stores.memory import InMemoryVectorStore
-from ragit.tools.bridge import CollectionConfig, KnowledgeBridge
+from ragnor.evidence.assembler import EvidenceAssembler
+from ragnor.evidence.source_lookup import MemorySnapshotStore, SourceLookup
+from ragnor.evidence.tokenizer import ApproximateTokenizer
+from ragnor.evidence.types import ContextBudget, EvidenceBundle, SearchHit
+from ragnor.stores.memory import InMemoryVectorStore
+from ragnor.tools.bridge import CollectionConfig, KnowledgeBridge
 
 
 class HashingEmbedder:

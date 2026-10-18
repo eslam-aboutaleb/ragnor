@@ -21,11 +21,11 @@ from typing import Any
 import numpy as np
 import pytest
 
-from ragit.stores._scoring import l2_distance
-from ragit.stores.chroma import ChromaStore
-from ragit.stores.faiss import FaissStore
-from ragit.stores.qdrant import QdrantStore
-from ragit.types import RetrievalError
+from ragnor.stores._scoring import l2_distance
+from ragnor.stores.chroma import ChromaStore
+from ragnor.stores.faiss import FaissStore
+from ragnor.stores.qdrant import QdrantStore
+from ragnor.types import RetrievalError
 
 DIM = 3
 SRC_DIR = str(Path(__file__).resolve().parents[1] / "src")
@@ -415,22 +415,22 @@ def _faiss_store(index: _FakeFaissIndex, **kwargs: Any) -> FaissStore:
 
 class TestBackendSelection:
     def test_get_vector_store_selects_every_builtin_backend(self) -> None:
-        from ragit.stores import (
+        from ragnor.stores import (
             ChromaStore as LazyChromaStore,
         )
-        from ragit.stores import (
+        from ragnor.stores import (
             FaissStore as LazyFaissStore,
         )
-        from ragit.stores import (
+        from ragnor.stores import (
             InMemoryVectorStore,
         )
-        from ragit.stores import (
+        from ragnor.stores import (
             PgVectorStore as LazyPgVectorStore,
         )
-        from ragit.stores import (
+        from ragnor.stores import (
             QdrantStore as LazyQdrantStore,
         )
-        from ragit.stores import get_vector_store
+        from ragnor.stores import get_vector_store
 
         for provider, store_class in (
             ("memory", InMemoryVectorStore),
@@ -669,7 +669,7 @@ class TestQdrantStoreCapabilities:
     async def test_satisfies_capability_protocols(
         self, qdrant_module: types.ModuleType, qdrant_client: _FakeQdrantClient
     ) -> None:
-        from ragit.stores.base import (
+        from ragnor.stores.base import (
             DocumentStore,
             LexicalIndex,
             VectorIndex,
@@ -1082,7 +1082,7 @@ class TestChromaStoreCapabilities:
     """Capability split: vector_search, keyword_search, delete, get."""
 
     async def test_satisfies_capability_protocols(self, chroma_client: _FakeChromaClient) -> None:
-        from ragit.stores.base import (
+        from ragnor.stores.base import (
             DocumentStore,
             LexicalIndex,
             VectorIndex,
@@ -1429,7 +1429,7 @@ class TestFaissStoreCapabilities:
     """Capability split: vector_search, keyword_search, delete, get."""
 
     async def test_satisfies_capability_protocols(self, faiss_index: _FakeFaissIndex) -> None:
-        from ragit.stores.base import (
+        from ragnor.stores.base import (
             DocumentStore,
             LexicalIndex,
             VectorIndex,
@@ -1606,8 +1606,8 @@ class TestDriverDecoupling:
         result = _run_python(
             "import sys\n"
             "sys.modules['qdrant_client'] = None\n"
-            "import ragit.stores\n"
-            "store = ragit.stores.QdrantStore(\n"
+            "import ragnor.stores\n"
+            "store = ragnor.stores.QdrantStore(\n"
             "    table_name='docs', embedding_dim=4,\n"
             ")\n"
             "print(type(store).__name__)\n"
@@ -1625,8 +1625,8 @@ class TestDriverDecoupling:
         result = _run_python(
             "import sys\n"
             "sys.modules['chromadb'] = None\n"
-            "import ragit.stores\n"
-            "store = ragit.stores.ChromaStore(\n"
+            "import ragnor.stores\n"
+            "store = ragnor.stores.ChromaStore(\n"
             "    table_name='docs', embedding_dim=4,\n"
             ")\n"
             "print(type(store).__name__)\n"
@@ -1644,8 +1644,8 @@ class TestDriverDecoupling:
         result = _run_python(
             "import sys\n"
             "sys.modules['faiss'] = None\n"
-            "import ragit.stores\n"
-            "store = ragit.stores.FaissStore(\n"
+            "import ragnor.stores\n"
+            "store = ragnor.stores.FaissStore(\n"
             "    table_name='docs', embedding_dim=4,\n"
             ")\n"
             "print(type(store).__name__)\n"

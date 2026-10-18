@@ -19,24 +19,24 @@ from unittest.mock import MagicMock
 import pytest
 from sqlalchemy import text
 
-from ragit.db.session import create_session_factory
-from ragit.stores.pgvector import PgVectorStore
+from ragnor.db.session import create_session_factory
+from ragnor.stores.pgvector import PgVectorStore
 
 
 def _test_database_url() -> str | None:
     """Return the dedicated test database URL, if configured.
 
-    Database-backed tests run only when ``RAGIT_TEST_DATABASE_URL``
+    Database-backed tests run only when ``RAGNOR_TEST_DATABASE_URL``
     names a database (env var or repo ``.env``).
     """
-    url = os.environ.get("RAGIT_TEST_DATABASE_URL")
+    url = os.environ.get("RAGNOR_TEST_DATABASE_URL")
     if url:
         return url
     env_file = Path(__file__).resolve().parents[3] / ".env"
     if not env_file.exists():
         return None
     for raw in env_file.read_text(encoding="utf-8").splitlines():
-        if raw.strip().startswith("RAGIT_TEST_DATABASE_URL="):
+        if raw.strip().startswith("RAGNOR_TEST_DATABASE_URL="):
             return raw.strip().split("=", 1)[1].strip().strip('"').strip("'")
     return None
 
@@ -136,7 +136,7 @@ async def test_hybrid_search_sees_caller_uncommitted_data():
     """
     database_url = _test_database_url()
     if database_url is None:
-        pytest.skip("RAGIT_TEST_DATABASE_URL is not set")
+        pytest.skip("RAGNOR_TEST_DATABASE_URL is not set")
 
     factory = create_session_factory(database_url)
     store = PgVectorStore(
@@ -148,7 +148,7 @@ async def test_hybrid_search_sees_caller_uncommitted_data():
 
     user_id = uuid.uuid4()
     claim_id = str(uuid.uuid4())
-    text_content = "Claim CLM-RAGIT03: Water Damage - Pipe burst causing kitchen flooding."
+    text_content = "Claim CLM-RAGNOR03: Water Damage - Pipe burst causing kitchen flooding."
     embedding = hash_embedding(text_content)
 
     async with factory() as session:
@@ -159,8 +159,8 @@ async def test_hybrid_search_sees_caller_uncommitted_data():
             ),
             {
                 "id": user_id,
-                "username": f"ragit-03-{uuid.uuid4().hex[:8]}",
-                "password_hash": "ragit-03-test-placeholder-hash",
+                "username": f"ragnor-03-{uuid.uuid4().hex[:8]}",
+                "password_hash": "ragnor-03-test-placeholder-hash",
             },
         )
         await store.upsert(
@@ -170,8 +170,8 @@ async def test_hybrid_search_sees_caller_uncommitted_data():
                     "text": text_content,
                     "embedding": embedding,
                     "metadata": {
-                        "claim_id": "CLM-RAGIT03",
-                        "policy_number": "POL-RAGIT03",
+                        "claim_id": "CLM-RAGNOR03",
+                        "policy_number": "POL-RAGNOR03",
                         "claim_type": "Water Damage",
                         "status": "Submitted",
                         "amount": 100.0,
@@ -196,6 +196,6 @@ async def test_hybrid_search_sees_caller_uncommitted_data():
         matches = [row for row in results if row["id"] == claim_id]
         assert matches
         assert matches[0]["distance"] == 0.0
-        assert matches[0]["metadata"] == {"claim_id": "CLM-RAGIT03"}
+        assert matches[0]["metadata"] == {"claim_id": "CLM-RAGNOR03"}
 
         await session.rollback()

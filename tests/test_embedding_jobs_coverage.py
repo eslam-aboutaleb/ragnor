@@ -1,4 +1,4 @@
-"""Coverage tests for the ragit job outbox enqueue path.
+"""Coverage tests for the ragnor job outbox enqueue path.
 
 Includes the outbox invariant test: a job enqueued with a
 caller session is not committed by the enqueue call.
@@ -10,8 +10,8 @@ import asyncio
 
 import pytest
 
-from ragit.jobs import drainer
-from ragit.jobs.outbox import enqueue_job
+from ragnor.jobs import drainer
+from ragnor.jobs.outbox import enqueue_job
 from tests.job_doubles import FakeJobStore, RecordingSession
 
 

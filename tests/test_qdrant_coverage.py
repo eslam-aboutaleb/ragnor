@@ -1,6 +1,6 @@
 """Coverage tests for the Qdrant store.
 
-Exercises the paths in ``ragit.stores.qdrant`` that the
+Exercises the paths in ``ragnor.stores.qdrant`` that the
 shared backend suite does not reach: the ``_point_id``
 document-id mapping, ``hybrid_search``'s ``n_results``
 validation, and ``count``'s strict/non-strict error
@@ -18,8 +18,8 @@ from typing import Any
 
 import pytest
 
-from ragit.stores.qdrant import QdrantStore, _point_id
-from ragit.types import RetrievalError
+from ragnor.stores.qdrant import QdrantStore, _point_id
+from ragnor.types import RetrievalError
 
 DIM = 3
 

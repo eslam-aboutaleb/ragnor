@@ -1,10 +1,10 @@
-"""Tests for ragit.ingestion.sources."""
+"""Tests for ragnor.ingestion.sources."""
 
 from __future__ import annotations
 
 import pytest
 
-from ragit.ingestion import (
+from ragnor.ingestion import (
     DocumentSource,
     FileDocumentSource,
     RawDocument,

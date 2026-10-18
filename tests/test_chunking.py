@@ -1,4 +1,4 @@
-"""Tests for ragit.chunking.
+"""Tests for ragnor.chunking.
 
 Covers the sliding-window chunker -- including the word-count
 semantics pinned by the original ingest implementation -- the
@@ -10,14 +10,14 @@ from __future__ import annotations
 
 import pytest
 
-from ragit.chunking.base import Chunker
-from ragit.chunking.markdown import MarkdownSectionChunker
-from ragit.chunking.registry import chunker_registry
-from ragit.chunking.sliding_window import (
+from ragnor.chunking.base import Chunker
+from ragnor.chunking.markdown import MarkdownSectionChunker
+from ragnor.chunking.registry import chunker_registry
+from ragnor.chunking.sliding_window import (
     SlidingWindowChunker,
     sliding_window_chunk,
 )
-from ragit.types import Chunk
+from ragnor.types import Chunk
 
 SAMPLE_DOCUMENT = """# Sample Policy
 

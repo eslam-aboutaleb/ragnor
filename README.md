@@ -1,10 +1,10 @@
-# ragit
+# Ragnor
 
-[![CI](https://github.com/eslam-aboutaleb/ragit/actions/workflows/ci.yml/badge.svg)](https://github.com/eslam-aboutaleb/ragit/actions/workflows/ci.yml)
+[![CI](https://github.com/eslam-aboutaleb/ragnor/actions/workflows/ci.yml/badge.svg)](https://github.com/eslam-aboutaleb/ragnor/actions/workflows/ci.yml)
 
 **Domain-agnostic RAG toolkit** — chunking, embeddings, vector stores, hybrid retrieval, idempotent ingestion, background jobs, and evaluation.
 
-ragit is a RAG _subsystem_, not an application. so **any** host application can plug its own domain bindings into the same machinery. It ships no application code: every host-specific dependency (settings, session factory, version tables, job tables, datasets) is injected through protocols and case-insensitive provider registries.
+ragnor is a RAG _subsystem_, not an application. so **any** host application can plug its own domain bindings into the same machinery. It ships no application code: every host-specific dependency (settings, session factory, version tables, job tables, datasets) is injected through protocols and case-insensitive provider registries.
 
 ---
 
@@ -26,7 +26,7 @@ ragit is a RAG _subsystem_, not an application. so **any** host application can 
 - [Ingestion](#ingestion)
 - [Job outbox and drainer](#job-outbox-and-drainer)
 - [Evaluation](#evaluation)
-- [Extending ragit: provider registries](#extending-ragit-provider-registries)
+- [Extending ragnor: provider registries](#extending-ragnor-provider-registries)
 - [Host integration checklist](#host-integration-checklist)
 - [Security model](#security-model)
 - [Troubleshooting](#troubleshooting)
@@ -66,7 +66,7 @@ ragit is a RAG _subsystem_, not an application. so **any** host application can 
                 │ injects                          │ injects
                 ▼                                  ▼
 ┌──────────────────────────────────────────────────────────────┐
-│                          ragit                              │
+│                          ragnor                              │
 │                                                              │
 │  ┌──────────┐  ┌───────────┐  ┌──────────┐  ┌───────────┐  │
 │  │ chunking │  │ embeddings│  │  stores  │  │ retrieval │  │
@@ -95,37 +95,37 @@ ragit is a RAG _subsystem_, not an application. so **any** host application can 
         └───────────────┘             └───────────────┘
 ```
 
-**How the pieces fit.** A document enters through a `DocumentSource` and flows through the ingestion pipeline: the pipeline hashes the content, compares it against the active version's snapshot, chunks the text, embeds the chunks, validates the vectors, and upserts them into a vector store — inside one transaction, serialized by an advisory lock when a lock key is supplied. At query time, `HybridRetriever` embeds the query, delegates the two-stage search (vector similarity + keyword search) to the store, and fuses the results with RRF. Embedding work can be deferred to a background drainer through the job outbox. Finally, the evaluation harness scores retrieval quality against a curated test set. Every arrow in that flow is a protocol seam: the host injects settings, sessions, version storage, job storage, and datasets, and ragit never imports the host in return.
+**How the pieces fit.** A document enters through a `DocumentSource` and flows through the ingestion pipeline: the pipeline hashes the content, compares it against the active version's snapshot, chunks the text, embeds the chunks, validates the vectors, and upserts them into a vector store — inside one transaction, serialized by an advisory lock when a lock key is supplied. At query time, `HybridRetriever` embeds the query, delegates the two-stage search (vector similarity + keyword search) to the store, and fuses the results with RRF. Embedding work can be deferred to a background drainer through the job outbox. Finally, the evaluation harness scores retrieval quality against a curated test set. Every arrow in that flow is a protocol seam: the host injects settings, sessions, version storage, job storage, and datasets, and ragnor never imports the host in return.
 
-**Two abstract factories.** Every SQL operation ragit performs — sessions, queries, mutations, and advisory locking — goes through the `SQLFactory` interface, implemented by `SQLAlchemyFactory` (any SQLAlchemy dialect). Vector stores are created through the `VectorStoreFactory` interface, implemented by `RegistryVectorStoreFactory` (registry-based selection, including the zero-SQL in-memory store). Hosts subclass either factory to target another stack.
+**Two abstract factories.** Every SQL operation ragnor performs — sessions, queries, mutations, and advisory locking — goes through the `SQLFactory` interface, implemented by `SQLAlchemyFactory` (any SQLAlchemy dialect). Vector stores are created through the `VectorStoreFactory` interface, implemented by `RegistryVectorStoreFactory` (registry-based selection, including the zero-SQL in-memory store). Hosts subclass either factory to target another stack.
 
-**Key design decisions.** ragit depends on the host through protocols and never imports it: settings via `RagSettings`, sessions via `SessionProvider`, version and job storage via `VersionStore` / `EmbeddingJobStore`. Providers register under names and are looked up case-insensitively, so swapping a provider never edits ragit. `Chunk`, `Document`, and `SearchResult` are the canonical value types, with the dict-based store API working alongside them. There are no module-level singletons — the host creates every registry, engine, and session factory per process.
+**Key design decisions.** ragnor depends on the host through protocols and never imports it: settings via `RagSettings`, sessions via `SessionProvider`, version and job storage via `VersionStore` / `EmbeddingJobStore`. Providers register under names and are looked up case-insensitively, so swapping a provider never edits ragnor. `Chunk`, `Document`, and `SearchResult` are the canonical value types, with the dict-based store API working alongside them. There are no module-level singletons — the host creates every registry, engine, and session factory per process.
 
 ---
 
 ## Installation
 
-ragit requires **Python ≥ 3.11**. The core install has **zero third-party dependencies** — every capability (LiteLLM embeddings, vector backends) is an optional extra, imported lazily only when used.
+Upgrading from an earlier release? See the [Ragnor migration guide](docs/migration-ragnor.md).
 
-The distribution is published on PyPI as **`ragit-toolkit`** (the PyPI name `ragit` is taken by an unrelated third-party package — see "About the names" below):
+ragnor requires **Python ≥ 3.11**. The core install has **zero third-party dependencies** — every capability (LiteLLM embeddings, vector backends) is an optional extra, imported lazily only when used.
+
+The distribution is published on PyPI as **`ragnor`**:
 
 ```bash
 # Install from PyPI
-pip install ragit-toolkit
+pip install ragnor
 
 # With a backend extra
-pip install "ragit-toolkit[pgvector]"
+pip install "ragnor[pgvector]"
 ```
 
 As a uv/poetry dependency in `pyproject.toml`:
 
 ```toml
-ragit-toolkit
+ragnor
 # or with an extra:
-ragit-toolkit[pgvector]
+ragnor[pgvector]
 ```
-
-> **About the names.** The PyPI name `ragit` is **taken** by an unrelated third-party package — RODMENA LIMITED's "Automatic RAG Pattern Optimization Engine" (currently v0.12.2; github.com/rodmena-limited/ragit) — so this project is published on PyPI under the distribution name **`ragit-toolkit`**. The PyPI package `raglib` (an openai-agents-based Spanish RAG library by Harrison Chacon) is another unrelated third-party project. The GitHub repository is `eslam-aboutaleb/ragit` and the Python package (import name) inside is `ragit`.
 
 Local development install from a checkout:
 
@@ -152,7 +152,7 @@ pip install -e ".[test]"
 pip install -e . fastapi uvicorn
 ```
 
-The core install has **zero third-party packages** — `import ragit.*` never requires litellm, a database driver, or a vector-DB client. Every capability ships as an optional extra and is imported lazily, only when actually used:
+The core install has **zero third-party packages** — `import ragnor.*` never requires litellm, a database driver, or a vector-DB client. Every capability ships as an optional extra and is imported lazily, only when actually used:
 
 | Extra              | Adds                                          | Notes                                                              |
 | ------------------ | --------------------------------------------- | ------------------------------------------------------------------ |
@@ -163,7 +163,7 @@ The core install has **zero third-party packages** — `import ragit.*` never re
 | `faiss`            | `faiss-cpu>=1.8`                              | FAISS vector store                                                 |
 | `local-embeddings` | *(reserved — currently empty)*                | Future local-model embedding backend (e.g. sentence-transformers) |
 | `test`             | `pytest`, `pytest-asyncio`, `aiosqlite`, `sqlalchemy[asyncio]`, `numpy`, `litellm` | Full test suite, including the LiteLLM integration check |
-| `all`              | `ragit[litellm,pgvector,qdrant,chroma,faiss]` | Every shipped capability at once                           |
+| `all`              | `ragnor[litellm,pgvector,qdrant,chroma,faiss]` | Every shipped capability at once                           |
 
 The extra names `pdf` and `web` are reserved for future loader/serving integrations.
 
@@ -171,20 +171,20 @@ The extra names `pdf` and `web` are reserved for future loader/serving integrati
 
 ## Quick start
 
-The high-level API needs three lines: build a `Ragit` with `RagitBuilder.local` (fully offline defaults — in-memory store, no database, no API key), ingest documents, and search. ragit ships no local embedder in core, so you inject one; the example below uses a deterministic fake (the runnable version lives in `examples/local_quickstart.py`).
+The high-level API needs three lines: build a `Ragnor` with `RagnorBuilder.local` (fully offline defaults — in-memory store, no database, no API key), ingest documents, and search. ragnor ships no local embedder in core, so you inject one; the example below uses a deterministic fake (the runnable version lives in `examples/local_quickstart.py`).
 
 ```python
-from ragit.builder import RagitBuilder
-from ragit.types import Document
+from ragnor.builder import RagnorBuilder
+from ragnor.types import Document
 
-rag = await RagitBuilder.local(embedder=my_embedder).build()
+rag = await RagnorBuilder.local(embedder=my_embedder).build()
 await rag.ingest([Document(id="policy", text="The refund policy covers water damage.")])
 results = await rag.search("refund policy")
 ```
 
 Every component is overridable (`with_store` / `with_embedder` / `with_chunker` / `with_version_store` / `with_settings`), and the low-level seams stay reachable through `rag.store`, `rag.pipeline`, and `rag.retriever`. The builder wires the existing `IngestionPipeline` and `HybridRetriever` unchanged — idempotent ingestion, snapshot comparison, and version replacement (retired chunks deleted through the store's `delete` capability) all behave exactly as in the low-level API.
 
-Details the three lines hide: `build()` raises `ValueError` without an embedder (ragit ships no local embedder in core); `embedding_dim=` is auto-registered for the embedding model via `register_dimension`; `rag.ingest(..., purge_on_empty=True)` treats an empty document list as authoritative — the active version is retired and its chunks deleted from the search index; `rag.count(**filters)` counts documents through the store; and `rag.search` defaults to `n_results=5`. The defaults are `SlidingWindowChunker(chunk_size=600, overlap=100)`, `BuilderSettings(embedding_model="local", rag_distance_threshold=1.3)` (a plain dataclass satisfying the `RagSettings` protocol — no pydantic-settings in core), and `InMemoryVersionStore` wired to the store; `BuilderSettings` and `InMemoryVersionStore` are public names, so hosts can construct or subclass them directly.
+Details the three lines hide: `build()` raises `ValueError` without an embedder (ragnor ships no local embedder in core); `embedding_dim=` is auto-registered for the embedding model via `register_dimension`; `rag.ingest(..., purge_on_empty=True)` treats an empty document list as authoritative — the active version is retired and its chunks deleted from the search index; `rag.count(**filters)` counts documents through the store; and `rag.search` defaults to `n_results=5`. The defaults are `SlidingWindowChunker(chunk_size=600, overlap=100)`, `BuilderSettings(embedding_model="local", rag_distance_threshold=1.3)` (a plain dataclass satisfying the `RagSettings` protocol — no pydantic-settings in core), and `InMemoryVersionStore` wired to the store; `BuilderSettings` and `InMemoryVersionStore` are public names, so hosts can construct or subclass them directly.
 
 ---
 
@@ -229,7 +229,7 @@ Run `python examples/host_integration.py` for the full offline demo: it ingests 
 
 ## Configuration
 
-ragit reads its configuration through the **`RagSettings` protocol** — your existing pydantic `Settings` class already works when it exposes these fields:
+ragnor reads its configuration through the **`RagSettings` protocol** — your existing pydantic `Settings` class already works when it exposes these fields:
 
 | Field                              | Type    | Used by                                                                                                                |
 | ---------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------- |
@@ -258,7 +258,7 @@ Chunkers split raw text into `Chunk` objects. Every chunker reports a `version` 
 Splits text into overlapping chunks by **word count**: each chunk holds `chunk_size` words and consecutive chunks overlap by `overlap` words, preserving context across chunk boundaries. Use it for plain text with no structure to respect.
 
 ```python
-from ragit.chunking import SlidingWindowChunker, sliding_window_chunk
+from ragnor.chunking import SlidingWindowChunker, sliding_window_chunk
 
 chunks = sliding_window_chunk(text, chunk_size=600, overlap=100)  # functional
 
@@ -312,7 +312,7 @@ class EmbeddingFunction(Protocol):
 The default provider wraps `litellm.embedding`, so any LiteLLM-supported backend can serve embeddings. The synchronous litellm call runs in a thread so it never blocks the event loop.
 
 ```python
-from ragit.embeddings import LitellmEmbeddingFunction
+from ragnor.embeddings import LitellmEmbeddingFunction
 
 embedder = LitellmEmbeddingFunction(
     api_key="sk-...",
@@ -337,7 +337,7 @@ embedder = LitellmEmbeddingFunction(
 The dimension registry is the single source of truth mapping model names to vector dimensions, so changing the embedding model cannot silently desynchronize the dimension checks at insert time. Known models return their dimension; **unknown models warn and fall back to `FALLBACK_DIMENSION` (1536)** instead of crashing start-up — register your model if the fallback is wrong.
 
 ```python
-from ragit.embeddings import get_embedding_dimension, register_dimension
+from ragnor.embeddings import get_embedding_dimension, register_dimension
 
 get_embedding_dimension("text-embedding-3-small")  # 1536
 get_embedding_dimension("text-embedding-3-large")  # 3072
@@ -353,15 +353,15 @@ register_dimension("my-model", 768)  # custom models
 
 ## Vector stores
 
-ragit ships five interchangeable stores behind the `VectorStore` interface. The core install stays database-free; install only the extra for the backend you select.
+ragnor ships five interchangeable stores behind the `VectorStore` interface. The core install stays database-free; install only the extra for the backend you select.
 
 | Backend | Install extra | Best fit | Important trade-off |
 | --- | --- | --- | --- |
 | `memory` | None | Tests and local development | In-process and non-persistent; keyword search is token overlap |
-| `pgvector` | `ragit-toolkit[pgvector]` | PostgreSQL-backed production retrieval | The only built-in backend with native PostgreSQL full-text ranking |
-| `qdrant` | `ragit-toolkit[qdrant]` | Vector search through a Qdrant server | Keyword search is an in-process token-overlap fallback |
-| `chroma` | `ragit-toolkit[chroma]` | Embedded or persistent Chroma collections | Keyword search is an in-process token-overlap fallback |
-| `faiss` | `ragit-toolkit[faiss]` | An exact in-process vector index | No persistence or server; keyword search is token overlap |
+| `pgvector` | `ragnor[pgvector]` | PostgreSQL-backed production retrieval | The only built-in backend with native PostgreSQL full-text ranking |
+| `qdrant` | `ragnor[qdrant]` | Vector search through a Qdrant server | Keyword search is an in-process token-overlap fallback |
+| `chroma` | `ragnor[chroma]` | Embedded or persistent Chroma collections | Keyword search is an in-process token-overlap fallback |
+| `faiss` | `ragnor[faiss]` | An exact in-process vector index | No persistence or server; keyword search is token overlap |
 
 The fallback keyword path in `memory`, `qdrant`, `chroma`, and `faiss` is not equivalent to PostgreSQL full-text search, and should not be used to tune production ranking thresholds. For backend setup examples, supported distance metrics, strict mode, and lifecycle operations, see the [vector-store guide](docs/vector-stores.md).
 
@@ -372,7 +372,7 @@ The fallback keyword path in `memory`, `qdrant`, `chroma`, and `faiss` is not eq
 `HybridRetriever` orchestrates retrieval: it resolves the embedder and store from settings, embeds the query, delegates the two-stage search to the store, and returns `SearchResult` dataclasses.
 
 ```python
-from ragit.retrieval import HybridRetriever, RetrieverSpec, as_dicts
+from ragnor.retrieval import HybridRetriever, RetrieverSpec, as_dicts
 
 retriever = HybridRetriever(
     spec=RetrieverSpec(table_name="policy_chunks", metadata_fields=["section", "source"]),
@@ -397,7 +397,7 @@ rows = as_dicts(results)  # back to dicts for legacy consumers
 
 ### Retrieval strategies
 
-`ragit.retrieval.strategies` composes the capability Protocols instead of the fused store: `DenseRetrieval(vector_index, embedder)`, `KeywordRetrieval(lexical_index)` (keyword-only, **no embedding dependency** — a keyword-only application needs no embedding-provider configuration at all), and `HybridRetrieval(vector_index, lexical_index, embedder, reranker=None)` — the two stages may be different objects (e.g. a pgvector `VectorIndex` plus an external lexical engine adapted to `LexicalIndex`). `reranker` is an optional `Reranker` protocol (`async rerank(query, results) -> list[dict]`; no built-in implementation ships — hosts inject a cross-encoder, an LLM reranker, ...). Dense and hybrid retrieval **require** a `threshold` kwarg (the distance cutoff) and raise `ValueError` without it. Every strategy applies the legacy swallow/raise contract: `strict=False` (the default) swallows failures into `[]`, `strict=True` raises `ragit.types.RetrievalError`. Inject a strategy into `HybridRetriever(spec, settings, strategy=...)` to bypass the retriever's eager embedder/store construction — the builder wires its `HybridRetrieval` strategy this way, so the facade searches the same store instance the pipeline writes to.
+`ragnor.retrieval.strategies` composes the capability Protocols instead of the fused store: `DenseRetrieval(vector_index, embedder)`, `KeywordRetrieval(lexical_index)` (keyword-only, **no embedding dependency** — a keyword-only application needs no embedding-provider configuration at all), and `HybridRetrieval(vector_index, lexical_index, embedder, reranker=None)` — the two stages may be different objects (e.g. a pgvector `VectorIndex` plus an external lexical engine adapted to `LexicalIndex`). `reranker` is an optional `Reranker` protocol (`async rerank(query, results) -> list[dict]`; no built-in implementation ships — hosts inject a cross-encoder, an LLM reranker, ...). Dense and hybrid retrieval **require** a `threshold` kwarg (the distance cutoff) and raise `ValueError` without it. Every strategy applies the legacy swallow/raise contract: `strict=False` (the default) swallows failures into `[]`, `strict=True` raises `ragnor.types.RetrievalError`. Inject a strategy into `HybridRetriever(spec, settings, strategy=...)` to bypass the retriever's eager embedder/store construction — the builder wires its `HybridRetrieval` strategy this way, so the facade searches the same store instance the pipeline writes to.
 
 ---
 
@@ -469,7 +469,7 @@ The host implements the `VersionStore` protocol — `find_active`, `close_active
 
 **External stores.** `delete_chunks` is the single host hook for retiring a version's chunks. Implement it with the portable delete capability: `await store.delete(filters={version_id_key: version_id})`. The delete-before-upsert order is load-bearing: chunk ids are position-based, so the new version's chunks would violate the unique constraint if the retired version's chunks stayed.
 
-Hosts whose search index cannot share the version-table transaction should use the **staged-generation pattern**: write index mutations through the job outbox (`ragit.jobs`) when they cannot join the ingestion transaction, and let the version-table transition (`close_active` + `create_version`) be the atomic active-version switch. A legacy backend wrapped in `LegacyHybridStoreAdapter` deliberately exposes no capabilities — hosts using legacy backends must retire chunks through their own mechanism (their version tables, or a native delete the backend provides outside the adapter). The pipeline itself only ever calls `version_store.delete_chunks`, so it stays agnostic to whether the underlying store implements the capability.
+Hosts whose search index cannot share the version-table transaction should use the **staged-generation pattern**: write index mutations through the job outbox (`ragnor.jobs`) when they cannot join the ingestion transaction, and let the version-table transition (`close_active` + `create_version`) be the atomic active-version switch. A legacy backend wrapped in `LegacyHybridStoreAdapter` deliberately exposes no capabilities — hosts using legacy backends must retire chunks through their own mechanism (their version tables, or a native delete the backend provides outside the adapter). The pipeline itself only ever calls `version_store.delete_chunks`, so it stays agnostic to whether the underlying store implements the capability.
 
 ---
 
@@ -480,7 +480,7 @@ The outbox pattern decouples row insertion from background processing: a job row
 ### Enqueue
 
 ```python
-from ragit.jobs import enqueue_job
+from ragnor.jobs import enqueue_job
 
 # Inside your transaction: the job and the row land atomically
 await enqueue_job(store, {"text": "...", "metadata": {...}}, session=my_session)
@@ -494,7 +494,7 @@ With a session, `enqueue_job` only flushes — the caller owns the commit, which
 ### Process
 
 ```python
-from ragit.jobs import process_pending_jobs, reclaim_stale_jobs
+from ragnor.jobs import process_pending_jobs, reclaim_stale_jobs
 
 processed = await process_pending_jobs(store, processor, limit=10, worker_id="worker-1")
 ```
@@ -509,7 +509,7 @@ processed = await process_pending_jobs(store, processor, limit=10, worker_id="wo
 ### Drainer
 
 ```python
-from ragit.jobs.drainer import drain_forever, main
+from ragnor.jobs.drainer import drain_forever, main
 
 # Programmatic: runs until the stop event is set
 await drain_forever(
@@ -533,7 +533,7 @@ The job table itself is host-owned: `EmbeddingJobStore` (claim, mark, enqueue, r
 `RagEvaluationHarness` runs a curated test set of `LabeledQuery` objects through any async retrieval function and aggregates Recall@K, Precision@K, MRR, average latency, and error counts.
 
 ```python
-from ragit.evaluation import LabeledQuery, RagEvaluationHarness
+from ragnor.evaluation import LabeledQuery, RagEvaluationHarness
 
 harness = RagEvaluationHarness(
     [
@@ -557,7 +557,7 @@ The heuristic judge is domain-neutral by default: key facts are numbers, plus an
 
 ### The runner
 
-`run_evaluation(config, retrieval_fn, dataset, settings=None, answer_fn=None)` orchestrates a full run. It **requires** an injected `retrieval_fn` and `dataset` (it raises `ValueError` otherwise) — ragit never imports a host retriever or dataset.
+`run_evaluation(config, retrieval_fn, dataset, settings=None, answer_fn=None)` orchestrates a full run. It **requires** an injected `retrieval_fn` and `dataset` (it raises `ValueError` otherwise) — ragnor never imports a host retriever or dataset.
 
 ```python
 result = await run_evaluation(
@@ -578,17 +578,17 @@ print(result.summary)  # human-readable report
 - `context` — scores the **joined retrieved context** against the gold answer. This is the legacy behavior under an honest name: it measures whether the retrieved chunks *contain* the answer, not whether a model answers faithfully. A cheap upper-bound proxy when no answer generator is wired.
 - `end-to-end` — also scores answer quality, but on a **real model output**: the injected `answer_fn` (an async `(query, context) -> answer` callable) generates the answer, and the judges receive the actual answer and the actual retrieved context as separate inputs. `end-to-end` **requires** `answer_fn` and raises `ValueError` naming the three modes otherwise — a silently wrong metric is worse than a loud failure. Per-sample results carry the retrieved `context`, the `generated_answer`, the `gold_answer`, and `chunks_found` separately.
 
-`EvalSample.category` is a free-form string (hosts define their own taxonomy); `difficulty` is an `easy`/`medium`/`hard` enum. The CLI entry point (`ragit.evaluation.runner:main`) exposes `--mode` (all three choices), `--judge`, `--n-results`, `--category`, `--difficulty`, and `--output`; hosts pass their own `retrieval_fn`, `dataset`, and optional `runner` callable to inject domain dependencies — including the `answer_fn` answer generator that `end-to-end` mode requires — behind the flags.
+`EvalSample.category` is a free-form string (hosts define their own taxonomy); `difficulty` is an `easy`/`medium`/`hard` enum. The CLI entry point (`ragnor.evaluation.runner:main`) exposes `--mode` (all three choices), `--judge`, `--n-results`, `--category`, `--difficulty`, and `--output`; hosts pass their own `retrieval_fn`, `dataset`, and optional `runner` callable to inject domain dependencies — including the `answer_fn` answer generator that `end-to-end` mode requires — behind the flags.
 
 ---
 
-## Extending ragit: provider registries
+## Extending ragnor: provider registries
 
-Providers register themselves in ragit's registries — swap a provider without editing ragit. A provider is a factory class that (1) accepts a `RagSettings` object in its constructor and (2) exposes a `create()` method returning the protocol instance:
+Providers register themselves in ragnor's registries — swap a provider without editing ragnor. A provider is a factory class that (1) accepts a `RagSettings` object in its constructor and (2) exposes a `create()` method returning the protocol instance:
 
 ```python
-from ragit.embeddings import embedding_registry
-from ragit.embeddings.base import EmbeddingFunction
+from ragnor.embeddings import embedding_registry
+from ragnor.embeddings.base import EmbeddingFunction
 
 
 @embedding_registry.register("my-provider")
@@ -607,20 +607,20 @@ The same pattern applies to every registry:
 
 | Registry                | Module                      | Selected by                      |
 | ----------------------- | --------------------------- | -------------------------------- |
-| `embedding_registry`    | `ragit.embeddings.registry` | `settings.embedding_provider`    |
-| `vector_store_registry` | `ragit.stores.registry`     | `settings.vector_store_provider` |
-| `chunker_registry`      | `ragit.chunking.registry`   | explicit construction            |
+| `embedding_registry`    | `ragnor.embeddings.registry` | `settings.embedding_provider`    |
+| `vector_store_registry` | `ragnor.stores.registry`     | `settings.vector_store_provider` |
+| `chunker_registry`      | `ragnor.chunking.registry`   | explicit construction            |
 
 All lookups are case-insensitive; unknown names raise `KeyError` listing the registered providers. For a vector backend, subclass the `VectorStore` ABC and make the constructor accept the registry factory kwargs (`table_name`, `id_field`, `embedding_dim`, `session_factory`, `settings`, `embedding_fn`), because `get_vector_store` instantiates it with them — this is the seam for targeting Milvus, Weaviate, or any other vector database not shipped in the box.
 
 ### Abstract factories
 
-Two abstract factories sit above the registries. `SQLFactory` is the seam for every SQL operation — sessions, queries, mutations, and advisory locking; inject a custom implementation via `sql_factory=` on `IngestionPipeline` and `PgVectorStore` to run ragit on another stack:
+Two abstract factories sit above the registries. `SQLFactory` is the seam for every SQL operation — sessions, queries, mutations, and advisory locking; inject a custom implementation via `sql_factory=` on `IngestionPipeline` and `PgVectorStore` to run ragnor on another stack:
 
 ```python
 from contextlib import asynccontextmanager
 
-from ragit.db.sql_factory import SQLFactory
+from ragnor.db.sql_factory import SQLFactory
 
 
 class MySqlFactory(SQLFactory):
@@ -640,10 +640,10 @@ class MySqlFactory(SQLFactory):
 
 ## Host integration checklist
 
-ragit is host-agnostic by design — any domain application integrates by completing the checklist below. A complete runnable template lives in `examples/host_integration.py`: it wires settings, a registered embedder provider, a registered vector backend, the ingestion pipeline, the hybrid retriever, and the evaluation harness end to end, and runs fully offline (in-memory store + fake embedder).
+ragnor is host-agnostic by design — any domain application integrates by completing the checklist below. A complete runnable template lives in `examples/host_integration.py`: it wires settings, a registered embedder provider, a registered vector backend, the ingestion pipeline, the hybrid retriever, and the evaluation harness end to end, and runs fully offline (in-memory store + fake embedder).
 
 1. **Define domain settings.** A settings class exposing the `RagSettings` fields (see the table in [Configuration](#configuration)). Validate at start-up with `isinstance(settings, RagSettings)`.
-2. **Provide an embedder.** Either construct an `EmbeddingFunction` implementation directly and inject it into `IngestionPipeline`, or register a provider factory under a name (see [Extending ragit](#extending-ragit-provider-registries)) and select it via `settings.embedding_provider`.
+2. **Provide an embedder.** Either construct an `EmbeddingFunction` implementation directly and inject it into `IngestionPipeline`, or register a provider factory under a name (see [Extending ragnor](#extending-ragnor-provider-registries)) and select it via `settings.embedding_provider`.
 3. **Choose the vector backend.** Use a built-in (`"memory"` for dev/test, `"pgvector"` for PostgreSQL, `"qdrant"`, `"chroma"`, or `"faiss"`) or bring your own for any other vector database: subclass the `VectorStore` ABC, register it, and select it via `settings.vector_store_provider`. The constructor must accept the registry factory kwargs because `get_vector_store` instantiates it with them.
 4. **Register the embedding dimension.** Call `register_dimension("my-model", 768)` so insert-time dimension validation matches the model's real output; unknown models warn and fall back to 1536 instead of crashing start-up.
 5. **Wire ingestion.** Construct `IngestionPipeline(store, embedder, chunker, session_factory, settings)` plus a host-implemented `VersionStore`.
@@ -673,7 +673,7 @@ The built-in pgvector store builds raw SQL (the hybrid query needs CTEs, window 
 
 **`ValueError: embedding has N dimensions; expected M`** — A dimension mismatch at insert or query time. The usual cause is an unregistered embedding model that silently fell back to `FALLBACK_DIMENSION` (1536) while your backend produces a different size. Register the real dimension with `register_dimension()` and check the logs for the unknown-model warning.
 
-**Warning: `No embedding dimension registered for model '...'`** — The model is not in the dimension registry, so ragit assumed 1536. If that is wrong, call `register_dimension(model, dimension)` at start-up; otherwise the fallback is safe.
+**Warning: `No embedding dimension registered for model '...'`** — The model is not in the dimension registry, so ragnor assumed 1536. If that is wrong, call `register_dimension(model, dimension)` at start-up; otherwise the fallback is safe.
 
 **`RuntimeError: PgVectorStore needs a session_factory or settings with a database_url`** — The store has no way to open its own sessions. Pass `session_factory` or `settings` carrying a `database_url`.
 
@@ -701,7 +701,7 @@ The built-in pgvector store builds raw SQL (the hybrid query needs CTEs, window 
 - **SQL factory** — the `SQLFactory` interface every SQL operation goes through (sessions, queries, mutations, advisory locking); `SQLAlchemyFactory` is the built-in implementation, and hosts subclass it to target another stack.
 - **Vector store factory** — the `VectorStoreFactory` interface that creates vector stores; `RegistryVectorStoreFactory` is the default, selecting the backend from the provider registry.
 - **tsvector / pgvector** — PostgreSQL extensions for full-text search (tokenized text matched with `tsquery`) and vector similarity (L2 distance via the `<->` operator), respectively.
-- **retrieval_fn** — the injected async callable `(query: str) -> list[result dicts]` that evaluation runs against; the host supplies it, ragit never imports it.
+- **retrieval_fn** — the injected async callable `(query: str) -> list[result dicts]` that evaluation runs against; the host supplies it, ragnor never imports it.
 
 ---
 
@@ -713,7 +713,7 @@ The built-in pgvector store builds raw SQL (the hybrid query needs CTEs, window 
 python examples/local_quickstart.py
 ```
 
-`examples/minimal_app.py` is a complete FastAPI app using ragit with zero host code — in-memory store, fake embedder (unless `OPENAI_API_KEY` is set), no database:
+`examples/minimal_app.py` is a complete FastAPI app using ragnor with zero host code — in-memory store, fake embedder (unless `OPENAI_API_KEY` is set), no database:
 
 ```bash
 pip install -e . fastapi uvicorn
@@ -766,12 +766,12 @@ The suite is **512 passed, 7 skipped**. It covers:
 | `registry`, `validation`, `types`, `config` | `test_registry.py`, `test_validation.py`, `test_types.py`, `test_config.py`                                                                                                  |
 | `db`                                        | `test_session_provider.py`                                                                                                                                                   |
 | factories (`db`, `stores`)                  | `test_factories.py`, `test_factory_coverage.py`                                                                                                                              |
-| invariants                                  | `test_no_app_imports.py` (ragit must never import the host `app` package), `test_dependency_hygiene.py` (zero-dependency invariant: subprocess-based litellm import blocking)                                                                                                    |
+| invariants                                  | `test_no_app_imports.py` (ragnor must never import the host `app` package), `test_dependency_hygiene.py` (zero-dependency invariant: subprocess-based litellm import blocking)                                                                                                    |
 
-**Database-dependent tests** (pgvector strict mode, session injection) skip automatically unless `RAGIT_TEST_DATABASE_URL` points at a PostgreSQL instance with pgvector installed — that is 3 of the 7 skipped tests in a default run (the other 4 need the `chroma` extra):
+**Database-dependent tests** (pgvector strict mode, session injection) skip automatically unless `RAGNOR_TEST_DATABASE_URL` points at a PostgreSQL instance with pgvector installed — that is 3 of the 7 skipped tests in a default run (the other 4 need the `chroma` extra):
 
 ```bash
-RAGIT_TEST_DATABASE_URL="postgresql+asyncpg://user:pass@localhost/ragit_test" \
+RAGNOR_TEST_DATABASE_URL="postgresql+asyncpg://user:pass@localhost/ragnor_test" \
     python -m pytest -q
 ```
 
@@ -784,9 +784,9 @@ RAGIT_TEST_DATABASE_URL="postgresql+asyncpg://user:pass@localhost/ragit_test" \
 [CI](.github/workflows/ci.yml) inherits Python quality, security analysis, and workflow validation from
 [ci-workflows](https://github.com/eslam-aboutaleb/ci-workflows), pinned to a reviewed commit SHA.
 The Python call explicitly uses pip and the package's `test` extra on Python 3.11 and 3.12.
-It requires Ruff lint/format checks, at least 85% coverage of `src/ragit`, and valid wheel/sdist metadata.
+It requires Ruff lint/format checks, at least 85% coverage of `src/ragnor`, and valid wheel/sdist metadata.
 
-Ragit's optional backend matrix also runs in CI. `CI Status Check` requires the shared jobs and
+Ragnor's optional backend matrix also runs in CI. `CI Status Check` requires the shared jobs and
 every backend job to succeed. SonarCloud runs through its dedicated workflow.
 GitHub Actions Dependabot updates cover the shared workflow references; review a dependency update
 and its resulting checks before adopting a new revision.
@@ -794,7 +794,7 @@ and its resulting checks before adopting a new revision.
 ## Project structure
 
 ```
-ragit/
+ragnor/
 ├── pyproject.toml            # packaging, pytest, ruff config
 ├── README.md                 # this file
 ├── examples/
@@ -802,12 +802,12 @@ ragit/
 │   ├── minimal_app.py        # zero-dependency FastAPI example
 │   ├── host_integration.py   # host integration template (any domain)
 │   └── sample_document.md    # bundled example document
-├── src/ragit/
+├── src/ragnor/
 │   ├── types.py              # Chunk, Document, SearchResult, RetrievalError
 │   ├── config.py             # RagSettings, SettingsProvider protocols
 │   ├── registry.py           # generic case-insensitive Registry[T]
 │   ├── validation.py         # validate_identifier, validate_embedding
-│   ├── builder.py            # RagitBuilder, Ragit facade, BuilderSettings, InMemoryVersionStore
+│   ├── builder.py            # RagnorBuilder, Ragnor facade, BuilderSettings, InMemoryVersionStore
 │   ├── chunking/             # sliding-window + Markdown section chunkers
 │   ├── embeddings/           # LiteLLM function, dimension registry
 │   ├── stores/               # VectorStore ABC, five built-in backends
@@ -835,7 +835,7 @@ ragit/
 
 These invariants are pinned by tests and must hold for any change:
 
-1. **ragit never imports the host application** — enforced by `test_no_app_imports.py`.
+1. **ragnor never imports the host application** — enforced by `test_no_app_imports.py`.
 2. **No module-level singletons** — registries, engines, and session factories are created per process by the host.
 3. **Chunk metadata keys are frozen** — the Markdown chunker's metadata set is exactly `{chunk_id, section, source, chunk_index, sub_chunk_index}`.
 4. **Ingestion is idempotent** — an unchanged source is skipped via snapshot comparison, never re-embedded.
@@ -867,10 +867,4 @@ The hooks run `ruff check`, `ruff format`, and the standard whitespace/EOF/YAML 
 
 ## License
 
-This software is source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE).
-
-Commercial use, including incorporation into commercial products or services, requires a separate commercial license from the copyright holder, except for purposes expressly permitted by the license (including its Noncommercial Organizations provision). Noncommercial use, modification, and redistribution are permitted subject to the full license terms.
-
-For commercial licensing, contact [eslam-aboutaleb](https://github.com/eslam-aboutaleb).
-
-Third-party dependencies and separately identified third-party code retain their own licenses. This license applies only to rights the copyright holder is entitled to license. Previously granted licenses for earlier versions are not revoked by this change.
+ragnor is released under the MIT License. See the LICENSE file in the repository root.

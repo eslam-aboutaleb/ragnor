@@ -1,14 +1,14 @@
-"""Coverage tests for the ragit evaluation dataset types.
+"""Coverage tests for the ragnor evaluation dataset types.
 
-The dataset **types** live in ``ragit.evaluation.dataset``;
+The dataset **types** live in ``ragnor.evaluation.dataset``;
 curated sample datasets live in the host application, not
-in ragit, and their filtering tests belong to the host
+in ragnor, and their filtering tests belong to the host
 application's own test suite.
 """
 
 from __future__ import annotations
 
-from ragit.evaluation.dataset import (
+from ragnor.evaluation.dataset import (
     Difficulty,
     EvalSample,
 )

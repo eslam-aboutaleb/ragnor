@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from ragit.sync.manifest import InMemoryManifestStore, ManifestRecord, ManifestStatus
-from ragit.sync.state import InMemorySyncStateStore
-from ragit.telemetry.health import (
+from ragnor.sync.manifest import InMemoryManifestStore, ManifestRecord, ManifestStatus
+from ragnor.sync.state import InMemorySyncStateStore
+from ragnor.telemetry.health import (
     ComponentHealth,
     HealthChecker,
     HealthReport,
@@ -159,7 +159,7 @@ async def test_health_checker_sync_status() -> None:
 @pytest.mark.asyncio
 async def test_health_checker_jobs_dead_letter_detection() -> None:
     """Dead letter jobs mark component as DEGRADED."""
-    from ragit.jobs.outbox import InMemoryEmbeddingJobStore
+    from ragnor.jobs.outbox import InMemoryEmbeddingJobStore
 
     job_store = InMemoryEmbeddingJobStore()
     checker = HealthChecker(job_store=job_store)

@@ -1,10 +1,10 @@
 """
-Tests for the ragit job outbox engine.
+Tests for the ragnor job outbox engine.
 
 The retry/backoff/dead-letter engine is driven here
 through a fake in-memory
-:class:`~ragit.jobs.outbox.EmbeddingJobStore`
-and :class:`~ragit.jobs.outbox.JobProcessor` —
+:class:`~ragnor.jobs.outbox.EmbeddingJobStore`
+and :class:`~ragnor.jobs.outbox.JobProcessor` —
 no host dependency. The host adapter's database
 behavior is covered by the host application's own
 test suite.
@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from ragit.jobs.outbox import (
+from ragnor.jobs.outbox import (
     MAX_ATTEMPTS,
     RETRY_SCHEDULE,
     process_pending_jobs,

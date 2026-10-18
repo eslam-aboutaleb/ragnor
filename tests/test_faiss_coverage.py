@@ -25,9 +25,9 @@ from typing import Any
 import numpy as np
 import pytest
 
-from ragit.stores._scoring import l2_distance
-from ragit.stores.faiss import FaissStore
-from ragit.stores.memory import InMemoryVectorStore
+from ragnor.stores._scoring import l2_distance
+from ragnor.stores.faiss import FaissStore
+from ragnor.stores.memory import InMemoryVectorStore
 
 DIM = 3
 

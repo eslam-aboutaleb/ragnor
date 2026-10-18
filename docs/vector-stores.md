@@ -2,7 +2,7 @@
 
 This page keeps the backend-specific setup and behavioral details together. Start with the [README overview](../README.md#vector-stores) to choose a store.
 
-ragit is vector-database agnostic: it ships no required database. Every backend — built-in or your own — implements the same `VectorStore` ABC with three methods: `hybrid_search`, `count`, and `upsert` (full signatures in `src/ragit/stores/base.py`; the ABC itself has no database dependency). Storage is split from retrieval strategy: three `@runtime_checkable` capability Protocols describe what a backend can do — `VectorIndex` (`vector_search`), `LexicalIndex` (`keyword_search`), and `DocumentStore` (`upsert`/`count`/`delete`/`get`) — and a host adapts an existing search engine to a Protocol by implementing its methods, with no ragit inheritance. Five backends ship in the box — `memory`, `pgvector`, `qdrant`, `chroma`, and `faiss` — each in its own module, imported lazily by the factory so its driver dependency stays optional until the backend is selected. Any other vector database plugs in through the registry.
+ragnor is vector-database agnostic: it ships no required database. Every backend — built-in or your own — implements the same `VectorStore` ABC with three methods: `hybrid_search`, `count`, and `upsert` (full signatures in `src/ragnor/stores/base.py`; the ABC itself has no database dependency). Storage is split from retrieval strategy: three `@runtime_checkable` capability Protocols describe what a backend can do — `VectorIndex` (`vector_search`), `LexicalIndex` (`keyword_search`), and `DocumentStore` (`upsert`/`count`/`delete`/`get`) — and a host adapts an existing search engine to a Protocol by implementing its methods, with no ragnor inheritance. Five backends ship in the box — `memory`, `pgvector`, `qdrant`, `chroma`, and `faiss` — each in its own module, imported lazily by the factory so its driver dependency stays optional until the backend is selected. Any other vector database plugs in through the registry.
 
 **Session ownership rule:** when the caller supplies a `session`, the caller owns the transaction (commit/rollback). When omitted, the store opens its own session and commits where the operation is transactional.
 
@@ -15,16 +15,16 @@ ragit is vector-database agnostic: it ships no required database. Every backend 
 | Production vector search on a Qdrant server | `QdrantStore` (`"qdrant"`)         | in-process fallback (token overlap)       | Qdrant's native nearest-neighbor search + in-process token-overlap keyword stage, merged with RRF (L2 only)               |
 | Embedded or server Chroma                   | `ChromaStore` (`"chroma"`)         | in-process fallback (token overlap)       | Chroma's native vector search + in-process token-overlap keyword stage; ephemeral or persistent (L2 only)                 |
 | In-process exact vector index               | `FaissStore` (`"faiss"`)           | in-process fallback (token overlap)       | Exact `IndexFlatL2` search over an in-process `IndexIDMap`; no server, nothing persisted (L2 or cosine)                   |
-| Production on another vector DB             | Your own `VectorStore` subclass    | —                                           | Register it and select via `settings.vector_store_provider` — see [Extending ragit](../README.md#extending-ragit-provider-registries) |
+| Production on another vector DB             | Your own `VectorStore` subclass    | —                                           | Register it and select via `settings.vector_store_provider` — see [Extending ragnor](../README.md#extending-ragnor-provider-registries) |
 
-The in-memory, Qdrant, Chroma, and FAISS stores' keyword score is a **token-overlap ratio, not a real `ts_rank`** — expect ranking differences versus the pgvector backend, so never tune production thresholds against it. Their `LexicalIndex` implementation is an **in-process fallback** (a full-corpus token-overlap scan) intended for local development, small corpora, and testing; implementing `LexicalIndex` does not guarantee production-scale keyword performance. pgvector is the only built-in **native lexical index** (PostgreSQL full-text search). Hosts at scale combine a pgvector `VectorIndex` with an external lexical engine adapted to `LexicalIndex` — a first-class composition the retrieval strategies (`ragit.retrieval.strategies`) support out of the box.
+The in-memory, Qdrant, Chroma, and FAISS stores' keyword score is a **token-overlap ratio, not a real `ts_rank`** — expect ranking differences versus the pgvector backend, so never tune production thresholds against it. Their `LexicalIndex` implementation is an **in-process fallback** (a full-corpus token-overlap scan) intended for local development, small corpora, and testing; implementing `LexicalIndex` does not guarantee production-scale keyword performance. pgvector is the only built-in **native lexical index** (PostgreSQL full-text search). Hosts at scale combine a pgvector `VectorIndex` with an external lexical engine adapted to `LexicalIndex` — a first-class composition the retrieval strategies (`ragnor.retrieval.strategies`) support out of the box.
 
 ### Distance metrics
 
 Every store's vector stage ranks by one distance metric: **`l2`** (Euclidean, the historical default) or **`cosine`** (`1 - cosine_similarity`, in `[0, 2]`). The metric is selected per store — the `metric` constructor argument wins over the optional `rag_distance_metric` host settings field, which wins over the `"l2"` default; values are case-insensitive:
 
 ```python
-from ragit.stores import get_vector_store, resolve_distance_metric
+from ragnor.stores import get_vector_store, resolve_distance_metric
 
 store = get_vector_store(
     table_name="policy_chunks",
@@ -43,7 +43,7 @@ Cosine support per built-in backend:
 
 | Backend     | Cosine | How                                                                                                   |
 | ----------- | ------ | ----------------------------------------------------------------------------------------------------- |
-| `memory`    | yes    | True cosine similarity (`ragit.metrics.cosine_distance`) over the in-process records                    |
+| `memory`    | yes    | True cosine similarity (`ragnor.metrics.cosine_distance`) over the in-process records                    |
 | `pgvector`  | yes    | The `<=>` operator; needs no pre-normalization. Match the index opclass (`vector_cosine_ops`) — DDL is host-owned |
 | `faiss`     | yes    | Vectors and queries are normalized, then ranked on the existing `IndexFlatL2`; the reported distance is `l2² / 2`, exactly `1 - cosine_similarity` |
 | `qdrant`    | no     | L2 only; constructing it with `metric="cosine"` raises `ValueError`                                    |
@@ -52,7 +52,7 @@ Cosine support per built-in backend:
 Two conventions matter when you switch a store's metric:
 
 1. **Thresholds are distances, and distances are metric-relative.** `rag_distance_threshold` keeps its meaning ("smaller is stricter") under both metrics, but a value tuned under `l2` means something different under `cosine` — convert a cosine *similarity* cutoff `s` to the distance `1 - s` and re-tune against a labeled query set (see [Evaluation](../README.md#evaluation)) before serving.
-2. **The index must match the metric.** ragit never creates indexes; a pgvector cosine deployment indexes with `vector_cosine_ops` and an L2 deployment with `vector_l2_ops`. Searching with `<=>` against a `vector_l2_ops` index still computes correctly, but without the HNSW acceleration.
+2. **The index must match the metric.** ragnor never creates indexes; a pgvector cosine deployment indexes with `vector_cosine_ops` and an L2 deployment with `vector_l2_ops`. Searching with `<=>` against a `vector_l2_ops` index still computes correctly, but without the HNSW acceleration.
 
 `get_vector_store` forwards `metric` to the selected backend only when it is not `None`, and forwards the `settings` object only to backends whose constructor declares an explicit `settings` parameter — so a custom registered backend built on the documented registry kwargs keeps working unchanged.
 
@@ -62,10 +62,10 @@ For tests and zero-dependency development — **not** a production backend. It a
 
 ### pgvector store (built-in)
 
-The built-in production backend for PostgreSQL tables with `vector` and `tsvector` columns — the only ragit component that is PostgreSQL-specific. It requires the `pgvector` extra (`pip install -e ".[pgvector]"`), plus `table_name` and `embedding_dim`, and either a `session_factory` or `settings` carrying a `database_url` to open its own sessions. The optional `tsquery_config` (default `"english"`, a lowercase identifier) must match the tsvector column's configuration.
+The built-in production backend for PostgreSQL tables with `vector` and `tsvector` columns — the only ragnor component that is PostgreSQL-specific. It requires the `pgvector` extra (`pip install -e ".[pgvector]"`), plus `table_name` and `embedding_dim`, and either a `session_factory` or `settings` carrying a `database_url` to open its own sessions. The optional `tsquery_config` (default `"english"`, a lowercase identifier) must match the tsvector column's configuration.
 
 ```python
-from ragit.stores import PgVectorStore
+from ragnor.stores import PgVectorStore
 
 store = PgVectorStore(
     table_name="policy_chunks",
@@ -82,7 +82,7 @@ The pgvector store keeps its optimized single-query `hybrid_search` (one round-t
 Production vector search on a Qdrant server. Requires the `qdrant` extra (`pip install -e ".[qdrant]"`), plus `table_name` (the collection name) and `embedding_dim`. The client is created lazily from `url`/`api_key` (falling back to `settings.database_url`) on first use, or injected directly via `client` for hosts and tests that manage their own.
 
 ```python
-from ragit.stores import QdrantStore
+from ragnor.stores import QdrantStore
 
 store = QdrantStore(
     table_name="policy_chunks",  # Qdrant collection name
@@ -101,7 +101,7 @@ Qdrant identifies points by unsigned integers or UUIDs, so string document ids a
 Embedded or server Chroma. Requires the `chroma` extra (`pip install -e ".[chroma]"`), plus `table_name` (the collection name) and `embedding_dim`. The client is created lazily on first use — an `EphemeralClient` by default, or a `PersistentClient` when `path` is given — or injected via `client`. The store talks to Chroma's synchronous client API and wraps every call in `asyncio.to_thread` so the event loop is never blocked.
 
 ```python
-from ragit.stores import ChromaStore
+from ragnor.stores import ChromaStore
 
 store = ChromaStore(
     table_name="policy_chunks",  # Chroma collection name
@@ -119,7 +119,7 @@ The vector stage uses Chroma's native nearest-neighbor search (L2 distance); the
 In-process exact L2 index — no server, nothing persisted. Requires the `faiss` extra (`pip install -e ".[faiss]"`), plus `embedding_dim`. The index is created lazily on first use — a `faiss.IndexIDMap` over `IndexFlatL2` — or injected via `index` for hosts and tests that manage their own.
 
 ```python
-from ragit.stores import FaissStore
+from ragnor.stores import FaissStore
 
 store = FaissStore(
     table_name="policy_chunks",  # logical name (logging only)
@@ -137,8 +137,8 @@ Every backend also implements the `DocumentStore` lifecycle: `delete(ids=None, f
 
 ### Strict mode
 
-By default, store failures are logged and swallowed into an empty result list (or `0` for `count`) — the historical behavior. Pass `strict=True` to raise `ragit.types.RetrievalError` instead, which you want for fail-fast pipelines and tests. The opt-in swallow contract lives only in the legacy `hybrid_search`/`count` and in the retrieval strategies: the capability methods (`vector_search`, `keyword_search`) and the lifecycle operations (`delete`, `get`) have no `strict` parameter and always raise on failure.
+By default, store failures are logged and swallowed into an empty result list (or `0` for `count`) — the historical behavior. Pass `strict=True` to raise `ragnor.types.RetrievalError` instead, which you want for fail-fast pipelines and tests. The opt-in swallow contract lives only in the legacy `hybrid_search`/`count` and in the retrieval strategies: the capability methods (`vector_search`, `keyword_search`) and the lifecycle operations (`delete`, `get`) have no `strict` parameter and always raise on failure.
 
-Stores are selected through `vector_store_registry` via `get_vector_store(...)`, which reads `settings.vector_store_provider` (default `"memory"`) and instantiates the provider with the remaining kwargs. To use another vector database, register your backend under a name and set `vector_store_provider` to it — no ragit code changes. `get_vector_store` also accepts `metric="l2" | "cosine"` (forwarded to the selected backend only when it is not `None`, so backends built on the documented registry kwargs are untouched), and forwards the `settings` object to backends whose constructor declares an explicit `settings` parameter, so they can read their optional host fields.
+Stores are selected through `vector_store_registry` via `get_vector_store(...)`, which reads `settings.vector_store_provider` (default `"memory"`) and instantiates the provider with the remaining kwargs. To use another vector database, register your backend under a name and set `vector_store_provider` to it — no ragnor code changes. `get_vector_store` also accepts `metric="l2" | "cosine"` (forwarded to the selected backend only when it is not `None`, so backends built on the documented registry kwargs are untouched), and forwards the `settings` object to backends whose constructor declares an explicit `settings` parameter, so they can read their optional host fields.
 
 ---

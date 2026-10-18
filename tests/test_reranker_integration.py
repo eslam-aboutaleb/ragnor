@@ -7,8 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ragit.retrieval.rerankers import LiteLLMReranker
-from ragit.retrieval.strategies import Reranker
+from ragnor.retrieval.rerankers import LiteLLMReranker
+from ragnor.retrieval.strategies import Reranker
 
 
 def test_litellm_reranker_satisfies_reranker_protocol() -> None:
@@ -51,4 +51,4 @@ async def test_litellm_reranker_missing_extra_raises_import_error() -> None:
     with patch.dict(sys.modules, {"litellm": None}):
         with pytest.raises(ImportError) as exc_info:
             await reranker.rerank("query", [{"id": "1", "document": "test"}])
-    assert "ragit[rerank]" in str(exc_info.value)
+    assert "ragnor[rerank]" in str(exc_info.value)

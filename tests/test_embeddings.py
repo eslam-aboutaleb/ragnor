@@ -1,4 +1,4 @@
-"""Tests for ragit.embeddings.
+"""Tests for ragnor.embeddings.
 
 Covers the LiteLLM embedding function (with
 ``litellm.embedding`` mocked), the settings-driven provider
@@ -13,14 +13,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ragit.embeddings.base import EmbeddingFunction
-from ragit.embeddings.dimensions import (
+from ragnor.embeddings.base import EmbeddingFunction
+from ragnor.embeddings.dimensions import (
     FALLBACK_DIMENSION,
     get_embedding_dimension,
     register_dimension,
 )
-from ragit.embeddings.litellm import LitellmEmbeddingFunction
-from ragit.embeddings.registry import (
+from ragnor.embeddings.litellm import LitellmEmbeddingFunction
+from ragnor.embeddings.registry import (
     LiteLLMEmbeddingProvider,
     embedding_registry,
     get_embedding_function,
@@ -55,7 +55,7 @@ class TestLitellmEmbeddingFunction:
         response = _mock_response([[0.1, 0.2], [0.3, 0.4]])
 
         with patch(
-            "ragit.embeddings.litellm.litellm.embedding", return_value=response
+            "ragnor.embeddings.litellm.litellm.embedding", return_value=response
         ) as mock_embed:
             result = await fn(["hello", "world"])
 
@@ -75,7 +75,7 @@ class TestLitellmEmbeddingFunction:
         response = _mock_response([[0.1, 0.2]])
 
         with patch(
-            "ragit.embeddings.litellm.litellm.embedding", return_value=response
+            "ragnor.embeddings.litellm.litellm.embedding", return_value=response
         ) as mock_embed:
             result = await fn(["hello"])
 
@@ -92,7 +92,7 @@ class TestLitellmEmbeddingFunction:
         response = _mock_response([[0.5, 0.6]])
 
         with patch(
-            "ragit.embeddings.litellm.litellm.embedding", return_value=response
+            "ragnor.embeddings.litellm.litellm.embedding", return_value=response
         ) as mock_embed:
             result = await fn.embed_query("hello")
 
@@ -103,7 +103,7 @@ class TestLitellmEmbeddingFunction:
         fn = LitellmEmbeddingFunction(api_key="k", model_name="m")
         response = _mock_response([[0.7, 0.8]])
 
-        with patch("ragit.embeddings.litellm.litellm.embedding", return_value=response):
+        with patch("ragnor.embeddings.litellm.litellm.embedding", return_value=response):
             result = await fn.embed_query(["hello"])
 
         assert result == [0.7, 0.8]
@@ -112,7 +112,7 @@ class TestLitellmEmbeddingFunction:
         fn = LitellmEmbeddingFunction(api_key="k", model_name="m")
         response = _mock_response([[0.1, 0.2], [0.3, 0.4]])
 
-        with patch("ragit.embeddings.litellm.litellm.embedding", return_value=response):
+        with patch("ragnor.embeddings.litellm.litellm.embedding", return_value=response):
             result = await fn.embed_documents(["a", "b"])
 
         assert result == [[0.1, 0.2], [0.3, 0.4]]
@@ -169,7 +169,7 @@ class TestEmbeddingDimensions:
         assert get_embedding_dimension("text-embedding-3-large") == 3072
 
     def test_unknown_model_warns_and_falls_back(self, caplog) -> None:
-        with caplog.at_level(logging.WARNING, logger="ragit.embeddings.dimensions"):
+        with caplog.at_level(logging.WARNING, logger="ragnor.embeddings.dimensions"):
             dimension = get_embedding_dimension("brand-new-model")
 
         assert dimension == FALLBACK_DIMENSION == 1536
@@ -179,10 +179,10 @@ class TestEmbeddingDimensions:
         )
 
     def test_bare_call_warns_and_falls_back(self, caplog) -> None:
-        with caplog.at_level(logging.WARNING, logger="ragit.embeddings.dimensions"):
+        with caplog.at_level(logging.WARNING, logger="ragnor.embeddings.dimensions"):
             assert get_embedding_dimension() == 1536
 
     def test_register_dimension_extends_the_table(self) -> None:
-        register_dimension("ragit-test-model", 768)
+        register_dimension("ragnor-test-model", 768)
 
-        assert get_embedding_dimension("ragit-test-model") == 768
+        assert get_embedding_dimension("ragnor-test-model") == 768

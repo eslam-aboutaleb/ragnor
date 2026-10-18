@@ -1,9 +1,9 @@
 """Dependency hygiene: the core install has zero third-party dependencies.
 
-Invariant: ``import ragit.*`` never requires litellm, a database
+Invariant: ``import ragnor.*`` never requires litellm, a database
 driver, or a vector-DB client. The LiteLLM integration lives
 behind the ``litellm`` extra and is imported lazily -- through
-the PEP 562 ``__getattr__`` in ``ragit.embeddings`` and a
+the PEP 562 ``__getattr__`` in ``ragnor.embeddings`` and a
 function-level import in ``LiteLLMEmbeddingProvider.create()``.
 
 Every litellm-blocked assertion runs in a subprocess: setting
@@ -20,7 +20,7 @@ import sys
 import textwrap
 from pathlib import Path
 
-import ragit.embeddings
+import ragnor.embeddings
 
 SRC_DIR = Path(__file__).resolve().parents[1] / "src"
 
@@ -46,7 +46,7 @@ def _assert_success(proc: subprocess.CompletedProcess[str]) -> None:
     assert proc.returncode == 0, f"subprocess failed:\n{proc.stderr}"
 
 
-def test_import_ragit_without_litellm() -> None:
+def test_import_ragnor_without_litellm() -> None:
     script = """
     try:
         import litellm
@@ -55,15 +55,15 @@ def test_import_ragit_without_litellm() -> None:
     else:
         raise AssertionError("litellm should be blocked in this subprocess")
 
-    import ragit
-    import ragit.embeddings
+    import ragnor
+    import ragnor.embeddings
     """
     _assert_success(_run_without_litellm(script))
 
 
 def test_get_embedding_function_importable_without_litellm() -> None:
     script = """
-    from ragit.embeddings import get_embedding_function
+    from ragnor.embeddings import get_embedding_function
 
     assert callable(get_embedding_function)
     """
@@ -72,25 +72,25 @@ def test_get_embedding_function_importable_without_litellm() -> None:
 
 def test_lazy_litellm_names_raise_helpful_import_error_without_litellm() -> None:
     script = """
-    import ragit.embeddings
+    import ragnor.embeddings
 
     try:
-        ragit.embeddings.LitellmEmbeddingFunction
+        ragnor.embeddings.LitellmEmbeddingFunction
     except ImportError as exc:
-        assert "ragit[litellm]" in str(exc), str(exc)
+        assert "ragnor[litellm]" in str(exc), str(exc)
     else:
         raise AssertionError("expected ImportError for LitellmEmbeddingFunction")
 
     # The provider class lives in the registry module, which no
     # longer imports litellm, so it resolves without the extra.
-    assert ragit.embeddings.LiteLLMEmbeddingProvider is not None
+    assert ragnor.embeddings.LiteLLMEmbeddingProvider is not None
     """
     _assert_success(_run_without_litellm(script))
 
 
 def test_provider_create_raises_helpful_import_error_without_litellm() -> None:
     script = """
-    from ragit.embeddings import embedding_registry, get_embedding_function
+    from ragnor.embeddings import embedding_registry, get_embedding_function
 
 
     class _Settings:
@@ -108,7 +108,7 @@ def test_provider_create_raises_helpful_import_error_without_litellm() -> None:
     try:
         provider.create()
     except ImportError as exc:
-        assert "ragit[litellm]" in str(exc), str(exc)
+        assert "ragnor[litellm]" in str(exc), str(exc)
     else:
         raise AssertionError("provider.create() should raise ImportError")
 
@@ -116,7 +116,7 @@ def test_provider_create_raises_helpful_import_error_without_litellm() -> None:
     try:
         get_embedding_function(settings)
     except ImportError as exc:
-        assert "ragit[litellm]" in str(exc), str(exc)
+        assert "ragnor[litellm]" in str(exc), str(exc)
     else:
         raise AssertionError("get_embedding_function should raise ImportError")
     """
@@ -124,15 +124,15 @@ def test_provider_create_raises_helpful_import_error_without_litellm() -> None:
 
 
 def test_litellm_names_importable_with_extra_installed() -> None:
-    from ragit.embeddings import (
+    from ragnor.embeddings import (
         LiteLLMEmbeddingProvider,
         LitellmEmbeddingFunction,
     )
 
-    assert LitellmEmbeddingFunction.__module__ == "ragit.embeddings.litellm"
-    assert LiteLLMEmbeddingProvider.__module__ == "ragit.embeddings.registry"
+    assert LitellmEmbeddingFunction.__module__ == "ragnor.embeddings.litellm"
+    assert LiteLLMEmbeddingProvider.__module__ == "ragnor.embeddings.registry"
 
 
 def test_all_exports_include_the_lazy_litellm_names() -> None:
-    assert "LitellmEmbeddingFunction" in ragit.embeddings.__all__
-    assert "LiteLLMEmbeddingProvider" in ragit.embeddings.__all__
+    assert "LitellmEmbeddingFunction" in ragnor.embeddings.__all__
+    assert "LiteLLMEmbeddingProvider" in ragnor.embeddings.__all__

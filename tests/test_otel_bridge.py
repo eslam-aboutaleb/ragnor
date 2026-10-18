@@ -7,17 +7,17 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ragit.telemetry.events import EventKind, TelemetryEvent
+from ragnor.telemetry.events import EventKind, TelemetryEvent
 
 
 def test_otel_sink_missing_dependency() -> None:
     """When opentelemetry is not installed, instantiation raises a clear ImportError."""
     with patch.dict(sys.modules, {"opentelemetry": None, "opentelemetry.trace": None}):
-        from ragit.telemetry.otel import OpenTelemetryEventSink
+        from ragnor.telemetry.otel import OpenTelemetryEventSink
 
         with pytest.raises(ImportError) as exc_info:
             OpenTelemetryEventSink()
-        assert "ragit[opentelemetry]" in str(exc_info.value)
+        assert "ragnor[opentelemetry]" in str(exc_info.value)
 
 
 def test_otel_sink_with_mocked_otel() -> None:
@@ -46,7 +46,7 @@ def test_otel_sink_with_mocked_otel() -> None:
             "opentelemetry.metrics": mock_metrics,
         },
     ):
-        from ragit.telemetry.otel import OpenTelemetryEventSink
+        from ragnor.telemetry.otel import OpenTelemetryEventSink
 
         sink = OpenTelemetryEventSink(service_name="test-service")
         event = TelemetryEvent(

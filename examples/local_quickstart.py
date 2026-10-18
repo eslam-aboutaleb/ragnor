@@ -1,9 +1,9 @@
-"""Offline quickstart for ragit's high-level convenience API.
+"""Offline quickstart for ragnor's high-level convenience API.
 
 Three lines of application code -- build, ingest, search -- with
 every component overridable. The embedder here is a deterministic
 fake defined in this file (tokens hash into vector dimensions, so
-texts that share vocabulary get close L2 distance); ragit ships no
+texts that share vocabulary get close L2 distance); ragnor ships no
 local embedder in core, so the builder requires an injected one.
 
 Run it with::
@@ -12,7 +12,7 @@ Run it with::
 
 Everything runs in process: no network, no database, no API keys,
 no external services -- only the core install is required
-(``pip install git+https://github.com/eslam-aboutaleb/ragit.git``).
+(``pip install git+https://github.com/eslam-aboutaleb/ragnor.git``).
 """
 
 from __future__ import annotations
@@ -22,8 +22,8 @@ import hashlib
 import math
 import re
 
-from ragit.builder import RagitBuilder
-from ragit.types import Document
+from ragnor.builder import RagnorBuilder
+from ragnor.types import Document
 
 
 class HashingEmbedder:
@@ -96,11 +96,11 @@ class HashingEmbedder:
 
 
 async def main() -> None:
-    """Build a Ragit instance, ingest two documents, and search."""
+    """Build a Ragnor instance, ingest two documents, and search."""
     embedder = HashingEmbedder(dim=8)
 
     # The three-line workflow: build, ingest, search.
-    rag = await RagitBuilder.local(embedder, embedding_dim=8).build()
+    rag = await RagnorBuilder.local(embedder, embedding_dim=8).build()
     count = await rag.ingest(
         [
             Document(

@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_call:
   push:
     branches: [main]
   pull_request:
@@ -26,7 +27,7 @@ jobs:
       manager: pip
       pip-extras: test
       python-versions: '["3.11", "3.12"]'
-      coverage-source: src/ragit
+      coverage-source: src/ragnor
       coverage-min: 85
       build-distribution: true
 

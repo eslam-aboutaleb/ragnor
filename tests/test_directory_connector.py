@@ -12,13 +12,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from ragit.ingestion.connector_core import (
+from ragnor.ingestion.connector_core import (
     SourceInaccessibleError,
     SourceNotFoundError,
     SourceStatus,
     TransientSourceError,
 )
-from ragit.ingestion.directory_connector import (
+from ragnor.ingestion.directory_connector import (
     DirectoryConnector,
     DirectoryDocumentSource,
     DirectorySource,

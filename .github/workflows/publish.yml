@@ -3,58 +3,100 @@ name: Publish
 on:
   release:
     types: [published]
-  push:
-    tags:
-      - "v*.*.*"
   workflow_dispatch:
-    inputs:
-      dry_run:
-        description: "Dry run (build and verify only, skip PyPI publish)"
-        type: boolean
-        default: false
 
 permissions:
-  contents: write
-  id-token: write
+  contents: read
+
+concurrency:
+  group: pypi-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  build-and-publish:
-    name: Build & Publish Release
+  verify-release:
+    name: Verify release identity
     runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/p/ragit-toolkit
+    timeout-minutes: 5
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
-
-      - name: Install build and packaging tools
+          python-version: '3.12'
+      - name: Require the correct distribution and a release from main
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install build twine
+          python - <<'PY'
+          import os, subprocess, tomllib
+          from pathlib import Path
+          project = tomllib.loads(Path('pyproject.toml').read_text())['project']
+          if project['name'] != 'ragnor':
+              raise SystemExit('Expected the ragnor distribution')
+          if os.environ['EVENT_NAME'] == 'release':
+              if os.environ['PRERELEASE'] != 'false':
+                  raise SystemExit('Prereleases cannot publish to production PyPI')
+              if os.environ['RELEASE_TAG'] != f"v{project['version']}":
+                  raise SystemExit('Release tag must match the package version')
+              subprocess.run(['git', 'merge-base', '--is-ancestor', 'HEAD', 'origin/main'], check=True)
+          print(f"Validated {project['name']} {project['version']}")
+          PY
 
-      - name: Build sdist and wheel
-        run: python -m build
+  qualify:
+    name: Qualify release
+    needs: verify-release
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+      pull-requests: read
 
-      - name: Verify package metadata
-        run: python -m twine check --strict dist/*
+  build:
+    name: Build qualified distribution
+    needs: [verify-release, qualify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Build and validate distributions
+        run: |
+          python -m pip install 'build==1.2.2.post1' 'twine==6.1.0'
+          python -m build
+          python -m twine check --strict dist/*
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ragnor-release-${{ github.run_id }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 3
 
-      - name: Publish to PyPI
-        if: ${{ !inputs.dry_run }}
-        uses: pypa/gh-action-pypi-publish@release/v1
+  publish:
+    name: Publish qualified distribution
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: pypi
+      url: https://pypi.org/p/ragnor
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ragnor-release-${{ github.run_id }}
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
         with:
           packages-dir: dist/
-
-      - name: Attach artifacts to GitHub Release
-        if: ${{ startsWith(github.ref, 'refs/tags/v') && !inputs.dry_run }}
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          generate_release_notes: true

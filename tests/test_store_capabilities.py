@@ -16,8 +16,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from ragit.stores._scoring import fuse_hybrid
-from ragit.stores.base import (
+from ragnor.stores._scoring import fuse_hybrid
+from ragnor.stores.base import (
     DocumentStore,
     LegacyHybridStoreAdapter,
     LexicalIndex,
@@ -27,7 +27,7 @@ from ragit.stores.base import (
 
 
 class _MinimalCapabilityStore:
-    """A hand-written capability object: no ragit inheritance."""
+    """A hand-written capability object: no ragnor inheritance."""
 
     async def vector_search(  # noqa: PLR0913, PLR0917
         self,

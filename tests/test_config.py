@@ -2,7 +2,7 @@
 
 The standalone library ships no settings class of its own: host
 applications pass their own settings object (typically a pydantic
-``Settings``) and ragit reads it through the :class:`RagSettings`
+``Settings``) and ragnor reads it through the :class:`RagSettings`
 protocol. This test pins the protocol's required attribute set so a
 settings class that drifts away from the protocol fails here instead
 of at runtime inside a store or retriever.
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from ragit.config import RagSettings, SettingsProvider
+from ragnor.config import RagSettings, SettingsProvider
 
 
 class _MinimalSettings:
@@ -91,7 +91,7 @@ def test_a_pydantic_style_settings_class_satisfies_the_protocol() -> None:
 
     A plain class with the same attributes is structurally identical
     for the protocol's purposes; this pins that duck typing works
-    without ragit importing pydantic at all.
+    without ragnor importing pydantic at all.
     """
 
     @runtime_checkable

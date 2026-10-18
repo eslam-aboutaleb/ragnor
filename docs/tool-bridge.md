@@ -3,7 +3,7 @@
 Register every collection under its actual name. Omitting the collection selects the bridge's declared `default_collection`. An unknown name raises `KeyError`; the bridge never redirects it to another collection. Every operation checks both the client grants in `ScopeAuthorizer` and the collection's `allowed_scopes`. An empty scope allowlist denies all scopes.
 
 ```python
-from ragit.tools import KnowledgeBridge, CollectionConfig, ScopeAuthorizer
+from ragnor.tools import KnowledgeBridge, CollectionConfig, ScopeAuthorizer
 
 bridge = KnowledgeBridge(
     collections={
@@ -33,7 +33,7 @@ Evidence references escape their identifiers and include optional character offs
 MCP handlers use the SDK's authenticated access-token context when available. A local stdio host can bind a fixed client identity, or supply a trusted provider that resolves identity from its own session context:
 
 ```python
-from ragit.mcp import create_mcp_server
+from ragnor.mcp import create_mcp_server
 
 server = create_mcp_server(
     bridge,

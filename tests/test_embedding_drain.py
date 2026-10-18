@@ -1,5 +1,5 @@
 """
-Tests for the ragit job drainer loop.
+Tests for the ragnor job drainer loop.
 
 The drainer is parameterized by a store and a processor,
 so these tests drive ``drain_forever`` with in-memory
@@ -17,8 +17,8 @@ from unittest.mock import patch
 
 import pytest
 
-from ragit.jobs import drainer as drainer_module
-from ragit.jobs.drainer import (
+from ragnor.jobs import drainer as drainer_module
+from ragnor.jobs.drainer import (
     _install_signal_handlers,
     drain_forever,
     main,
@@ -216,7 +216,7 @@ async def test_drain_logs_when_stale_jobs_are_reclaimed(
         async def process(self, job) -> None:
             stop.set()
 
-    with caplog.at_level(logging.INFO, logger="ragit.jobs.drainer"):
+    with caplog.at_level(logging.INFO, logger="ragnor.jobs.drainer"):
         await drain_forever(
             store,
             _StopProcessor(),
@@ -285,7 +285,7 @@ def test_main_returns_zero_after_clean_shutdown() -> None:
     """The console entry point installs logging and returns 0 on exit."""
     store = FakeJobStore()
     processor = FakeJobProcessor()
-    with patch("ragit.jobs.drainer.asyncio.run", return_value=None) as mock_run:
+    with patch("ragnor.jobs.drainer.asyncio.run", return_value=None) as mock_run:
         assert main(store, processor, interval=1.0, batch_size=2, worker_id="w") == 0
     mock_run.assert_called_once()
 
@@ -295,7 +295,7 @@ def test_main_swallows_keyboard_interrupt() -> None:
     store = FakeJobStore()
     processor = FakeJobProcessor()
     with patch(
-        "ragit.jobs.drainer.asyncio.run",
+        "ragnor.jobs.drainer.asyncio.run",
         side_effect=KeyboardInterrupt,
     ):
         assert main(store, processor, interval=1.0, batch_size=2, worker_id="w") == 0

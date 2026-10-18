@@ -1,10 +1,10 @@
-"""Unit tests for ragit.registry."""
+"""Unit tests for ragnor.registry."""
 
 from __future__ import annotations
 
 import pytest
 
-from ragit.registry import Registry
+from ragnor.registry import Registry
 
 
 def test_register_and_get_is_case_insensitive() -> None:

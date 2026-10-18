@@ -1,10 +1,10 @@
-"""Tests for ragit.retrieval.
+"""Tests for ragnor.retrieval.
 
 Covers the :class:`HybridRetriever` orchestrator:
 the distance-threshold fallback, filter passthrough,
 the ``SearchResult`` conversion, and -- the key
 plan-04 assertion -- retrieval against the
-:class:`ragit.stores.InMemoryVectorStore`, which
+:class:`ragnor.stores.InMemoryVectorStore`, which
 proves the retriever has no pgvector dependency.
 """
 
@@ -18,25 +18,25 @@ from unittest.mock import patch
 
 import pytest
 
-from ragit.retrieval import (
+from ragnor.retrieval import (
     HybridRetriever,
     RetrieverSpec,
     as_dicts,
 )
-from ragit.retrieval.strategies import (
+from ragnor.retrieval.strategies import (
     DenseRetrieval,
     HybridRetrieval,
     KeywordRetrieval,
     RetrievalStrategy,
     Reranker,
 )
-from ragit.stores.base import (
+from ragnor.stores.base import (
     DocumentStore,
     LexicalIndex,
     VectorIndex,
 )
-from ragit.stores.memory import InMemoryVectorStore
-from ragit.types import RetrievalError, SearchResult
+from ragnor.stores.memory import InMemoryVectorStore
+from ragnor.types import RetrievalError, SearchResult
 
 
 class _FakeSettings:
@@ -140,11 +140,11 @@ async def test_retrieve_returns_search_results() -> None:
 
     with (
         patch(
-            "ragit.retrieval.retriever.get_embedding_function",
+            "ragnor.retrieval.retriever.get_embedding_function",
             return_value=embedder,
         ),
         patch(
-            "ragit.retrieval.retriever.get_vector_store",
+            "ragnor.retrieval.retriever.get_vector_store",
             return_value=store,
         ),
     ):
@@ -165,11 +165,11 @@ async def test_distance_threshold_none_falls_back_to_settings() -> None:
 
     with (
         patch(
-            "ragit.retrieval.retriever.get_embedding_function",
+            "ragnor.retrieval.retriever.get_embedding_function",
             return_value=embedder,
         ),
         patch(
-            "ragit.retrieval.retriever.get_vector_store",
+            "ragnor.retrieval.retriever.get_vector_store",
             return_value=store,
         ),
     ):
@@ -186,11 +186,11 @@ async def test_explicit_distance_threshold_is_passed_through() -> None:
 
     with (
         patch(
-            "ragit.retrieval.retriever.get_embedding_function",
+            "ragnor.retrieval.retriever.get_embedding_function",
             return_value=embedder,
         ),
         patch(
-            "ragit.retrieval.retriever.get_vector_store",
+            "ragnor.retrieval.retriever.get_vector_store",
             return_value=store,
         ),
     ):
@@ -207,11 +207,11 @@ async def test_filters_and_n_results_are_passed_through() -> None:
 
     with (
         patch(
-            "ragit.retrieval.retriever.get_embedding_function",
+            "ragnor.retrieval.retriever.get_embedding_function",
             return_value=embedder,
         ),
         patch(
-            "ragit.retrieval.retriever.get_vector_store",
+            "ragnor.retrieval.retriever.get_vector_store",
             return_value=store,
         ),
     ):
@@ -262,11 +262,11 @@ async def test_retriever_retrieves_from_in_memory_store() -> None:
 
     with (
         patch(
-            "ragit.retrieval.retriever.get_embedding_function",
+            "ragnor.retrieval.retriever.get_embedding_function",
             return_value=embedder,
         ),
         patch(
-            "ragit.retrieval.retriever.get_vector_store",
+            "ragnor.retrieval.retriever.get_vector_store",
             return_value=store,
         ),
     ):
@@ -313,11 +313,11 @@ async def test_retrieve_propagates_store_errors() -> None:
 
     with (
         patch(
-            "ragit.retrieval.retriever.get_embedding_function",
+            "ragnor.retrieval.retriever.get_embedding_function",
             return_value=embedder,
         ),
         patch(
-            "ragit.retrieval.retriever.get_vector_store",
+            "ragnor.retrieval.retriever.get_vector_store",
             return_value=store,
         ),
     ):
@@ -883,11 +883,11 @@ async def test_retriever_default_path_still_builds_embedder_and_store() -> None:
 
     with (
         patch(
-            "ragit.retrieval.retriever.get_embedding_function",
+            "ragnor.retrieval.retriever.get_embedding_function",
             return_value=embedder,
         ),
         patch(
-            "ragit.retrieval.retriever.get_vector_store",
+            "ragnor.retrieval.retriever.get_vector_store",
             return_value=store,
         ) as get_store,
     ):

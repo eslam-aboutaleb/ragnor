@@ -1,7 +1,7 @@
-"""Coverage tests for ragit.stores.pgvector uncovered paths.
+"""Coverage tests for ragnor.stores.pgvector uncovered paths.
 
 The private validation helpers are now the public
-``ragit.validation`` functions, and the session factory
+``ragnor.validation`` functions, and the session factory
 is injected through the constructor.
 """
 
@@ -13,8 +13,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ragit.stores.pgvector import PgVectorStore
-from ragit.validation import validate_embedding, validate_identifier
+from ragnor.stores.pgvector import PgVectorStore
+from ragnor.validation import validate_embedding, validate_identifier
 
 
 class TestPgVectorStore:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib
 from types import SimpleNamespace
 
-from ragit.ingestion.connectors import (
+from ragnor.ingestion.connectors import (
     ChangeEventSource,
     ConnectorDocumentSource,
     DirectoryConnector,
@@ -18,15 +18,15 @@ from ragit.ingestion.connectors import (
     SourceConnector,
     SourceStatus,
 )
-from ragit.ingestion.pipeline import IngestionPipeline
-from ragit.ingestion.versioning import build_snapshot
+from ragnor.ingestion.pipeline import IngestionPipeline
+from ragnor.ingestion.versioning import build_snapshot
 from tests.test_extractors import make_pdf
 
 
 def test_public_exports_and_protocol(tmp_path):
-    import ragit.ingestion.connectors as api
+    import ragnor.ingestion.connectors as api
 
-    for module_name in ("ragit.connectors", "ragit.ingestion"):
+    for module_name in ("ragnor.connectors", "ragnor.ingestion"):
         module = importlib.import_module(module_name)
         for name in api.__all__:
             assert getattr(module, name) is getattr(api, name)

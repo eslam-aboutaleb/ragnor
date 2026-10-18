@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from ragit.retrieval.capabilities import (
+from ragnor.retrieval.capabilities import (
     BackendFeature,
     CapabilityUnsupportedError,
     FilterOperator,
     StoreCapabilities,
 )
-from ragit.retrieval.strategies import DenseRetrieval, HybridRetrieval, KeywordRetrieval
-from ragit.retrieval.types import RetrievalRequest
+from ragnor.retrieval.strategies import DenseRetrieval, HybridRetrieval, KeywordRetrieval
+from ragnor.retrieval.types import RetrievalRequest
 
 
 class MockVectorStore:
