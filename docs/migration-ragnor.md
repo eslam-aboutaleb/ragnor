@@ -46,16 +46,19 @@ The SonarCloud project key retains its existing external identity.
 
 ## Release process
 
-The repository is `eslam-aboutaleb/ragnor`. PyPI trusted publishing must authorize
-that repository, the top-level `publish.yml` workflow, and the `pypi` environment.
+The repository is `eslam-aboutaleb/ragnor`. Store a PyPI API token authorized to
+publish `ragnor` as the repository Actions secret `PYPI_API_TOKEN`. The `pypi`
+environment requires the repository owner's approval before uploading.
 
 1. Merge the migration or release change only after **CI Status Check** succeeds.
 2. Ensure the package version matches the proposed `v<version>` release tag.
 3. Publish a GitHub release from a commit contained in `main`.
 4. The Publish workflow checks the name and tag, runs the complete qualification
-   workflow, builds and validates the distributions, and publishes using PyPI OIDC.
-   The upload job runs in this repository's `publish.yml`; PyPI does not support
-   trusted publishing from a called shared workflow.
+   workflow, then calls the pinned shared PyPI workflow to build and validate the
+   distributions and publish with `PYPI_API_TOKEN` after approval. The token is
+   available only in the upload job. Token publication does not generate PyPI
+   attestations; PyPI OIDC publication requires an upload job in the consuming
+   repository's own workflow.
 
 Manual dispatch of **Publish** runs qualification without uploading to PyPI. Tag
 pushes alone do not publish, preventing duplicate uploads when creating a release.
