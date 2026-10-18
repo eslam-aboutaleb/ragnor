@@ -853,4 +853,10 @@ The hooks run `ruff check`, `ruff format`, and the standard whitespace/EOF/YAML 
 
 ## License
 
-ragit is released under the MIT License. See the LICENSE file in the repository root.
+This software is source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE).
+
+Commercial use, including incorporation into commercial products or services, requires a separate commercial license from the copyright holder, except for purposes expressly permitted by the license (including its Noncommercial Organizations provision). Noncommercial use, modification, and redistribution are permitted subject to the full license terms.
+
+For commercial licensing, contact [eslam-aboutaleb](https://github.com/eslam-aboutaleb).
+
+Third-party dependencies and separately identified third-party code retain their own licenses. This license applies only to rights the copyright holder is entitled to license. Previously granted licenses for earlier versions are not revoked by this change.
