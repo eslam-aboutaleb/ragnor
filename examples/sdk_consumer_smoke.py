@@ -17,10 +17,7 @@ from ragnor.types import Chunk, Document
 
 class HostEmbedder:
     async def __call__(self, texts: list[str]) -> list[list[float]]:
-        return [
-            [1.0 if "refund" in text.lower() else 0.0, 1.0]
-            for text in texts
-        ]
+        return [[1.0 if "refund" in text.lower() else 0.0, 1.0] for text in texts]
 
     async def embed_query(self, text: str) -> list[float]:
         return (await self([text]))[0]
@@ -56,9 +53,9 @@ async def main() -> None:
         .build()
     )
 
-    count = await rag.ingest([
-        Document(id="customer-policy", text="refund conditions|office hours"),
-    ])
+    count = await rag.ingest(
+        [Document(id="customer-policy", text="refund conditions|office hours")]
+    )
     assert count == 2
     assert await rag.count() == 2
     results = await rag.search("refund", n_results=2)
