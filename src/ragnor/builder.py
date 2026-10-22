@@ -441,7 +441,8 @@ class RagnorBuilder:
         missing = [name for name, value in required.items() if value is None]
         if missing:
             raise ValueError(
-                "production mode requires explicit " + ", ".join(missing)
+                "production mode requires explicit "
+                + ", ".join(missing)
                 + "; local defaults are not durable"
             )
         if isinstance(self._store, InMemoryVectorStore) or isinstance(
