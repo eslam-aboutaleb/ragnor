@@ -64,7 +64,8 @@ def _prohibited_imports(source: str) -> list[str]:
                 names.append(module)
             else:
                 names.extend(
-                    f"{module}.{alias.name}" for alias in node.names
+                    f"{module}.{alias.name}"
+                    for alias in node.names
                     if _is_forbidden_import(f"{module}.{alias.name}")
                 )
     return names
