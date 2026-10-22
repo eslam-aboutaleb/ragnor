@@ -51,6 +51,31 @@ jobs:
       - name: Enforce inward dependency and plug-in protocol contracts
         run: python -m pytest -q tests/test_architecture_contracts.py
 
+  sdk-consumer:
+    name: Installed-wheel SDK consumer
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Build distributable wheel
+        run: |
+          python -m pip install build
+          python -m build --wheel
+      - name: Install and exercise SDK outside checkout
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/ragnor-sdk-venv"
+          "$RUNNER_TEMP/ragnor-sdk-venv/bin/python" -m pip install --no-deps dist/ragnor-*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/ragnor-sdk-venv/bin/python" "$GITHUB_WORKSPACE/examples/sdk_consumer_smoke.py"
+
   security:
     name: Shared security analysis
     uses: eslam-aboutaleb/ci-workflows/.github/workflows/security.yml@227a096a48326e07e5bcf128cfeafb9251706e78
@@ -128,7 +153,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-    needs: [python, architecture-contracts, security, workflow-validation, optional-backends]
+    needs: [python, architecture-contracts, sdk-consumer, security, workflow-validation, optional-backends]
     if: always()
     steps:
       - name: Require every qualification job to pass
