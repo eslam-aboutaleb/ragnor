@@ -31,11 +31,11 @@ class HostChunker:
     config = {"separator": "|"}
 
     def chunk(self, text: str) -> list[Chunk]:
-        return [
-            Chunk(id=f"consumer-{index}", text=piece)
-            for index, piece in enumerate(text.split("|"))
-            if piece
-        ]
+        chunks: list[Chunk] = []
+        for index, piece in enumerate(text.split("|")):
+            if piece:
+                chunks.append(Chunk(id=f"consumer-{index}", text=piece))
+        return chunks
 
 
 async def main() -> None:
@@ -43,19 +43,16 @@ async def main() -> None:
     assert "site-packages" in str(installed_path), (
         f"Expected installed wheel, got import path: {installed_path}"
     )
-    assert not (importlib.metadata.requires("ragnor") or []), (
-        "Core SDK unexpectedly requires third-party runtime packages"
-    )
+    requirements = importlib.metadata.requires("ragnor") or []
+    # Optional extras are declared in wheel metadata but are not required
+    # when installing only the base distribution.
+    assert all("extra ==" in requirement for requirement in requirements), requirements
 
-    rag = await (
-        RagnorBuilder.local(HostEmbedder(), embedding_dim=2)
-        .with_chunker(HostChunker())
-        .build()
-    )
+    builder = RagnorBuilder.local(HostEmbedder(), embedding_dim=2)
+    rag = await builder.with_chunker(HostChunker()).build()
 
-    count = await rag.ingest(
-        [Document(id="customer-policy", text="refund conditions|office hours")]
-    )
+    document = Document(id="customer-policy", text="refund conditions|office hours")
+    count = await rag.ingest([document])
     assert count == 2
     assert await rag.count() == 2
     results = await rag.search("refund", n_results=2)
