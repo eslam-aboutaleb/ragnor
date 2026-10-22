@@ -29,7 +29,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ragnor.chunking import SlidingWindowChunker
 from ragnor.chunking.base import Chunker
@@ -44,10 +44,16 @@ from ragnor.ingestion.pipeline import (
 from ragnor.ingestion.sources import ListDocumentSource
 from ragnor.ingestion.versioning import IngestionSnapshot
 from ragnor.retrieval.retriever import HybridRetriever, RetrieverSpec
-from ragnor.retrieval.strategies import HybridRetrieval
+from ragnor.retrieval.strategies import HybridRetrieval, RetrievalStrategy
 from ragnor.stores.base import DocumentStore, VectorStore
 from ragnor.stores.memory import InMemoryVectorStore
+from ragnor.telemetry.events import EventSink
 from ragnor.types import Document, SearchResult
+
+if TYPE_CHECKING:
+    from ragnor.db.session import SessionProvider
+    from ragnor.db.sql_factory import SQLFactory
+
 
 DEFAULT_EMBEDDING_MODEL = "local"
 """Embedding model name the builder defaults to."""
@@ -243,6 +249,11 @@ class RagnorBuilder:
         store: VectorStore | None = None,
         version_store: VersionStore | None = None,
         settings: RagSettings | None = None,
+        session_factory: SessionProvider | None = None,
+        sql_factory: SQLFactory | None = None,
+        retrieval_strategy: RetrievalStrategy | None = None,
+        event_sink: EventSink | None = None,
+        production_mode: bool = False,
     ) -> None:
         """Initialize the builder.
 
@@ -265,6 +276,12 @@ class RagnorBuilder:
                 :class:`InMemoryVersionStore` wired to the store.
             settings: Settings for the pipeline and retriever.
                 Defaults to :class:`BuilderSettings`.
+            session_factory: Host-supplied async session context manager factory.
+                If omitted, the builder's local path uses a null session.
+            sql_factory: Optional advisory locking adapter for ingestion.
+            retrieval_strategy: Optional injected strategy replacing default hybrid retrieval.
+            event_sink: Optional host-owned search telemetry sink.
+            production_mode: Require explicit persistent components (not a durability proof).
         """
         self._embedder = embedder
         self._embedding_model = embedding_model
@@ -273,6 +290,11 @@ class RagnorBuilder:
         self._store = store
         self._version_store = version_store
         self._settings = settings
+        self._session_factory = session_factory
+        self._sql_factory = sql_factory
+        self._retrieval_strategy = retrieval_strategy
+        self._event_sink = event_sink
+        self._production_mode = production_mode
 
     @classmethod
     def local(  # noqa: PLR0913
@@ -374,6 +396,62 @@ class RagnorBuilder:
         self._settings = settings
         return self
 
+    def with_session_factory(self, session_factory: SessionProvider) -> RagnorBuilder:
+        """Use a host-provided session provider for ingestion and retrieval.
+
+        Sessions returned by this factory are controlled by the provider.
+        The ingestion pipeline commits its own session, but not a
+        session explicitly supplied to `pipeline.run(..., session=...)`.
+        """
+        self._session_factory = session_factory
+        return self
+
+    def with_sql_factory(self, sql_factory: SQLFactory) -> RagnorBuilder:
+        """Inject the host's advisory-lock adapter; no SQLAlchemy dependency required."""
+        self._sql_factory = sql_factory
+        return self
+
+    def with_retrieval_strategy(self, strategy: RetrievalStrategy) -> RagnorBuilder:
+        """Use a custom pluggable retrieval strategy instead of the default hybrid one."""
+        self._retrieval_strategy = strategy
+        return self
+
+    def with_event_sink(self, event_sink: EventSink) -> RagnorBuilder:
+        """Forward retrieval telemetry to a host-supplied event sink."""
+        self._event_sink = event_sink
+        return self
+
+    def with_production_mode(self) -> RagnorBuilder:
+        """Refuse known ephemeral defaults when building a persistent application.
+
+        This checks required injection, not whether a custom backend is truly
+        durable or safe under concurrency. Validate custom adapters separately.
+        """
+        self._production_mode = True
+        return self
+
+    def _validate_production_dependencies(self) -> None:
+        if not self._production_mode:
+            return
+        required = {
+            "store": self._store,
+            "version_store": self._version_store,
+            "session_factory": self._session_factory,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise ValueError(
+                "production mode requires explicit " + ", ".join(missing)
+                + "; local defaults are not durable"
+            )
+        if isinstance(self._store, InMemoryVectorStore) or isinstance(
+            self._version_store, InMemoryVersionStore
+        ):
+            raise ValueError(
+                "production mode rejects InMemory stores; "
+                "inject and validate durable host implementations"
+            )
+
     async def build(self) -> Ragnor:
         """Wire the components into a :class:`Ragnor` facade.
 
@@ -399,6 +477,8 @@ class RagnorBuilder:
                 "(ragnor ships no local embedder in core)"
             )
 
+        self._validate_production_dependencies()
+
         settings = self._settings
         if settings is None:
             settings = BuilderSettings(embedding_model=self._embedding_model)
@@ -421,19 +501,22 @@ class RagnorBuilder:
         if version_store is None:
             version_store = InMemoryVersionStore(store)
 
-        session_factory = _null_session_factory
+        session_factory = self._session_factory or _null_session_factory
         pipeline = IngestionPipeline(
             store=store,
             embedder=self._embedder,
             chunker=chunker,
             session_factory=session_factory,
             settings=settings,
+            sql_factory=self._sql_factory,
         )
-        strategy = HybridRetrieval(
-            vector_index=store,
-            lexical_index=store,
-            embedder=self._embedder,
-        )
+        strategy = self._retrieval_strategy
+        if strategy is None:
+            strategy = HybridRetrieval(
+                vector_index=store,
+                lexical_index=store,
+                embedder=self._embedder,
+            )
         retriever = HybridRetriever(
             spec=RetrieverSpec(
                 table_name=getattr(store, "table_name", "documents"),
@@ -442,6 +525,7 @@ class RagnorBuilder:
             settings=settings,
             session_factory=session_factory,
             strategy=strategy,
+            event_sink=self._event_sink,
         )
         return Ragnor(
             store=store,
@@ -489,6 +573,7 @@ class Ragnor:
         documents: list[Document],
         *,
         purge_on_empty: bool = False,
+        lock_key: str | None = None,
     ) -> int:
         """Ingest documents and return the stored chunk count.
 
@@ -504,6 +589,9 @@ class Ragnor:
             purge_on_empty: Treat an empty list as authoritative: the
                 active version is retired and its chunks deleted from
                 the search index.
+            lock_key: Optional scoped ingestion advisory lock identifier.
+                Requires a compatible SQL factory and transaction/session
+                provider. Never a distributed lock with local defaults.
 
         Returns:
             The number of chunks stored, or the stored chunk count
@@ -514,6 +602,7 @@ class Ragnor:
             source,
             self._version_store,
             purge_on_empty=purge_on_empty,
+            lock_key=lock_key,
         )
 
     async def search(

@@ -209,12 +209,13 @@ class IngestionPipeline:
 
         sql_factory = None
         if lock_key is not None:
-            # Imported lazily so importing the pipeline does
-            # not require a database driver; the default is
-            # the SQLAlchemy factory.
-            from ragnor.db.sql_factory import SQLAlchemyFactory  # noqa: PLC0415
+            sql_factory = self._sql_factory
+            if sql_factory is None:
+                # Import the default only when no host adapter was supplied:
+                # SQLAlchemy is an optional dependency.
+                from ragnor.db.sql_factory import SQLAlchemyFactory  # noqa: PLC0415
 
-            sql_factory = self._sql_factory or SQLAlchemyFactory()
+                sql_factory = SQLAlchemyFactory()
 
         if not documents:
             if not purge_on_empty:
