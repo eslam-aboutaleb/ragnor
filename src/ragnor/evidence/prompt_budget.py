@@ -32,6 +32,8 @@ class ProviderPromptCounter(Protocol):
     def count_prompt_tokens(self, messages: Sequence[Mapping[str, Any]]) -> int:
         """Count the complete provider-specific serialized prompt."""
         raise NotImplementedError
+
+
 @dataclass(frozen=True)
 class PromptBudgetResult:
     """No customer text or credentials are retained in budget diagnostics."""
