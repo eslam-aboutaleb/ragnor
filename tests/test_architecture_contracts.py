@@ -148,9 +148,12 @@ def test_sql_port_is_importable_without_sqlalchemy() -> None:
     )
     env = dict(os.environ)
     completed = subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True,
-        check=False, env=env,
-    )
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )  # noqa: S603 -- fixed interpreter and constant source, no shell or user input
     assert completed.returncode == 0, completed.stderr
 
 
