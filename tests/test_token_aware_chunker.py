@@ -33,8 +33,7 @@ def test_opt_in_exact_chunker_preserves_source_and_token_cap() -> None:
     assert chunks[0].metadata["start_offset"] == 0
     assert chunks[-1].metadata["end_offset"] == len(text)
     assert all(
-        x.text == text[x.metadata["start_offset"] : x.metadata["end_offset"]]
-        for x in chunks
+        x.text == text[x.metadata["start_offset"] : x.metadata["end_offset"]] for x in chunks
     )
     assert all(x.metadata["start_offset"] < x.metadata["end_offset"] for x in chunks)
     assert all(
