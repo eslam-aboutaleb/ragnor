@@ -201,7 +201,9 @@ async def process_pending_jobs(
             job.retry_count += 1
             if job.retry_count >= job.max_attempts:
                 job.status = "dead_letter"
-                job.status_detail = f"Exhausted {job.max_attempts} attempts: {exc}"
+                job.status_detail = (
+                    f"Exhausted {job.max_attempts} attempts ({type(exc).__name__})"
+                )
                 job.next_retry_at = None
                 job.locked_at = None
                 job.locked_by = None
@@ -209,7 +211,7 @@ async def process_pending_jobs(
                 backoff = RETRY_SCHEDULE[min(job.retry_count - 1, len(RETRY_SCHEDULE) - 1)]
                 job.next_retry_at = datetime.now(UTC) + backoff
                 job.status = "failed"
-                job.status_detail = str(exc)
+                job.status_detail = f"Retry scheduled ({type(exc).__name__})"
                 job.locked_at = None
                 job.locked_by = None
             await store.mark_failed(job, exc)
@@ -217,7 +219,7 @@ async def process_pending_jobs(
                 "Job '%s' failed (retry %d): %s",
                 job.job_id,
                 job.retry_count,
-                exc,
+                type(exc).__name__,
             )
 
     return processed
