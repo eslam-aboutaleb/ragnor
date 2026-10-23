@@ -145,10 +145,7 @@ class SQLVersionStore:
 
     async def delete_chunks(self, session, version_id: str) -> None:
         await session.execute(
-            text(
-                "DELETE FROM ragnor_sdk_host_vectors "
-                "WHERE scope=:scope AND version_id=:version"
-            ),
+            text("DELETE FROM ragnor_sdk_host_vectors WHERE scope=:scope AND version_id=:version"),
             {"scope": self.scope, "version": version_id},
         )
 
@@ -185,17 +182,26 @@ async def test_real_host_injection_is_tenant_isolated_and_idempotent() -> None:
     try:
         first, _, _ = await _client(scopes[0], sessions)
         second, _, _ = await _client(scopes[1], sessions)
-        assert await first.ingest(
-            [Document(id="doc", text="Tenant A refund policy")], lock_key=scopes[0]
-        ) == 1
-        assert await second.ingest(
-            [Document(id="doc", text="Tenant B separate policy")], lock_key=scopes[1]
-        ) == 1
+        assert (
+            await first.ingest(
+                [Document(id="doc", text="Tenant A refund policy")], lock_key=scopes[0]
+            )
+            == 1
+        )
+        assert (
+            await second.ingest(
+                [Document(id="doc", text="Tenant B separate policy")], lock_key=scopes[1]
+            )
+            == 1
+        )
         assert await first.count() == 1
         assert await second.count() == 1
-        assert await first.ingest(
-            [Document(id="doc", text="Tenant A refund policy")], lock_key=scopes[0]
-        ) == 1
+        assert (
+            await first.ingest(
+                [Document(id="doc", text="Tenant A refund policy")], lock_key=scopes[0]
+            )
+            == 1
+        )
         async with sessions() as session:
             rows = await session.execute(
                 text(
@@ -217,9 +223,12 @@ async def test_mid_upsert_sql_exception_rolls_back_active_version_and_vectors() 
     scope = f"rollback-{uuid4()}"
     try:
         rag, store, versions = await _client(scope, sessions)
-        assert await rag.ingest(
-            [Document(id="policy", text="Original coverage terms")], lock_key=scope
-        ) == 1
+        assert (
+            await rag.ingest(
+                [Document(id="policy", text="Original coverage terms")], lock_key=scope
+            )
+            == 1
+        )
         async with sessions() as session:
             original = await versions.find_active(session)
         assert original is not None
@@ -234,9 +243,7 @@ async def test_mid_upsert_sql_exception_rolls_back_active_version_and_vectors() 
             assert after is not None
             assert after.version_id == original.version_id
             rows = await session.execute(
-                text(
-                    "SELECT content FROM ragnor_sdk_host_vectors WHERE scope=:scope"
-                ),
+                text("SELECT content FROM ragnor_sdk_host_vectors WHERE scope=:scope"),
                 {"scope": scope},
             )
             assert rows.scalars().all() == ["Original coverage terms"]
