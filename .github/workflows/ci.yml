@@ -21,7 +21,7 @@ permissions:
 jobs:
   python:
     name: Shared Python quality
-    uses: eslam-aboutaleb/ci-workflows/.github/workflows/python.yml@227a096a48326e07e5bcf128cfeafb9251706e78
+    uses: eslam-aboutaleb/ci-workflows/.github/workflows/python.yml@57c21925ec0fd1aa1969922136fa7b2594ce6a4e
     with:
       project-dir: .
       manager: pip
@@ -33,7 +33,7 @@ jobs:
 
   security:
     name: Shared security analysis
-    uses: eslam-aboutaleb/ci-workflows/.github/workflows/security.yml@227a096a48326e07e5bcf128cfeafb9251706e78
+    uses: eslam-aboutaleb/ci-workflows/.github/workflows/security.yml@57c21925ec0fd1aa1969922136fa7b2594ce6a4e
     permissions:
       contents: read
       actions: read
@@ -45,7 +45,7 @@ jobs:
 
   workflow-validation:
     name: Shared workflow validation
-    uses: eslam-aboutaleb/ci-workflows/.github/workflows/workflow-lint.yml@227a096a48326e07e5bcf128cfeafb9251706e78
+    uses: eslam-aboutaleb/ci-workflows/.github/workflows/workflow-lint.yml@57c21925ec0fd1aa1969922136fa7b2594ce6a4e
 
   optional-backends:
     name: Optional Backend (${{ matrix.extra }})
