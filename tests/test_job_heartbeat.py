@@ -20,9 +20,7 @@ class HostLeaseStore(InMemoryEmbeddingJobStore):
         self.renewed = asyncio.Event()
         self.lose_ownership = False
 
-    async def renew_lease(
-        self, job: JobPayload, *, lease_seconds: float | None = None
-    ) -> None:
+    async def renew_lease(self, job: JobPayload, *, lease_seconds: float | None = None) -> None:
         if self.lose_ownership:
             raise LostJobOwnershipError("claim expired")
         self.renewed.set()
@@ -45,9 +43,12 @@ class WaitingProcessor:
 async def test_opt_in_heartbeat_renews_until_processor_completes() -> None:
     store = HostLeaseStore()
     processor = WaitingProcessor(store.renewed)
-    assert await process_pending_jobs(
-        store, processor, worker_id="host", heartbeat_interval_seconds=0.01
-    ) == 1
+    assert (
+        await process_pending_jobs(
+            store, processor, worker_id="host", heartbeat_interval_seconds=0.01
+        )
+        == 1
+    )
     assert store.renewed.is_set()
     assert store.jobs[0].status == "completed"
 

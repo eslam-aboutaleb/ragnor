@@ -145,9 +145,7 @@ class AtomicClaimJobStore(Protocol):
 class LeaseRenewalJobStore(Protocol):
     """Optional host-driven lease extension for long-running jobs."""
 
-    async def renew_lease(
-        self, job: JobPayload, *, lease_seconds: float | None = None
-    ) -> None:
+    async def renew_lease(self, job: JobPayload, *, lease_seconds: float | None = None) -> None:
         """Renew only the active owner and claim-generation lease."""
         ...
 
@@ -236,9 +234,7 @@ async def process_pending_jobs(
             if heartbeat_interval_seconds is None:
                 await processor.process(job)
             else:
-                await _process_with_heartbeat(
-                    store, processor, job, heartbeat_interval_seconds
-                )
+                await _process_with_heartbeat(store, processor, job, heartbeat_interval_seconds)
 
             job.status = "completed"
             job.completed_at = datetime.now(UTC)

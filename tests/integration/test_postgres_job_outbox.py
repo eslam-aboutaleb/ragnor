@@ -151,7 +151,9 @@ async def test_fenced_lease_renewal_extends_deadline_and_rejects_expired_owner()
             assert result.scalar_one() is True
         async with sessions() as session, session.begin():
             await session.execute(
-                text("UPDATE ragnor_embedding_jobs SET lease_expires_at=now()-interval '1 second' WHERE job_id=:id"),
+                text(
+                    "UPDATE ragnor_embedding_jobs SET lease_expires_at=now()-interval '1 second' WHERE job_id=:id"
+                ),
                 {"id": job.job_id},
             )
         with pytest.raises(LostJobOwnershipError):

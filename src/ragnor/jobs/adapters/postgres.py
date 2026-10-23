@@ -184,9 +184,7 @@ class PostgresEmbeddingJobStore:
             "generation": job.claim_generation,
         }
 
-    async def renew_lease(
-        self, job: JobPayload, *, lease_seconds: float | None = None
-    ) -> None:
+    async def renew_lease(self, job: JobPayload, *, lease_seconds: float | None = None) -> None:
         """Extend a live lease only for its current scope/owner/generation.
 
         Uses PostgreSQL server time so host clock skew cannot incorrectly
