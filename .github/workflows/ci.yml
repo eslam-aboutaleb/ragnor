@@ -48,10 +48,6 @@ jobs:
         run: |
           python -m pip install -e .
           python -m pip install "pytest>=8.3" "pytest-asyncio>=0.24"
-      - name: Display formatter diff for conformance fixtures
-        run: |
-          python -m pip install "ruff==0.14.14"
-          ruff format --diff tests/test_extended_adapter_conformance.py
       - name: Verify host adapters and fail-closed contracts
         run: |
           python -m pytest -q tests/test_external_adapter_conformance.py tests/test_extended_adapter_conformance.py
