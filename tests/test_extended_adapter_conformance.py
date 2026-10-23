@@ -136,9 +136,7 @@ class HostReranker:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def rerank(
-        self, query: str, results: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
+    async def rerank(self, query: str, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
         self.calls += 1
         return sorted(results, key=lambda result: str(result["id"]), reverse=True)
 
@@ -161,9 +159,7 @@ class HostManifestAdapter:
     async def compare_and_swap(self, record: ManifestRecord, expected_fence: int) -> bool:
         return await self.backend.compare_and_swap(record, expected_fence)
 
-    async def compare_and_swap_many(
-        self, updates: list[tuple[ManifestRecord, int]]
-    ) -> bool:
+    async def compare_and_swap_many(self, updates: list[tuple[ManifestRecord, int]]) -> bool:
         return await self.backend.compare_and_swap_many(updates)
 
     async def delete(self, scope: str, document_id: str) -> bool:
@@ -174,9 +170,7 @@ class HostSyncStateAdapter:
     def __init__(self) -> None:
         self.backend = InMemorySyncStateStore()
 
-    async def acquire_lease(
-        self, scope: str, owner: str, ttl_seconds: float = 30.0
-    ) -> Any:
+    async def acquire_lease(self, scope: str, owner: str, ttl_seconds: float = 30.0) -> Any:
         return await self.backend.acquire_lease(scope, owner, ttl_seconds)
 
     async def renew_lease(self, token: Any, ttl_seconds: float = 30.0) -> Any:
@@ -197,9 +191,7 @@ class HostSyncStateAdapter:
     async def get_checkpoint(self, scope: str) -> dict[str, Any] | None:
         return await self.backend.get_checkpoint(scope)
 
-    async def save_checkpoint(
-        self, scope: str, checkpoint: dict[str, Any], token: Any
-    ) -> bool:
+    async def save_checkpoint(self, scope: str, checkpoint: dict[str, Any], token: Any) -> bool:
         return await self.backend.save_checkpoint(scope, checkpoint, token)
 
     def fenced(self, token: Any) -> Any:
@@ -233,9 +225,7 @@ class HostRetriever:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def retrieve(
-        self, query: str, n_results: int = 5, **kwargs: Any
-    ) -> list[dict[str, Any]]:
+    async def retrieve(self, query: str, n_results: int = 5, **kwargs: Any) -> list[dict[str, Any]]:
         self.calls += 1
         return []
 
@@ -244,9 +234,11 @@ class HostRetriever:
 async def test_external_source_and_extractor_can_be_injected() -> None:
     source = HostSource(HostExtractor())
     assert isinstance(source, DocumentSource)
-    rag = await RagnorBuilder.local(
-        HostEmbedder(), embedding_dim=2
-    ).with_chunker(HostChunker()).build()
+    rag = (
+        await RagnorBuilder.local(HostEmbedder(), embedding_dim=2)
+        .with_chunker(HostChunker())
+        .build()
+    )
     count = await rag.pipeline.run(source, rag._version_store)
     assert count == 1
     assert await rag.count() == 1
@@ -256,10 +248,12 @@ async def test_external_source_and_extractor_can_be_injected() -> None:
 async def test_external_document_store_observes_filter_and_delete_contracts() -> None:
     store = HostStorageAdapter()
     assert isinstance(store, DocumentStore)
-    await store.upsert([
-        {"id": "a", "text": "alpha", "embedding": [1.0, 0.0], "metadata": {"tenant": "a"}},
-        {"id": "b", "text": "beta", "embedding": [0.0, 1.0], "metadata": {"tenant": "b"}},
-    ])
+    await store.upsert(
+        [
+            {"id": "a", "text": "alpha", "embedding": [1.0, 0.0], "metadata": {"tenant": "a"}},
+            {"id": "b", "text": "beta", "embedding": [0.0, 1.0], "metadata": {"tenant": "b"}},
+        ]
+    )
     assert await store.count(tenant="a") == 1
     rows = await store.get(filters={"tenant": "a"})
     assert [row["id"] for row in rows] == ["a"]
@@ -348,7 +342,5 @@ async def test_host_authorizer_denies_before_querying_retriever() -> None:
     )
     bridge = KnowledgeBridge(retriever=retriever, authorizer=authorizer)
     with pytest.raises(ScopeAuthorizationError):
-        await bridge.search_knowledge(
-            query="refund", client_id="client-b", scope="tenant-a"
-        )
+        await bridge.search_knowledge(query="refund", client_id="client-b", scope="tenant-a")
     assert retriever.calls == 0
