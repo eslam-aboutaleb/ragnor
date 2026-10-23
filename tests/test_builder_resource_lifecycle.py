@@ -173,3 +173,34 @@ async def test_simultaneous_close_callers_share_one_cleanup() -> None:
     )
     await asyncio.gather(rag.aclose(), rag.aclose(), rag.aclose())
     assert events == ["once"]
+
+
+@pytest.mark.asyncio
+async def test_close_waits_for_inflight_operation_before_releasing_owned_clients() -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+    events: list[str] = []
+
+    class BlockingStore(BorrowedStore):
+        async def count(self, **filters: object) -> int:
+            started.set()
+            await release.wait()
+            return await super().count(**filters)
+
+    store = BlockingStore()
+    rag = await (
+        RagnorBuilder.local(HostEmbedder(), embedding_dim=2, store=store)
+        .with_owned_resource(OwnedResource("owned", events))
+        .build()
+    )
+    operation = asyncio.create_task(rag.count())
+    await asyncio.wait_for(started.wait(), timeout=3)
+    closing = asyncio.create_task(rag.aclose())
+    await asyncio.sleep(0)
+    assert events == []
+    with pytest.raises(RuntimeError, match="closed"):
+        await rag.count()
+    release.set()
+    assert await asyncio.wait_for(operation, timeout=3) == 0
+    await asyncio.wait_for(closing, timeout=3)
+    assert events == ["owned"]

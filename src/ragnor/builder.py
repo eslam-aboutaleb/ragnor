@@ -611,10 +611,26 @@ class Ragnor:
         self._owned_resources = owned_resources
         self._closed = False
         self._close_task: asyncio.Task[None] | None = None
+        self._active_ops = 0
+        self._operations_drained = asyncio.Event()
+        self._operations_drained.set()
 
     def _ensure_open(self) -> None:
         if self._closed:
             raise RuntimeError("Ragnor client is closed")
+
+    @asynccontextmanager
+    async def _active_operation(self) -> AsyncIterator[None]:
+        """Hold a facade-level operation lease until the call completes."""
+        self._ensure_open()
+        self._active_ops += 1
+        self._operations_drained.clear()
+        try:
+            yield
+        finally:
+            self._active_ops -= 1
+            if self._active_ops == 0:
+                self._operations_drained.set()
 
     async def __aenter__(self) -> Ragnor:
         """Enter an async context managed facade."""
@@ -637,6 +653,10 @@ class Ragnor:
         if errors:
             raise errors[0]
 
+    async def _drain_and_close(self) -> None:
+        await self._operations_drained.wait()
+        await self._close_owned_resources()
+
     async def aclose(self) -> None:
         """Close explicitly owned resources exactly once.
 
@@ -649,7 +669,7 @@ class Ragnor:
             return
         if self._close_task is None:
             self._closed = True
-            self._close_task = asyncio.create_task(self._close_owned_resources())
+            self._close_task = asyncio.create_task(self._drain_and_close())
         try:
             await asyncio.shield(self._close_task)
         except asyncio.CancelledError:
@@ -688,14 +708,14 @@ class Ragnor:
             The number of chunks stored, or the stored chunk count
             when the documents were unchanged.
         """
-        self._ensure_open()
-        source = ListDocumentSource(documents)
-        return await self.pipeline.run(
-            source,
-            self._version_store,
-            purge_on_empty=purge_on_empty,
-            lock_key=lock_key,
-        )
+        async with self._active_operation():
+            source = ListDocumentSource(documents)
+            return await self.pipeline.run(
+                source,
+                self._version_store,
+                purge_on_empty=purge_on_empty,
+                lock_key=lock_key,
+            )
 
     async def search(
         self,
@@ -714,8 +734,8 @@ class Ragnor:
         Returns:
             Search results sorted by RRF score.
         """
-        self._ensure_open()
-        return await self.retriever.retrieve(query, n_results=n_results, **filters)
+        async with self._active_operation():
+            return await self.retriever.retrieve(query, n_results=n_results, **filters)
 
     async def count(self, **filters: Any) -> int:
         """Count documents in the store.
@@ -727,5 +747,5 @@ class Ragnor:
         Returns:
             Number of matching documents.
         """
-        self._ensure_open()
-        return await self.store.count(**filters)
+        async with self._active_operation():
+            return await self.store.count(**filters)
