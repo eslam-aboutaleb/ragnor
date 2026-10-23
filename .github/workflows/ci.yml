@@ -184,7 +184,7 @@ jobs:
           "$RUNNER_TEMP/ragnor-typing-venv/bin/python" -m pip install --no-deps dist/ragnor-*.whl
           "$RUNNER_TEMP/ragnor-typing-venv/bin/python" -m pip install "mypy==1.17.1"
           cd "$RUNNER_TEMP"
-          "$RUNNER_TEMP/ragnor-typing-venv/bin/python" -m mypy --no-incremental --strict --follow-imports=silent "$GITHUB_WORKSPACE/tests/typing/sdk_consumer.py"
+          "$RUNNER_TEMP/ragnor-typing-venv/bin/python" -m mypy --no-incremental --strict --follow-imports=silent "$GITHUB_WORKSPACE/tests/typing/sdk_consumer.py" "$GITHUB_WORKSPACE/tests/typing/adapter_consumer.py"
       - name: Prove type-checker rejects incompatible SDK API values
         run: |
           set -euo pipefail
