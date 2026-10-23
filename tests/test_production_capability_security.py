@@ -49,7 +49,7 @@ async def test_production_refuses_undeclared_store_capabilities() -> None:
         session_factory=session_factory,
         production_mode=True,
     )
-    with pytest.raises(ValueError, match="capabilities"):
+    with pytest.raises(ValueError, match="StoreCapabilities"):
         await builder.build()
 
 

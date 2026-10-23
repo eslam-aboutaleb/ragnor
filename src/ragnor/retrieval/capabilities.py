@@ -181,4 +181,6 @@ def get_backend_capabilities(backend: Any) -> StoreCapabilities:
     # ("PgVector" / "Memory") or presence of a method cannot establish
     # transaction, tenant isolation or filter semantics. Return none and
     # require explicit capability declarations for guarded operations.
-    return StoreCapabilities()
+    # Backward-compatible equality-only assumption for legacy local adapters.
+    # Never infer isolation, durability or transactional guarantees.
+    return StoreCapabilities(filter_operators=frozenset({FilterOperator.EQ}))
