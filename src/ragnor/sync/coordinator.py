@@ -33,6 +33,7 @@ from ragnor.embeddings.base import EmbeddingFunction
 from ragnor.embeddings.dimensions import get_embedding_dimension
 from ragnor.ingestion.connector_core import LoadResult, collect_pages, _error_record
 from ragnor.embeddings._safe_config import safe_config
+from ragnor.exceptions import IndexConsistencyError, RagnorError
 from ragnor.ingestion.sources import RawDocument
 from ragnor.stores.base import VectorStore
 from ragnor.sync.manifest import ManifestRecord, ManifestStatus, ManifestStore
@@ -46,20 +47,28 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class SyncError(Exception):
+class SyncError(RagnorError):
     """Base error for sync operations."""
+
+    default_code = "ERR_SYNC"
 
 
 class LeaseAcquisitionError(SyncError):
     """Could not acquire lease for sync scope."""
 
+    default_code = "ERR_LEASE_ACQUISITION"
 
-class StaleWorkerError(SyncError):
+
+class StaleWorkerError(IndexConsistencyError, SyncError):
     """Worker fencing token expired or superseded by another epoch."""
 
+    default_code = "ERR_STALE_WORKER"
 
-class FencingError(SyncError):
+
+class FencingError(IndexConsistencyError, SyncError):
     """CAS update or fencing validation failed."""
+
+    default_code = "ERR_FENCING"
 
 
 class ActivationMode(StrEnum):

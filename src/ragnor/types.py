@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from ragnor.exceptions import RagnorError
+
 
 @dataclass
 class Chunk:
@@ -51,5 +53,7 @@ class SearchResult:
     rrf_score: float = 0.0
 
 
-class RetrievalError(Exception):
+class RetrievalError(RagnorError):
     """Typed error for retrieval failures (used by strict-mode search)."""
+
+    default_code = "ERR_RETRIEVAL"

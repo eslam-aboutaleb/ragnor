@@ -45,6 +45,7 @@ from typing import Any
 from ragnor.embeddings.base import EmbeddingFunction
 from ragnor.embeddings.metrics import EmbeddingMetrics
 from ragnor.embeddings.profile import EmbeddingProfile, TaskMode
+from ragnor.exceptions import EmbeddingProviderError
 from ragnor.telemetry.events import EventKind, NullEventSink, TelemetryEvent
 
 logger = logging.getLogger(__name__)
@@ -54,20 +55,26 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class EmbeddingError(Exception):
+class EmbeddingError(EmbeddingProviderError):
     """Base class for embedding executor errors."""
 
 
 class EmbeddingTransientError(EmbeddingError):
     """A transient failure that may succeed on retry (network, rate-limit, 5xx)."""
 
+    default_code = "ERR_EMBEDDING_TRANSIENT"
+    default_retryable = True
+
     def __init__(self, message: str, *, retry_after: float | None = None) -> None:
-        super().__init__(message)
+        super().__init__(message, retryable=True)
         self.retry_after = retry_after
 
 
 class EmbeddingPermanentError(EmbeddingError):
     """A permanent failure that must not be retried (auth, config, dimension)."""
+
+    default_code = "ERR_EMBEDDING_PERMANENT"
+    default_retryable = False
 
 
 class EmbeddingResponseError(EmbeddingPermanentError):
@@ -77,6 +84,8 @@ class EmbeddingResponseError(EmbeddingPermanentError):
     Declared permanent because retrying the same input will produce the same
     invalid response.
     """
+
+    default_code = "ERR_EMBEDDING_RESPONSE"
 
 
 # ---------------------------------------------------------------------------

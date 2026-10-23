@@ -31,6 +31,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, runtime_checkable
 
+from ragnor.exceptions import IndexConsistencyError
+
 logger = logging.getLogger(__name__)
 
 RETRY_SCHEDULE = [
@@ -129,8 +131,10 @@ class EmbeddingJobStore(Protocol):
         raise NotImplementedError
 
 
-class LostJobOwnershipError(RuntimeError):
+class LostJobOwnershipError(IndexConsistencyError, RuntimeError):
     """Stale owner/lease/generation cannot alter an outbox job."""
+
+    default_code = "ERR_LOST_JOB_OWNERSHIP"
 
 
 @runtime_checkable

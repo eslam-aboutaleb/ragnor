@@ -14,16 +14,19 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from ragnor.exceptions import UnsupportedCapabilityError
 from ragnor.types import RetrievalError
 
 
-class CapabilityUnsupportedError(RetrievalError):
+class CapabilityUnsupportedError(UnsupportedCapabilityError, RetrievalError):
     """Raised when a mandatory capability constraint is not supported by the backend.
 
     Fail-closed behavior: unsupported security, filter, or transaction
     guarantees reject the request immediately to prevent silent leakage
     or incorrect results.
     """
+
+    default_code = "ERR_CAPABILITY_UNSUPPORTED"
 
 
 class FilterOperator(StrEnum):
