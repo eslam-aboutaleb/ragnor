@@ -180,7 +180,7 @@ class JobProcessor(Protocol):
         ...
 
 
-async def process_pending_jobs(
+async def process_pending_jobs(  # noqa: PLR0913 -- compatibility options are opt-in
     store: EmbeddingJobStore,
     processor: JobProcessor,
     limit: int = 10,
