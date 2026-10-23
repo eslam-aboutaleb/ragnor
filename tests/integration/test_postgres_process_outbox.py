@@ -104,9 +104,9 @@ async def test_killed_worker_claim_is_replayable_and_stale_ack_is_rejected() -> 
         child = await _start_worker(scope, "dead-worker", 1, "hold")
         await _go(child)
         assert child.stdout is not None
-        claim = json.loads(
-            (await asyncio.wait_for(child.stdout.readline(), timeout=15)).decode()
-        )[0]
+        claim = json.loads((await asyncio.wait_for(child.stdout.readline(), timeout=15)).decode())[
+            0
+        ]
         child.kill()
         await asyncio.wait_for(child.wait(), timeout=15)
         assert child.returncode != 0

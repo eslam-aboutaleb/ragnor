@@ -21,8 +21,7 @@ async def main() -> None:
     store = PostgresEmbeddingJobStore(sessions, scope=scope)
     jobs = await store.claim_and_mark_processing(int(batch), worker_id)
     payload = [
-        {"id": job.job_id, "owner": job.claim_owner, "epoch": job.claim_generation}
-        for job in jobs
+        {"id": job.job_id, "owner": job.claim_owner, "epoch": job.claim_generation} for job in jobs
     ]
     print(json.dumps(payload), flush=True)
     if mode == "hold":
