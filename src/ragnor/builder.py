@@ -629,6 +629,10 @@ class Ragnor:
         All callers await the same cleanup task. Cancelling a caller does not
         abandon disposal of remaining SDK-owned resources.
         """
+        # Repeated close is idempotent even if the first cleanup surfaced
+        # an error. Do not re-raise a completed task's prior exception.
+        if self._close_task is not None and self._close_task.done():
+            return
         if self._close_task is None:
             self._closed = True
             self._close_task = asyncio.create_task(self._close_owned_resources())
