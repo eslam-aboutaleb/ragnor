@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from ragnor.builder import RagnorBuilder
@@ -120,3 +122,55 @@ async def test_async_context_cleans_up_after_body_exception() -> None:
     with pytest.raises(RuntimeError, match="closed"):
         async with rag:
             pass
+
+
+@pytest.mark.asyncio
+async def test_builder_transfers_owned_resources_to_only_one_facade() -> None:
+    events: list[str] = []
+    owned = OwnedResource("once", events)
+    builder = RagnorBuilder.local(HostEmbedder(), embedding_dim=2)
+    builder.with_owned_resource(owned)
+    first = await builder.build()
+    second = await builder.build()
+    await first.aclose()
+    await second.aclose()
+    assert events == ["once"]
+
+
+@pytest.mark.asyncio
+async def test_cancelled_close_waits_for_owned_cleanup_before_propagating() -> None:
+    events: list[str] = []
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class SlowResource:
+        async def aclose(self) -> None:
+            started.set()
+            await release.wait()
+            events.append("slow")
+
+    rag = await (
+        RagnorBuilder.local(HostEmbedder(), embedding_dim=2)
+        .with_owned_resource(OwnedResource("early", events))
+        .with_owned_resource(SlowResource())
+        .build()
+    )
+    closing = asyncio.create_task(rag.aclose())
+    await asyncio.wait_for(started.wait(), timeout=3)
+    closing.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(closing, timeout=3)
+    assert events == ["slow", "early"]
+
+
+@pytest.mark.asyncio
+async def test_simultaneous_close_callers_share_one_cleanup() -> None:
+    events: list[str] = []
+    rag = await (
+        RagnorBuilder.local(HostEmbedder(), embedding_dim=2)
+        .with_owned_resource(OwnedResource("once", events))
+        .build()
+    )
+    await asyncio.gather(rag.aclose(), rag.aclose(), rag.aclose())
+    assert events == ["once"]
