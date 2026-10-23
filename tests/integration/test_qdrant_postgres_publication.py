@@ -124,14 +124,21 @@ async def test_worker_orchestrator_stages_then_publishes_without_direct_ack() ->
             for statement in DDL:
                 await connection.execute(text(statement))
         await outbox.enqueue(
-            {"scope": scope, "idempotency_key": "revision", "document_id": "policy",
-             "revision": 1, "generation_key": "gen-policy"}
+            {
+                "scope": scope,
+                "idempotency_key": "revision",
+                "document_id": "policy",
+                "revision": 1,
+                "generation_key": "gen-policy",
+            }
         )
         reader = ActiveGenerationReader(outbox, vectors)
         assert await reader.read(scope, "policy") == ()
         assert (
             await process_pending_jobs(
-                outbox, StagingProcessor(), worker_id="production-worker",
+                outbox,
+                StagingProcessor(),
+                worker_id="production-worker",
                 require_atomic_claims=True,
             )
             == 1

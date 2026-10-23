@@ -130,7 +130,8 @@ async def test_event_sink_failure_cannot_undo_committed_job_ack() -> None:
             raise RuntimeError("observer failure")
 
     store = InMemoryEmbeddingJobStore([JobPayload(job_id="one")])
-    assert await process_pending_jobs(
-        store, Processor(), worker_id="host", event_sink=BrokenSink()
-    ) == 1
+    assert (
+        await process_pending_jobs(store, Processor(), worker_id="host", event_sink=BrokenSink())
+        == 1
+    )
     assert store.jobs[0].status == "completed"

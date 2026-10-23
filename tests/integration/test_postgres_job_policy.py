@@ -45,10 +45,17 @@ async def test_durable_permanent_job_is_dead_lettered_once_and_redacted() -> Non
     observer = Events()
     try:
         await store.enqueue({"scope": scope, "idempotency_key": "bad"})
-        assert await process_pending_jobs(
-            store, PoisonedProcessor(), worker_id="worker",
-            require_atomic_claims=True, retry_policy=Permanent(), event_sink=observer,
-        ) == 0
+        assert (
+            await process_pending_jobs(
+                store,
+                PoisonedProcessor(),
+                worker_id="worker",
+                require_atomic_claims=True,
+                retry_policy=Permanent(),
+                event_sink=observer,
+            )
+            == 0
+        )
         async with sessions() as s:
             result = await s.execute(
                 text(

@@ -205,9 +205,7 @@ def _schedule_job_failure(job: JobPayload, error: Exception, policy: RetryPolicy
     """Apply a host-selected retry/dead-letter outcome without raw error details."""
     job.retry_count += 1
     delay = policy.delay(error, job.retry_count, job.max_attempts)
-    if delay is not None and (
-        not isinstance(delay, timedelta) or delay.total_seconds() <= 0
-    ):
+    if delay is not None and (not isinstance(delay, timedelta) or delay.total_seconds() <= 0):
         raise ValueError("retry policy must return a positive timedelta or None") from error
     if delay is None:
         job.status = "dead_letter"
@@ -358,8 +356,11 @@ async def process_pending_jobs(  # noqa: PLR0913 -- compatibility options are op
             await _emit_job_event(
                 event_sink,
                 JobEvent(
-                    "completed", job.job_id, worker_id or "",
-                    job.retry_count, perf_counter() - started,
+                    "completed",
+                    job.job_id,
+                    worker_id or "",
+                    job.retry_count,
+                    perf_counter() - started,
                 ),
             )
             logger.info("Processed job '%s'.", job.job_id)
@@ -367,8 +368,11 @@ async def process_pending_jobs(  # noqa: PLR0913 -- compatibility options are op
             await _emit_job_event(
                 event_sink,
                 JobEvent(
-                    "ownership_lost", job.job_id, worker_id or "",
-                    job.retry_count, perf_counter() - started,
+                    "ownership_lost",
+                    job.job_id,
+                    worker_id or "",
+                    job.retry_count,
+                    perf_counter() - started,
                 ),
             )
             raise
@@ -378,8 +382,11 @@ async def process_pending_jobs(  # noqa: PLR0913 -- compatibility options are op
             await _emit_job_event(
                 event_sink,
                 JobEvent(
-                    job.status, job.job_id, worker_id or "",
-                    job.retry_count, perf_counter() - started,
+                    job.status,
+                    job.job_id,
+                    worker_id or "",
+                    job.retry_count,
+                    perf_counter() - started,
                     error_type=type(exc).__name__,
                 ),
             )
