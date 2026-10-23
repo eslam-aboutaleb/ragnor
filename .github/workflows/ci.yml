@@ -247,6 +247,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - extra: litellm
+            tests: tests/test_embeddings_litellm.py tests/test_embeddings.py
+          - extra: rerank
+            tests: tests/test_reranker_integration.py
+          - extra: pdf
+            tests: tests/test_connectors.py
+          - extra: directory
+            tests: tests/test_directory_connector.py
+          - extra: web
+            tests: tests/test_http_connectors.py
+          - extra: mcp
+            tests: tests/test_mcp_adapter.py tests/test_mcp_stdio.py
           - extra: pgvector
             tests: tests/test_pgvector_store.py tests/test_pgvector_store_coverage.py tests/test_pgvector_strict_mode.py
           - extra: qdrant
