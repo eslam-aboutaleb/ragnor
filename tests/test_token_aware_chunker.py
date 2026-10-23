@@ -32,11 +32,14 @@ def test_opt_in_exact_chunker_preserves_source_and_token_cap() -> None:
     assert all(0 < len(x.text) <= 10 for x in chunks)
     assert chunks[0].metadata["start_offset"] == 0
     assert chunks[-1].metadata["end_offset"] == len(text)
-    assert all(x.text == text[x.metadata["start_offset"]:x.metadata["end_offset"]] for x in chunks)
+    assert all(
+        x.text == text[x.metadata["start_offset"] : x.metadata["end_offset"]]
+        for x in chunks
+    )
     assert all(x.metadata["start_offset"] < x.metadata["end_offset"] for x in chunks)
     assert all(
         nxt.metadata["start_offset"] > prev.metadata["start_offset"]
-        for prev, nxt in zip(chunks, chunks[1:], strict=True)
+        for prev, nxt in zip(chunks, chunks[1:], strict=False)
     )
     # every character of the source is in at least one generated chunk
     covered = set().union(
@@ -63,7 +66,8 @@ def test_token_chunker_empty_text_returns_empty() -> None:
 
 def test_legacy_word_chunker_unchanged() -> None:
     assert [x.text for x in SlidingWindowChunker(3, 1).chunk("a b c d")] == [
-        "a b c", "c d"
+        "a b c",
+        "c d",
     ]
 
 
