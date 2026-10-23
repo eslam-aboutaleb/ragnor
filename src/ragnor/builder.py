@@ -43,6 +43,7 @@ from ragnor.ingestion.pipeline import (
 )
 from ragnor.ingestion.sources import ListDocumentSource
 from ragnor.ingestion.versioning import IngestionSnapshot
+from ragnor.lifecycle import AsyncCloseable
 from ragnor.retrieval.retriever import HybridRetriever, RetrieverSpec
 from ragnor.retrieval.strategies import HybridRetrieval, RetrievalStrategy
 from ragnor.stores.base import DocumentStore, VectorStore
@@ -295,6 +296,7 @@ class RagnorBuilder:
         self._retrieval_strategy = retrieval_strategy
         self._event_sink = event_sink
         self._production_mode = production_mode
+        self._owned_resources: list[AsyncCloseable] = []
 
     @classmethod
     def local(  # noqa: PLR0913
@@ -421,6 +423,19 @@ class RagnorBuilder:
         self._event_sink = event_sink
         return self
 
+    def with_owned_resource(self, resource: AsyncCloseable) -> RagnorBuilder:
+        """Transfer ownership of an async-closeable resource to the Ragnor facade.
+
+        Unlike injected stores, embedders and sessions, resources registered
+        here are closed by `aclose()` in reverse registration order. A resource
+        is registered once by identity even if passed repeatedly.
+        """
+        if not callable(getattr(resource, "aclose", None)):
+            raise TypeError("owned resource must implement async aclose()")
+        if all(existing is not resource for existing in self._owned_resources):
+            self._owned_resources.append(resource)
+        return self
+
     def with_production_mode(self) -> RagnorBuilder:
         """Refuse known ephemeral defaults when building a persistent application.
 
@@ -534,6 +549,7 @@ class RagnorBuilder:
             retriever=retriever,
             version_store=version_store,
             settings=settings,
+            owned_resources=tuple(self._owned_resources),
         )
 
 
@@ -552,6 +568,8 @@ class Ragnor:
         retriever: HybridRetriever,
         version_store: VersionStore,
         settings: RagSettings,
+        *,
+        owned_resources: tuple[AsyncCloseable, ...] = (),
     ) -> None:
         """Initialize the facade.
 
@@ -562,12 +580,50 @@ class Ragnor:
             version_store: Version storage the pipeline records
                 snapshots in.
             settings: Settings the pipeline and retriever read.
+            owned_resources: Explicitly transferred resources to close when
+                the client exits or calls aclose(); injected resources are
+                borrowed by default.
         """
         self.store = store
         self.pipeline = pipeline
         self.retriever = retriever
         self._version_store = version_store
         self._settings = settings
+        self._owned_resources = owned_resources
+        self._closed = False
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise RuntimeError("Ragnor client is closed")
+
+    async def __aenter__(self) -> Ragnor:
+        """Enter an async context managed facade."""
+        self._ensure_open()
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        """Close explicitly owned resources, leaving borrowed clients open."""
+        await self.aclose()
+
+    async def aclose(self) -> None:
+        """Close owned async resources once, in reverse registration order.
+
+        All resources are attempted even if one raises. Multiple cleanup
+        failures are grouped so no error is silently discarded.
+        """
+        if self._closed:
+            return
+        self._closed = True
+        errors: list[Exception] = []
+        for resource in reversed(self._owned_resources):
+            try:
+                await resource.aclose()
+            except Exception as error:
+                errors.append(error)
+        if len(errors) > 1:
+            raise ExceptionGroup("Ragnor resource cleanup failed", errors)
+        if errors:
+            raise errors[0]
 
     async def ingest(
         self,
@@ -598,6 +654,7 @@ class Ragnor:
             The number of chunks stored, or the stored chunk count
             when the documents were unchanged.
         """
+        self._ensure_open()
         source = ListDocumentSource(documents)
         return await self.pipeline.run(
             source,
@@ -623,6 +680,7 @@ class Ragnor:
         Returns:
             Search results sorted by RRF score.
         """
+        self._ensure_open()
         return await self.retriever.retrieve(query, n_results=n_results, **filters)
 
     async def count(self, **filters: Any) -> int:
@@ -635,4 +693,5 @@ class Ragnor:
         Returns:
             Number of matching documents.
         """
+        self._ensure_open()
         return await self.store.count(**filters)
