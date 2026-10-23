@@ -272,7 +272,9 @@ class PostgresEmbeddingJobStore:
             if saved is None:
                 raise LostJobOwnershipError("publication rejected: expired or stale claim")
             if saved != job.payload:
-                raise LostJobOwnershipError("publication rejected: job payload differs from stored record")
+                raise LostJobOwnershipError(
+                    "publication rejected: job payload differs from stored record"
+                )
             # Serialize document publication even when it has no manifest row yet.
             await session.execute(
                 text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
@@ -287,7 +289,11 @@ class PostgresEmbeddingJobStore:
             )
             record = existing.mappings().one_or_none()
             activate = record is None or revision > record["revision"]
-            same = record is not None and revision == record["revision"] and generation_key == record["generation_key"]
+            same = (
+                record is not None
+                and revision == record["revision"]
+                and generation_key == record["generation_key"]
+            )
             if activate:
                 await session.execute(
                     text(
