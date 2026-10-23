@@ -46,6 +46,15 @@ DDL: tuple[str, ...] = (
        ON ragnor_embedding_jobs(scope, status, next_retry_at, created_at, job_id)""",
     """CREATE INDEX IF NOT EXISTS ragnor_job_lease_idx
        ON ragnor_embedding_jobs(scope, status, lease_expires_at)""",
+    """CREATE TABLE IF NOT EXISTS ragnor_active_generations (
+        scope text NOT NULL,
+        document_id text NOT NULL,
+        revision bigint NOT NULL,
+        generation_key text NOT NULL,
+        activated_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY(scope, document_id)
+    )""",
+
 )
 
 CLAIM_SQL = """
@@ -209,6 +218,105 @@ class PostgresEmbeddingJobStore:
             )
             if result.rowcount != 1:
                 raise LostJobOwnershipError("job lease renewal rejected: stale claim")
+
+    async def get_active_generation(self, document_id: str) -> str | None:
+        """Read the only visible immutable vector generation for this scope."""
+        if not document_id:
+            raise ValueError("document_id must be non-empty")
+        async with self._sessions() as session:
+            result = await session.execute(
+                text(
+                    "SELECT generation_key FROM ragnor_active_generations "
+                    "WHERE scope=:scope AND document_id=:document_id"
+                ),
+                {"scope": self.scope, "document_id": document_id},
+            )
+            return result.scalar_one_or_none()
+
+    async def activate_generation(self, job: JobPayload) -> bool:
+        """Commit an already-staged vector generation and job ack atomically.
+
+        Staged vectors MUST be keyed by the immutable payload generation_key.
+        Readers MUST use get_active_generation() to select a key, never search
+        all staged vectors. This method performs no vector writes and requires
+        a live, generation-fenced lease; an expired owner cannot activate.
+        For a prior source revision, the job completes without rewinding the
+        active generation. External side effects are at-least-once.
+        """
+        params = self._ownership_params(job)
+        scope_payload = job.payload.get("scope")
+        document_id = job.payload.get("document_id")
+        revision = job.payload.get("revision")
+        generation_key = job.payload.get("generation_key")
+        if scope_payload != self.scope:
+            raise ValueError("job scope must match manifest scope")
+        if not isinstance(document_id, str) or not document_id.strip():
+            raise ValueError("document_id must be non-empty")
+        if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
+            raise ValueError("revision must be a non-negative integer")
+        if not isinstance(generation_key, str) or not generation_key.strip():
+            raise ValueError("generation_key must be a non-empty immutable identifier")
+
+        async with self._sessions() as session, session.begin():
+            # Lock the authoritative job row before considering publication.
+            current = await session.execute(
+                text(
+                    "SELECT payload FROM ragnor_embedding_jobs WHERE "
+                    "scope=:scope AND job_id=:job_id AND status='processing' "
+                    "AND locked_by=:owner AND claim_generation=:generation "
+                    "AND lease_expires_at>now() FOR UPDATE"
+                ),
+                params,
+            )
+            saved = current.scalar_one_or_none()
+            if saved is None:
+                raise LostJobOwnershipError("publication rejected: expired or stale claim")
+            if saved != job.payload:
+                raise LostJobOwnershipError("publication rejected: job payload differs from stored record")
+            # Serialize document publication even when it has no manifest row yet.
+            await session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+                {"key": self.scope + ":" + document_id},
+            )
+            existing = await session.execute(
+                text(
+                    "SELECT revision, generation_key FROM ragnor_active_generations "
+                    "WHERE scope=:scope AND document_id=:document_id"
+                ),
+                {"scope": self.scope, "document_id": document_id},
+            )
+            record = existing.mappings().one_or_none()
+            activate = record is None or revision > record["revision"]
+            same = record is not None and revision == record["revision"] and generation_key == record["generation_key"]
+            if activate:
+                await session.execute(
+                    text(
+                        "INSERT INTO ragnor_active_generations "
+                        "(scope, document_id, revision, generation_key) "
+                        "VALUES (:scope, :document_id, :revision, :generation_key) "
+                        "ON CONFLICT (scope, document_id) DO UPDATE "
+                        "SET revision=EXCLUDED.revision, generation_key=EXCLUDED.generation_key, "
+                        "activated_at=now() "
+                        "WHERE ragnor_active_generations.revision < EXCLUDED.revision"
+                    ),
+                    {"scope": self.scope, "document_id": document_id,
+                     "revision": revision, "generation_key": generation_key},
+                )
+            ack = await session.execute(
+                text(
+                    "UPDATE ragnor_embedding_jobs "
+                    "SET status='completed', completed_at=now(), "
+                    "locked_at=NULL, lease_expires_at=NULL, locked_by=NULL "
+                    "WHERE scope=:scope AND job_id=:job_id AND status='processing' "
+                    "AND locked_by=:owner AND claim_generation=:generation "
+                    "AND lease_expires_at>now()"
+                ),
+                params,
+            )
+            if ack.rowcount != 1:
+                raise LostJobOwnershipError("publication completion rejected: stale claim")
+        job.status = "completed"
+        return activate or same
 
     async def mark_completed(self, job: JobPayload) -> None:
         params = self._ownership_params(job)
