@@ -11,7 +11,6 @@ side effects exactly once or safe from a stale processor.
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
@@ -74,16 +73,6 @@ UPDATE ragnor_embedding_jobs AS job
 RETURNING job.*
 """
 
-ACK_WHERE = """
-scope=:scope
-AND job_id=:job_id
-AND status='processing'
-AND locked_by=:owner
-AND claim_generation=:generation
-AND lease_expires_at>now()
-"""
-
-
 class PostgresEmbeddingJobStore:
     """Durable scoped PostgreSQL adapter, with no implicit table creation.
 
@@ -132,9 +121,8 @@ class PostgresEmbeddingJobStore:
             # Caller-owned transaction: SQL executes/flushes, but never commits.
             await session.execute(sql, params)
         else:
-            async with self._sessions() as owned:
-                async with owned.begin():
-                    await owned.execute(sql, params)
+            async with self._sessions() as owned, owned.begin():
+                await owned.execute(sql, params)
 
     @staticmethod
     def _from_row(row: Any) -> JobPayload:
@@ -163,18 +151,17 @@ class PostgresEmbeddingJobStore:
             raise ValueError("worker_id is required for fenced claims")
         if limit == 0:
             return []
-        async with self._sessions() as session:
-            async with session.begin():
-                rows = await session.execute(
-                    text(CLAIM_SQL),
-                    {
-                        "scope": self.scope,
-                        "worker": worker_id,
-                        "limit": limit,
-                        "lease_seconds": self.lease_seconds,
-                    },
-                )
-                return [self._from_row(row) for row in rows.mappings().all()]
+        async with self._sessions() as session, session.begin():
+            rows = await session.execute(
+                text(CLAIM_SQL),
+                {
+                    "scope": self.scope,
+                    "worker": worker_id,
+                    "limit": limit,
+                    "lease_seconds": self.lease_seconds,
+                },
+            )
+            return [self._from_row(row) for row in rows.mappings().all()]
 
     async def claim_pending(self, limit: int, worker_id: str) -> list[JobPayload]:
         raise RuntimeError(
@@ -199,19 +186,20 @@ class PostgresEmbeddingJobStore:
 
     async def mark_completed(self, job: JobPayload) -> None:
         params = self._ownership_params(job)
-        async with self._sessions() as session:
-            async with session.begin():
-                result = await session.execute(
-                    text(
-                        "UPDATE ragnor_embedding_jobs "
-                        "SET status='completed', completed_at=now(), "
-                        "locked_at=NULL, lease_expires_at=NULL, locked_by=NULL "
-                        "WHERE " + ACK_WHERE
-                    ),
-                    params,
-                )
-                if result.rowcount != 1:
-                    raise LostJobOwnershipError("job completion rejected: stale claim")
+        async with self._sessions() as session, session.begin():
+            result = await session.execute(
+                text(
+                    "UPDATE ragnor_embedding_jobs "
+                    "SET status='completed', completed_at=now(), "
+                    "locked_at=NULL, lease_expires_at=NULL, locked_by=NULL "
+                    "WHERE scope=:scope AND job_id=:job_id AND status='processing' "
+                    "AND locked_by=:owner AND claim_generation=:generation "
+                    "AND lease_expires_at>now()"
+                ),
+                params,
+            )
+            if result.rowcount != 1:
+                raise LostJobOwnershipError("job completion rejected: stale claim")
         job.status = "completed"
 
     async def mark_failed(self, job: JobPayload, error: Exception) -> None:
@@ -229,37 +217,37 @@ class PostgresEmbeddingJobStore:
             {"status": job.status, "detail": detail,
              "retries": job.retry_count, "next_retry": job.next_retry_at}
         )
-        async with self._sessions() as session:
-            async with session.begin():
-                result = await session.execute(
-                    text(
-                        "UPDATE ragnor_embedding_jobs SET status=:status, "
-                        "status_detail=:detail, retry_count=:retries, "
-                        "next_retry_at=:next_retry, "
-                        "locked_at=NULL, lease_expires_at=NULL, locked_by=NULL "
-                        "WHERE " + ACK_WHERE
-                    ),
-                    params,
-                )
-                if result.rowcount != 1:
-                    raise LostJobOwnershipError("job failure rejected: stale claim")
+        async with self._sessions() as session, session.begin():
+            result = await session.execute(
+                text(
+                    "UPDATE ragnor_embedding_jobs SET status=:status, "
+                    "status_detail=:detail, retry_count=:retries, "
+                    "next_retry_at=:next_retry, "
+                    "locked_at=NULL, lease_expires_at=NULL, locked_by=NULL "
+                    "WHERE scope=:scope AND job_id=:job_id AND status='processing' "
+                    "AND locked_by=:owner AND claim_generation=:generation "
+                    "AND lease_expires_at>now()"
+                ),
+                params,
+            )
+            if result.rowcount != 1:
+                raise LostJobOwnershipError("job failure rejected: stale claim")
 
     async def reclaim_stale(self, stale_after_seconds: float | None = None) -> int:
         if stale_after_seconds is not None and stale_after_seconds < 0:
             raise ValueError("stale_after_seconds must not be negative")
-        async with self._sessions() as session:
-            async with session.begin():
-                result = await session.execute(
-                    text(
-                        "UPDATE ragnor_embedding_jobs SET status='pending', "
-                        "status_detail=NULL, locked_by=NULL, locked_at=NULL, "
-                        "lease_expires_at=NULL, claim_generation=claim_generation+1 "
-                        "WHERE scope=:scope AND status='processing' "
-                        "AND lease_expires_at IS NOT NULL AND lease_expires_at<=now()"
-                    ),
-                    {"scope": self.scope},
-                )
-                return int(result.rowcount)
+        async with self._sessions() as session, session.begin():
+            result = await session.execute(
+                text(
+                    "UPDATE ragnor_embedding_jobs SET status='pending', "
+                    "status_detail=NULL, locked_by=NULL, locked_at=NULL, "
+                    "lease_expires_at=NULL, claim_generation=claim_generation+1 "
+                    "WHERE scope=:scope AND status='processing' "
+                    "AND lease_expires_at IS NOT NULL AND lease_expires_at<=now()"
+                ),
+                {"scope": self.scope},
+            )
+            return int(result.rowcount)
 
     async def get_status_counts(self) -> dict[str, int]:
         async with self._sessions() as session:
