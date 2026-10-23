@@ -184,6 +184,34 @@ class PostgresEmbeddingJobStore:
             "generation": job.claim_generation,
         }
 
+    async def renew_lease(
+        self, job: JobPayload, *, lease_seconds: float | None = None
+    ) -> None:
+        """Extend a live lease only for its current scope/owner/generation.
+
+        Uses PostgreSQL server time so host clock skew cannot incorrectly
+        renew a reclaimed or expired worker. This method is opt-in: the host
+        must invoke it while processing long jobs.
+        """
+        duration = self.lease_seconds if lease_seconds is None else lease_seconds
+        if duration <= 0:
+            raise ValueError("lease_seconds must be positive")
+        params = self._ownership_params(job)
+        params["lease_seconds"] = duration
+        async with self._sessions() as session, session.begin():
+            result = await session.execute(
+                text(
+                    "UPDATE ragnor_embedding_jobs "
+                    "SET lease_expires_at=now() + (:lease_seconds * interval '1 second') "
+                    "WHERE scope=:scope AND job_id=:job_id AND status='processing' "
+                    "AND locked_by=:owner AND claim_generation=:generation "
+                    "AND lease_expires_at>now()"
+                ),
+                params,
+            )
+            if result.rowcount != 1:
+                raise LostJobOwnershipError("job lease renewal rejected: stale claim")
+
     async def mark_completed(self, job: JobPayload) -> None:
         params = self._ownership_params(job)
         async with self._sessions() as session, session.begin():
