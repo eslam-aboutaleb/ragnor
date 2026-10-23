@@ -36,7 +36,10 @@ from ragnor.chunking import SlidingWindowChunker
 from ragnor.chunking.base import Chunker
 from ragnor.config import RagSettings
 from ragnor.embeddings.base import EmbeddingFunction
-from ragnor.embeddings.dimensions import register_dimension
+from ragnor.embeddings.dimensions import (
+    has_registered_embedding_dimension,
+    register_dimension,
+)
 from ragnor.ingestion.pipeline import (
     IngestionPipeline,
     VersionRecord,
@@ -481,6 +484,30 @@ class RagnorBuilder:
             raise ValueError(
                 "production mode requires declared isolation_scope capability; "
                 "configure a backend with verified tenant filtering"
+            )
+
+        model = getattr(self._settings, "embedding_model", self._embedding_model)
+        if not isinstance(model, str) or not model.strip():
+            raise ValueError("production embedding_model must be a non-empty string")
+        if self._embedding_dim is not None and (
+            not isinstance(self._embedding_dim, int)
+            or isinstance(self._embedding_dim, bool)
+            or self._embedding_dim <= 0
+        ):
+            raise ValueError("production embedding_dim must be a positive integer")
+        if self._embedding_dim is None and not has_registered_embedding_dimension(model):
+            raise ValueError(
+                "production embedding dimension must be explicitly registered "
+                "for an unknown embedding_model; refusing implicit fallback"
+            )
+        declared = getattr(self._store, "embedding_dim", None)
+        if (
+            declared is not None
+            and self._embedding_dim is not None
+            and declared != self._embedding_dim
+        ):
+            raise ValueError(
+                "production store embedding dimension does not match the configured embedding_dim"
             )
 
     async def build(self) -> Ragnor:

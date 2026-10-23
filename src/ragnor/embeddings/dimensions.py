@@ -42,6 +42,11 @@ def register_dimension(model: str, dimension: int) -> None:
     _DIMENSIONS[model] = dimension
 
 
+def has_registered_embedding_dimension(model: str) -> bool:
+    """Check if dimension is declared, without using fallback or logging."""
+    return model in _DIMENSIONS
+
+
 def get_embedding_dimension(model: str | None = None) -> int:
     """Return the vector dimension for an embedding model.
 
