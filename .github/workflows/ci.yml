@@ -52,9 +52,14 @@ jobs:
         run: python -m pytest -q tests/test_architecture_contracts.py
 
   sdk-consumer:
-    name: Installed-wheel SDK consumer
+    name: Installed SDK consumer
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+        artifact: ["wheel", "sdist"]
     permissions:
       contents: read
     steps:
@@ -63,16 +68,20 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
-      - name: Build distributable wheel
+          python-version: ${{ matrix.python-version }}
+      - name: Build distributions
         run: |
           python -m pip install build
-          python -m build --wheel
+          python -m build --wheel --sdist
       - name: Install and exercise SDK outside checkout
         run: |
           set -euo pipefail
           python -m venv "$RUNNER_TEMP/ragnor-sdk-venv"
-          "$RUNNER_TEMP/ragnor-sdk-venv/bin/python" -m pip install --no-deps dist/ragnor-*.whl
+          if [ "${{ matrix.artifact }}" = "wheel" ]; then
+            "$RUNNER_TEMP/ragnor-sdk-venv/bin/python" -m pip install --no-deps dist/ragnor-*.whl
+          else
+            "$RUNNER_TEMP/ragnor-sdk-venv/bin/python" -m pip install --no-deps dist/ragnor-*.tar.gz
+          fi
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/ragnor-sdk-venv/bin/python" "$GITHUB_WORKSPACE/examples/sdk_consumer_smoke.py"
 
@@ -111,6 +120,27 @@ jobs:
           python -m pip install "asyncpg>=0.29" "pytest>=8.3" "pytest-asyncio>=0.24"
       - name: Verify transactional SQL and real advisory locking
         run: python -m pytest -q tests/integration/test_postgres_adapter_contract.py
+
+  adapter-contracts:
+    name: External adapter conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install core and test runner
+        run: |
+          python -m pip install -e .
+          python -m pip install "pytest>=8.3" "pytest-asyncio>=0.24"
+      - name: Verify host adapters and fail-closed contracts
+        run: |
+          python -m pytest -q tests/test_external_adapter_conformance.py tests/test_extended_adapter_conformance.py
 
   security:
     name: Shared security analysis
@@ -189,7 +219,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-    needs: [python, architecture-contracts, sdk-consumer, postgres-contracts, security, workflow-validation, optional-backends]
+    needs: [python, architecture-contracts, sdk-consumer, adapter-contracts, postgres-contracts, security, workflow-validation, optional-backends]
     if: always()
     steps:
       - name: Require every qualification job to pass
