@@ -1,0 +1,29 @@
+name: Pull request description contract
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  description-contract:
+    name: PR description schema
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Unit regression tests for template validation
+        run: |
+          python -m pip install "pytest>=8,<10"
+          python -m pytest -q tests/test_pr_description_contract.py
+      - name: Validate pull request body
+        run: python scripts/check_pr_description.py --event "$GITHUB_EVENT_PATH"
