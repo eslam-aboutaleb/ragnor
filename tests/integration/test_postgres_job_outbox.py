@@ -130,3 +130,53 @@ async def test_job_runner_uses_atomic_claim_capability() -> None:
         assert await process_pending_jobs(store, processor, worker_id="atomic-worker") == 0
     finally:
         await engine.dispose()
+
+
+async def test_fenced_lease_renewal_extends_deadline_and_rejects_expired_owner() -> None:
+    engine, sessions = await _new_store()
+    scope = f"test-{uuid4()}"
+    store = PostgresEmbeddingJobStore(sessions, scope=scope, lease_seconds=5)
+    try:
+        await store.enqueue({"scope": scope, "idempotency_key": "lease"})
+        job = (await store.claim_and_mark_processing(1, "owner"))[0]
+        await store.renew_lease(job, lease_seconds=35)
+        async with sessions() as session:
+            result = await session.execute(
+                text(
+                    "SELECT lease_expires_at > now() + interval '20 seconds' "
+                    "FROM ragnor_embedding_jobs WHERE job_id=:id"
+                ),
+                {"id": job.job_id},
+            )
+            assert result.scalar_one() is True
+        async with sessions() as session, session.begin():
+            await session.execute(
+                text("UPDATE ragnor_embedding_jobs SET lease_expires_at=now()-interval '1 second' WHERE job_id=:id"),
+                {"id": job.job_id},
+            )
+        with pytest.raises(LostJobOwnershipError):
+            await store.renew_lease(job, lease_seconds=35)
+    finally:
+        await engine.dispose()
+
+
+async def test_tenants_with_identical_idempotency_keys_are_isolated() -> None:
+    engine, sessions = await _new_store()
+    left = PostgresEmbeddingJobStore(sessions, scope=f"left-{uuid4()}")
+    right = PostgresEmbeddingJobStore(sessions, scope=f"right-{uuid4()}")
+    try:
+        await left.enqueue({"scope": left.scope, "idempotency_key": "same"})
+        await right.enqueue({"scope": right.scope, "idempotency_key": "same"})
+        left_job = (await left.claim_and_mark_processing(1, "owner"))[0]
+        right_job = (await right.claim_and_mark_processing(1, "owner"))[0]
+        assert left_job.job_id != right_job.job_id
+        with pytest.raises(LostJobOwnershipError):
+            await right.mark_completed(left_job)
+        with pytest.raises(LostJobOwnershipError):
+            await right.renew_lease(left_job)
+        await left.mark_completed(left_job)
+        await right.mark_completed(right_job)
+        assert await left.get_status_counts() == {"completed": 1}
+        assert await right.get_status_counts() == {"completed": 1}
+    finally:
+        await engine.dispose()
