@@ -1,4 +1,5 @@
 """CodeQL regression: dependency graph and executable protocol declarations."""
+
 from __future__ import annotations
 
 import ast
@@ -17,11 +18,7 @@ def test_session_port_identity_is_preserved() -> None:
 def test_pure_sql_port_imports_no_session_or_vendor() -> None:
     for path in ("db/ports.py", "db/sql_factory.py"):
         module = ast.parse((ROOT / path).read_text(encoding="utf-8"))
-        imported = {
-            node.module
-            for node in ast.walk(module)
-            if isinstance(node, ast.ImportFrom)
-        }
+        imported = {node.module for node in ast.walk(module) if isinstance(node, ast.ImportFrom)}
         assert "ragnor.db.session" not in imported
 
 
