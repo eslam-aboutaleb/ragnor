@@ -107,6 +107,11 @@ async def test_invalid_owned_resource_rejected_before_build() -> None:
         builder.with_owned_resource(object())
 
 
+async def fail_in_context() -> None:
+    """Raise during async context body to exercise guaranteed cleanup."""
+    raise ValueError("body")
+
+
 @pytest.mark.asyncio
 async def test_async_context_cleans_up_after_body_exception() -> None:
     events: list[str] = []
@@ -117,7 +122,7 @@ async def test_async_context_cleans_up_after_body_exception() -> None:
     )
     with pytest.raises(ValueError, match="body"):
         async with rag:
-            raise ValueError("body")
+            await fail_in_context()
     assert events == ["owned"]
     with pytest.raises(RuntimeError, match="closed"):
         await rag.__aenter__()

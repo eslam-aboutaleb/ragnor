@@ -94,7 +94,7 @@ class EmbeddingJobStore(Protocol):
         a due retry and attempts remaining), ordered by creation time,
         using ``FOR UPDATE SKIP LOCKED`` so concurrent workers never
         claim the same row."""
-        ...
+        raise NotImplementedError
 
     async def mark_processing(self, jobs: list[JobPayload], worker_id: str) -> list[JobPayload]:
         """Transition jobs to ``processing`` and stamp the lock.
@@ -103,19 +103,19 @@ class EmbeddingJobStore(Protocol):
         worker claimed in the meantime is dropped so it is never
         processed twice.
         """
-        ...
+        raise NotImplementedError
 
     async def mark_completed(self, job: JobPayload) -> None:
         """Persist a successfully processed job as ``completed``."""
-        ...
+        raise NotImplementedError
 
     async def mark_failed(self, job: JobPayload, error: Exception) -> None:
         """Persist a failed job's retry/dead-letter transition."""
-        ...
+        raise NotImplementedError
 
     async def reclaim_stale(self, stale_after_seconds: float | None = None) -> int:
         """Reset jobs abandoned in ``processing`` back to ``pending``."""
-        ...
+        raise NotImplementedError
 
     async def enqueue(self, payload: dict[str, Any], session: Any = None) -> None:
         """Write a new pending job row.
@@ -125,7 +125,7 @@ class EmbeddingJobStore(Protocol):
         land in one transaction. Without a session the store opens its
         own transaction and commits.
         """
-        ...
+        raise NotImplementedError
 
 
 class LostJobOwnershipError(RuntimeError):
@@ -138,7 +138,7 @@ class AtomicClaimJobStore(Protocol):
 
     async def claim_and_mark_processing(self, limit: int, worker_id: str) -> list[JobPayload]:
         """Claim and transition jobs in one durable transaction."""
-        ...
+        raise NotImplementedError
 
 
 @runtime_checkable
@@ -147,7 +147,7 @@ class LeaseRenewalJobStore(Protocol):
 
     async def renew_lease(self, job: JobPayload, *, lease_seconds: float | None = None) -> None:
         """Renew only the active owner and claim-generation lease."""
-        ...
+        raise NotImplementedError
 
 
 async def _process_with_heartbeat(
@@ -177,7 +177,7 @@ class JobProcessor(Protocol):
 
     async def process(self, job: JobPayload) -> None:
         """Process one claimed job. Raises on failure."""
-        ...
+        raise NotImplementedError
 
 
 async def process_pending_jobs(
