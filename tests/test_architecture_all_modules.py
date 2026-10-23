@@ -45,7 +45,7 @@ def _inner_sources() -> list[Path]:
     return [
         file
         for file in ROOT.rglob("*.py")
-        if not (rel := file.relative_to(ROOT).as_posix()) in EXTERNAL_ADAPTERS
+        if (rel := file.relative_to(ROOT).as_posix()) not in EXTERNAL_ADAPTERS
         and rel not in EXTERNAL_NAMES
         and not any(rel.startswith(prefix) for prefix in EXTERNAL_PREFIXES)
         and (rel.startswith(INNER_DIRS) or rel in {"config.py", "lifecycle.py", "types.py", "validation.py"})
@@ -60,9 +60,8 @@ def _eager_vendor_imports(code: str) -> list[str]:
     for node in tree.body:
         if isinstance(node, ast.Import):
             results.extend(alias.name for alias in node.names if alias.name.split(".")[0] in VENDOR_ROOTS)
-        elif isinstance(node, ast.ImportFrom):
-            if (node.module or "").split(".")[0] in VENDOR_ROOTS:
-                results.append(node.module or "")
+        elif isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] in VENDOR_ROOTS:
+            results.append(node.module or "")
     return results
 
 
