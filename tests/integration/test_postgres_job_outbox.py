@@ -95,10 +95,12 @@ async def test_caller_transaction_enqueues_atomically_and_rolls_back() -> None:
                 await store.enqueue(
                     {"scope": scope, "idempotency_key": "rolled-back"}, session=session
                 )
-                assert (await session.execute(
-                    text("SELECT count(*) FROM ragnor_embedding_jobs WHERE scope=:scope"),
-                    {"scope": scope},
-                )).scalar_one() == 1
+                assert (
+                    await session.execute(
+                        text("SELECT count(*) FROM ragnor_embedding_jobs WHERE scope=:scope"),
+                        {"scope": scope},
+                    )
+                ).scalar_one() == 1
                 await session.rollback()
         assert await store.claim_and_mark_processing(10, "owner") == []
         await store.enqueue({"scope": scope, "idempotency_key": "one"})
@@ -112,6 +114,7 @@ async def test_job_runner_uses_atomic_claim_capability() -> None:
     engine, sessions = await _new_store()
     scope = f"test-{uuid4()}"
     store = PostgresEmbeddingJobStore(sessions, scope=scope)
+
     class Processor:
         def __init__(self) -> None:
             self.calls = 0

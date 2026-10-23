@@ -73,6 +73,7 @@ UPDATE ragnor_embedding_jobs AS job
 RETURNING job.*
 """
 
+
 class PostgresEmbeddingJobStore:
     """Durable scoped PostgreSQL adapter, with no implicit table creation.
 
@@ -108,8 +109,11 @@ class PostgresEmbeddingJobStore:
             raise ValueError("max_attempts must be a positive integer")
         encoded = json.dumps(payload, ensure_ascii=False, allow_nan=False)
         params = {
-            "id": str(uuid4()), "scope": self.scope,
-            "key": key, "payload": encoded, "max_attempts": attempts,
+            "id": str(uuid4()),
+            "scope": self.scope,
+            "key": key,
+            "payload": encoded,
+            "max_attempts": attempts,
         }
         sql = text(
             """INSERT INTO ragnor_embedding_jobs
@@ -142,9 +146,7 @@ class PostgresEmbeddingJobStore:
             claim_owner=row["locked_by"],
         )
 
-    async def claim_and_mark_processing(
-        self, limit: int, worker_id: str
-    ) -> list[JobPayload]:
+    async def claim_and_mark_processing(self, limit: int, worker_id: str) -> list[JobPayload]:
         if limit < 0:
             raise ValueError("claim limit must not be negative")
         if not worker_id or not worker_id.strip():
@@ -169,9 +171,7 @@ class PostgresEmbeddingJobStore:
             "not a two-step claim_pending()/mark_processing() sequence"
         )
 
-    async def mark_processing(
-        self, jobs: list[JobPayload], worker_id: str
-    ) -> list[JobPayload]:
+    async def mark_processing(self, jobs: list[JobPayload], worker_id: str) -> list[JobPayload]:
         raise RuntimeError("PostgreSQL claims cannot be transitioned in a separate call")
 
     def _ownership_params(self, job: JobPayload) -> dict[str, Any]:
@@ -214,8 +214,12 @@ class PostgresEmbeddingJobStore:
             else f"Retry scheduled ({type(error).__name__})"
         )
         params.update(
-            {"status": job.status, "detail": detail,
-             "retries": job.retry_count, "next_retry": job.next_retry_at}
+            {
+                "status": job.status,
+                "detail": detail,
+                "retries": job.retry_count,
+                "next_retry": job.next_retry_at,
+            }
         )
         async with self._sessions() as session, session.begin():
             result = await session.execute(

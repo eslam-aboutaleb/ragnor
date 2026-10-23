@@ -135,9 +135,7 @@ class LostJobOwnershipError(RuntimeError):
 class AtomicClaimJobStore(Protocol):
     """Optional stronger claim contract for durable multi-worker adapters."""
 
-    async def claim_and_mark_processing(
-        self, limit: int, worker_id: str
-    ) -> list[JobPayload]:
+    async def claim_and_mark_processing(self, limit: int, worker_id: str) -> list[JobPayload]:
         """Claim and transition jobs in one durable transaction."""
         ...
 
