@@ -201,9 +201,7 @@ async def process_pending_jobs(
             job.retry_count += 1
             if job.retry_count >= job.max_attempts:
                 job.status = "dead_letter"
-                job.status_detail = (
-                    f"Exhausted {job.max_attempts} attempts ({type(exc).__name__})"
-                )
+                job.status_detail = f"Exhausted {job.max_attempts} attempts ({type(exc).__name__})"
                 job.next_retry_at = None
                 job.locked_at = None
                 job.locked_by = None
