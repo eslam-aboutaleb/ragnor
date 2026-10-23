@@ -61,6 +61,8 @@ class JobPayload:
     locked_by: str | None = None
     created_at: datetime | None = None
     completed_at: datetime | None = None
+    claim_generation: int = 0
+    claim_owner: str | None = None
 
 
 def claim_jobs(jobs: list[JobPayload], worker_id: str, now: datetime) -> list[JobPayload]:
@@ -125,6 +127,21 @@ class EmbeddingJobStore(Protocol):
         ...
 
 
+class LostJobOwnershipError(RuntimeError):
+    """Stale owner/lease/generation cannot alter an outbox job."""
+
+
+@runtime_checkable
+class AtomicClaimJobStore(Protocol):
+    """Optional stronger claim contract for durable multi-worker adapters."""
+
+    async def claim_and_mark_processing(
+        self, limit: int, worker_id: str
+    ) -> list[JobPayload]:
+        """Claim and transition jobs in one durable transaction."""
+        ...
+
+
 @runtime_checkable
 class JobProcessor(Protocol):
     """Per-job work: embed the job's payload and upsert it."""
@@ -161,8 +178,13 @@ async def process_pending_jobs(
     Returns:
         int: Number of jobs successfully processed.
     """
-    jobs = await store.claim_pending(limit, worker_id or "")
-    jobs = await store.mark_processing(jobs, worker_id or "")
+    if isinstance(store, AtomicClaimJobStore):
+        jobs = await store.claim_and_mark_processing(limit, worker_id or "")
+    else:
+        # Backward compatibility with local/legacy single-host stores. Two
+        # separate calls do not promise distributed atomicity.
+        jobs = await store.claim_pending(limit, worker_id or "")
+        jobs = await store.mark_processing(jobs, worker_id or "")
 
     processed = 0
     for job in jobs:
@@ -174,6 +196,9 @@ async def process_pending_jobs(
             await store.mark_completed(job)
             processed += 1
             logger.info("Processed job '%s'.", job.job_id)
+        except LostJobOwnershipError:
+            # Do not turn an ownership conflict into a write by a stale worker.
+            raise
         except Exception as exc:
             job.retry_count += 1
             if job.retry_count >= job.max_attempts:
