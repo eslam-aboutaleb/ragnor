@@ -144,29 +144,89 @@ class HostReranker:
 
 
 class HostManifestAdapter:
-    """Host-defined port wrapper: exercises injection, not SQL atomicity."""
+    """Host-defined port implementation; delegates local-only persistence."""
 
     def __init__(self) -> None:
         self.backend = InMemoryManifestStore()
 
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self.backend, name)
+    async def get(self, scope: str, document_id: str) -> ManifestRecord | None:
+        return await self.backend.get(scope, document_id)
+
+    async def list(self, scope: str, status: Any = None) -> list[ManifestRecord]:
+        return await self.backend.list(scope, status)
+
+    async def put(self, record: ManifestRecord) -> None:
+        await self.backend.put(record)
+
+    async def compare_and_swap(self, record: ManifestRecord, expected_fence: int) -> bool:
+        return await self.backend.compare_and_swap(record, expected_fence)
+
+    async def compare_and_swap_many(
+        self, updates: list[tuple[ManifestRecord, int]]
+    ) -> bool:
+        return await self.backend.compare_and_swap_many(updates)
+
+    async def delete(self, scope: str, document_id: str) -> bool:
+        return await self.backend.delete(scope, document_id)
 
 
 class HostSyncStateAdapter:
     def __init__(self) -> None:
         self.backend = InMemorySyncStateStore()
 
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self.backend, name)
+    async def acquire_lease(
+        self, scope: str, owner: str, ttl_seconds: float = 30.0
+    ) -> Any:
+        return await self.backend.acquire_lease(scope, owner, ttl_seconds)
+
+    async def renew_lease(self, token: Any, ttl_seconds: float = 30.0) -> Any:
+        return await self.backend.renew_lease(token, ttl_seconds)
+
+    async def release_lease(self, token: Any) -> bool:
+        return await self.backend.release_lease(token)
+
+    async def validate_token(self, token: Any) -> bool:
+        return await self.backend.validate_token(token)
+
+    async def get_active_generation(self, scope: str) -> int:
+        return await self.backend.get_active_generation(scope)
+
+    async def advance_generation(self, scope: str, expected_generation: int) -> int:
+        return await self.backend.advance_generation(scope, expected_generation)
+
+    async def get_checkpoint(self, scope: str) -> dict[str, Any] | None:
+        return await self.backend.get_checkpoint(scope)
+
+    async def save_checkpoint(
+        self, scope: str, checkpoint: dict[str, Any], token: Any
+    ) -> bool:
+        return await self.backend.save_checkpoint(scope, checkpoint, token)
+
+    def fenced(self, token: Any) -> Any:
+        return self.backend.fenced(token)
 
 
 class HostJobStoreAdapter:
     def __init__(self) -> None:
         self.backend = InMemoryEmbeddingJobStore()
 
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self.backend, name)
+    async def claim_pending(self, limit: int, worker_id: str) -> Any:
+        return await self.backend.claim_pending(limit, worker_id)
+
+    async def mark_processing(self, jobs: Any, worker_id: str) -> Any:
+        return await self.backend.mark_processing(jobs, worker_id)
+
+    async def mark_completed(self, job: Any) -> None:
+        await self.backend.mark_completed(job)
+
+    async def mark_failed(self, job: Any, error: Exception) -> None:
+        await self.backend.mark_failed(job, error)
+
+    async def reclaim_stale(self, stale_after_seconds: float | None = None) -> int:
+        return await self.backend.reclaim_stale(stale_after_seconds)
+
+    async def enqueue(self, payload: dict[str, Any], session: Any = None) -> None:
+        await self.backend.enqueue(payload, session)
 
 
 class HostRetriever:
@@ -197,8 +257,8 @@ async def test_external_document_store_observes_filter_and_delete_contracts() ->
     store = HostStorageAdapter()
     assert isinstance(store, DocumentStore)
     await store.upsert([
-        {"id": "a", "text": "alpha", "embedding": [1.0, 0.0], "tenant": "a"},
-        {"id": "b", "text": "beta", "embedding": [0.0, 1.0], "tenant": "b"},
+        {"id": "a", "text": "alpha", "embedding": [1.0, 0.0], "metadata": {"tenant": "a"}},
+        {"id": "b", "text": "beta", "embedding": [0.0, 1.0], "metadata": {"tenant": "b"}},
     ])
     assert await store.count(tenant="a") == 1
     rows = await store.get(filters={"tenant": "a"})
