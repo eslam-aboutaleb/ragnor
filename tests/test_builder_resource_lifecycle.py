@@ -27,9 +27,7 @@ class HostEmbedder:
 
 
 class OwnedResource:
-    def __init__(
-        self, name: str, events: list[str], error: Exception | None = None
-    ) -> None:
+    def __init__(self, name: str, events: list[str], error: Exception | None = None) -> None:
         self.name = name
         self.events = events
         self.error = error
@@ -73,9 +71,7 @@ async def test_owned_resources_close_in_reverse_order_exactly_once() -> None:
 async def test_injected_host_resources_are_borrowed_unless_explicitly_owned() -> None:
     embedder = HostEmbedder()
     store = BorrowedStore()
-    rag = await RagnorBuilder.local(
-        embedder, embedding_dim=2, store=store
-    ).build()
+    rag = await RagnorBuilder.local(embedder, embedding_dim=2, store=store).build()
     async with rag:
         assert await rag.count() == 0
     assert embedder.close_calls == 0
