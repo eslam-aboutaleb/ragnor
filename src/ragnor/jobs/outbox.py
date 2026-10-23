@@ -24,6 +24,7 @@ its own transaction and commits.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -141,6 +142,38 @@ class AtomicClaimJobStore(Protocol):
 
 
 @runtime_checkable
+class LeaseRenewalJobStore(Protocol):
+    """Optional host-driven lease extension for long-running jobs."""
+
+    async def renew_lease(
+        self, job: JobPayload, *, lease_seconds: float | None = None
+    ) -> None:
+        """Renew only the active owner and claim-generation lease."""
+        ...
+
+
+async def _process_with_heartbeat(
+    store: LeaseRenewalJobStore,
+    processor: JobProcessor,
+    job: JobPayload,
+    interval: float,
+) -> None:
+    """Stop processing if renewal fails, without making a stale ack."""
+    work = asyncio.create_task(processor.process(job))
+    try:
+        while True:
+            completed, _ = await asyncio.wait({work}, timeout=interval)
+            if completed:
+                await work
+                return
+            await store.renew_lease(job)
+    finally:
+        if not work.done():
+            work.cancel()
+            await asyncio.gather(work, return_exceptions=True)
+
+
+@runtime_checkable
 class JobProcessor(Protocol):
     """Per-job work: embed the job's payload and upsert it."""
 
@@ -154,6 +187,7 @@ async def process_pending_jobs(
     processor: JobProcessor,
     limit: int = 10,
     worker_id: str | None = None,
+    heartbeat_interval_seconds: float | None = None,
 ) -> int:
     """Process pending jobs.
 
@@ -172,10 +206,22 @@ async def process_pending_jobs(
         processor: The per-job processor.
         limit: Maximum number of jobs to process in one batch.
         worker_id: Identity stamped into ``locked_by``.
+        heartbeat_interval_seconds: Optional positive renewal cadence. When
+            supplied, the adapter MUST implement ``renew_lease`` and the
+            processor is cancelled if the claim is lost.
 
     Returns:
         int: Number of jobs successfully processed.
     """
+    if heartbeat_interval_seconds is not None:
+        if heartbeat_interval_seconds <= 0:
+            raise ValueError("heartbeat_interval_seconds must be positive")
+        if not isinstance(store, LeaseRenewalJobStore):
+            raise ValueError("requested heartbeat requires a renew_lease job-store adapter")
+        lease = getattr(store, "lease_seconds", None)
+        if isinstance(lease, (int, float)) and heartbeat_interval_seconds >= lease:
+            raise ValueError("heartbeat_interval_seconds must be shorter than lease_seconds")
+
     if isinstance(store, AtomicClaimJobStore):
         jobs = await store.claim_and_mark_processing(limit, worker_id or "")
     else:
@@ -187,7 +233,12 @@ async def process_pending_jobs(
     processed = 0
     for job in jobs:
         try:
-            await processor.process(job)
+            if heartbeat_interval_seconds is None:
+                await processor.process(job)
+            else:
+                await _process_with_heartbeat(
+                    store, processor, job, heartbeat_interval_seconds
+                )
 
             job.status = "completed"
             job.completed_at = datetime.now(UTC)
