@@ -25,7 +25,9 @@ def test_strict_evidence_uses_exact_full_rendered_context() -> None:
     hits = [{"id": "doc", "document": "refund information " * 25}]
     result = assembler.assemble(hits, budget)
     assert result.total_tokens <= budget.available_evidence_tokens
-    assert all(tokenizer.count_tokens(x.text) <= budget.available_evidence_tokens for x in result.items)
+    assert all(
+        tokenizer.count_tokens(x.text) <= budget.available_evidence_tokens for x in result.items
+    )
 
 
 def test_approximate_warning_is_emitted_once(caplog: pytest.LogCaptureFixture) -> None:
