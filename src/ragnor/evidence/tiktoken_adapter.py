@@ -10,9 +10,7 @@ class TiktokenTokenizer:
     This only counts the given string, not host prompt serialization.
     """
 
-    def __init__(
-        self, *, encoding_name: str | None = None, model: str | None = None
-    ) -> None:
+    def __init__(self, *, encoding_name: str | None = None, model: str | None = None) -> None:
         if (encoding_name is None) == (model is None):
             raise ValueError("specify exactly one of encoding_name or model")
         try:
