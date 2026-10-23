@@ -185,6 +185,17 @@ jobs:
           "$RUNNER_TEMP/ragnor-typing-venv/bin/python" -m pip install "mypy==1.17.1"
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/ragnor-typing-venv/bin/python" -m mypy --no-incremental --strict --follow-imports=silent "$GITHUB_WORKSPACE/tests/typing/sdk_consumer.py"
+      - name: Prove type-checker rejects incompatible SDK API values
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          if "$RUNNER_TEMP/ragnor-typing-venv/bin/python" -m mypy --no-incremental --strict --follow-imports=silent "$GITHUB_WORKSPACE/tests/typing/invalid_sdk_consumer.py" > invalid-types.txt 2>&1; then
+            echo "::error::mypy unexpectedly accepted wrong public SDK argument types"
+            cat invalid-types.txt
+            exit 1
+          fi
+          grep -q "incompatible type" invalid-types.txt
+          grep -q "Document" invalid-types.txt
 
   tokenizer-contracts:
     name: Optional exact tokenizer contract
