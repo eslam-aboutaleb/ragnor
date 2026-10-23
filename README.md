@@ -867,4 +867,8 @@ The hooks run `ruff check`, `ruff format`, and the standard whitespace/EOF/YAML 
 
 ## License
 
-ragnor is released under the MIT License. See the LICENSE file in the repository root.
+ragnor is distributed under the **PolyForm Noncommercial License 1.0.0**.
+Commercial use is not automatically permitted under these terms. See
+[LICENSE](LICENSE) for the binding license text. Any future relicensing,
+including proposals under [issue #19](https://github.com/eslam-aboutaleb/ragnor/issues/19),
+requires an explicit decision and corresponding package metadata update.
