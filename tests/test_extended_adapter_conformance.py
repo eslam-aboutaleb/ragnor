@@ -257,7 +257,8 @@ async def test_external_document_store_observes_filter_and_delete_contracts() ->
     assert await store.count(tenant="a") == 1
     rows = await store.get(filters={"tenant": "a"})
     assert [row["id"] for row in rows] == ["a"]
-    assert await store.delete(ids=["a"], filters={"tenant": "a"}) == 1
+    deleted = await store.delete(ids=["a"], filters={"tenant": "a"})
+    assert deleted == 1
     assert await store.count() == 1
 
 
