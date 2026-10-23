@@ -12,17 +12,7 @@ application. It delegates to the default
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
-
-if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
-
-
-@runtime_checkable
-class SessionProvider(Protocol):
-    """Callable that yields an async session as a context manager."""
-
-    def __call__(self) -> AsyncSession: ...
+from ragnor.db.ports import SessionProvider
 
 
 def create_session_factory(database_url: str) -> SessionProvider:
