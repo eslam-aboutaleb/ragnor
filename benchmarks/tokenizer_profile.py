@@ -7,6 +7,7 @@ accuracy guarantees. No raw customer text is read or transmitted.
 from __future__ import annotations
 
 import json
+from functools import partial
 import time
 import tracemalloc
 
@@ -43,8 +44,8 @@ def main() -> None:
         approx = estimate.count_tokens(text)
         exact_chunker = TokenAwareChunker(exact, max_tokens=48, overlap_tokens=4)
         legacy_chunker = SlidingWindowChunker(chunk_size=40, overlap=6)
-        exact_parts, exact_ms, exact_mem = _profile(lambda: exact_chunker.chunk(text))
-        word_parts, word_ms, word_mem = _profile(lambda: legacy_chunker.chunk(text))
+        exact_parts, exact_ms, exact_mem = _profile(partial(exact_chunker.chunk, text))
+        word_parts, word_ms, word_mem = _profile(partial(legacy_chunker.chunk, text))
         row = {
             "sample": kind,
             "characters": len(text),
