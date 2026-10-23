@@ -36,4 +36,4 @@ Use unique tenant/source/revision/chunk/model generation values in idempotency k
 - Migration rollout, SIGTERM draining, metrics, dead-letter retry policy overrides, idempotent vector content identifiers, worker clock drift and multi-process kill/restart fault injection are additional #26 acceptance work.
 - Do not use an in-memory implementation to claim distributed safety.
 
-The GitHub Actions test uses a real PostgreSQL service. This is not a hosted job scheduler or message broker.
+The GitHub Actions tests use a real PostgreSQL service and separate worker processes. They race two independent Python processes over 100 claims in two repeated trials, SIGKILL a worker after claim, reclaim its expired lease, and reject an obsolete acknowledgment. These tests do not certify side-effect idempotence across external vector databases or guarantee exactly-once remote execution. This is not a hosted job scheduler or message broker.
