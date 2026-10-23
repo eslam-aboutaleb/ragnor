@@ -34,19 +34,23 @@ async def main() -> None:
             for number in range(80):
                 await store.enqueue({"scope": scope, "idempotency_key": f"chunk-{number}"})
 
-            async def worker(worker_num: int, started: asyncio.Event) -> list[str]:
+            async def worker(
+                worker_num: int,
+                started: asyncio.Event,
+                active_store: PostgresEmbeddingJobStore,
+            ) -> list[str]:
                 await started.wait()
                 owned: list[str] = []
                 while True:
-                    jobs = await store.claim_and_mark_processing(5, f"worker-{worker_num}")
+                    jobs = await active_store.claim_and_mark_processing(5, f"worker-{worker_num}")
                     if not jobs:
                         return owned
                     for job in jobs:
-                        await store.mark_completed(job)
+                        await active_store.mark_completed(job)
                         owned.append(job.job_id)
 
             started = asyncio.Event()
-            tasks = [asyncio.create_task(worker(num, started)) for num in range(workers)]
+            tasks = [asyncio.create_task(worker(num, started, store)) for num in range(workers)]
             start = perf_counter()
             started.set()
             batches = await asyncio.gather(*tasks)

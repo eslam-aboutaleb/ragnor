@@ -91,7 +91,7 @@ def _equality_filter(filters: dict[str, Any]) -> Any | None:
     """Build a Qdrant ``Filter`` from equality filters, or ``None``."""
     if not filters:
         return None
-    from qdrant_client import FieldCondition, Filter, MatchValue  # noqa: PLC0415
+    from qdrant_client.models import FieldCondition, Filter, MatchValue  # noqa: PLC0415
 
     return Filter(
         must=[
@@ -113,7 +113,7 @@ def _selector_filter(
     both are supplied. Returns ``None`` when neither is
     supplied (matching every point).
     """
-    from qdrant_client import FieldCondition, Filter, MatchAny, MatchValue  # noqa: PLC0415
+    from qdrant_client.models import FieldCondition, Filter, MatchAny, MatchValue  # noqa: PLC0415
 
     must: list[Any] = []
     if ids is not None:
@@ -231,7 +231,7 @@ class QdrantStore(HybridVectorStore):
             return
         client = self._resolve_client()
         if not await client.collection_exists(self.table_name):
-            from qdrant_client import Distance, VectorParams  # noqa: PLC0415
+            from qdrant_client.models import Distance, VectorParams  # noqa: PLC0415
 
             await client.create_collection(
                 collection_name=self.table_name,
@@ -528,7 +528,7 @@ class QdrantStore(HybridVectorStore):
             # the deletion count is the whole-collection count delta.
             before_response = await client.count(collection_name=self.table_name)
             before = int(before_response.count)
-            from qdrant_client import PointIdsList  # noqa: PLC0415
+            from qdrant_client.models import PointIdsList  # noqa: PLC0415
 
             selector: Any = PointIdsList(points=[_point_id(doc_id) for doc_id in ids])
             await client.delete(collection_name=self.table_name, points_selector=selector)
@@ -543,7 +543,7 @@ class QdrantStore(HybridVectorStore):
                 collection_name=self.table_name, count_filter=query_filter
             )
             before = int(before_response.count)
-            from qdrant_client import FilterSelector  # noqa: PLC0415
+            from qdrant_client.models import FilterSelector  # noqa: PLC0415
 
             selector = FilterSelector(filter=query_filter)
             await client.delete(collection_name=self.table_name, points_selector=selector)
@@ -656,7 +656,7 @@ class QdrantStore(HybridVectorStore):
         await self._ensure_collection()
         client = self._resolve_client()
 
-        from qdrant_client import PointStruct  # noqa: PLC0415
+        from qdrant_client.models import PointStruct  # noqa: PLC0415
 
         points = []
         for doc in documents:
