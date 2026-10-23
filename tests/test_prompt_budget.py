@@ -52,11 +52,13 @@ def test_whole_prompt_must_fit_not_just_evidence_content() -> None:
         reserved_completion_tokens=10,
     )
     with pytest.raises(PromptBudgetError, match="exceeds"):
-        planner.assess([
-            {"role": "system", "content": "Safety rules and system context"},
-            {"role": "user", "content": "A user question"},
-            {"role": "tool", "content": "[1] Evidence"},
-        ])
+        planner.assess(
+            [
+                {"role": "system", "content": "Safety rules and system context"},
+                {"role": "user", "content": "A user question"},
+                {"role": "tool", "content": "[1] Evidence"},
+            ]
+        )
 
 
 def test_model_identity_mismatch_is_refused_before_accounting() -> None:

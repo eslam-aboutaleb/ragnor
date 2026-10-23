@@ -65,13 +65,17 @@ class PromptBudgetPlanner:
     ) -> None:
         if not model_id or not model_id.strip():
             raise ValueError("model_id must be non-empty")
-        if not isinstance(total_context_tokens, int) or isinstance(
-            total_context_tokens, bool
-        ) or total_context_tokens <= 0:
+        if (
+            not isinstance(total_context_tokens, int)
+            or isinstance(total_context_tokens, bool)
+            or total_context_tokens <= 0
+        ):
             raise ValueError("total_context_tokens must be a positive integer")
-        if not isinstance(reserved_completion_tokens, int) or isinstance(
-            reserved_completion_tokens, bool
-        ) or not 0 <= reserved_completion_tokens < total_context_tokens:
+        if (
+            not isinstance(reserved_completion_tokens, int)
+            or isinstance(reserved_completion_tokens, bool)
+            or not 0 <= reserved_completion_tokens < total_context_tokens
+        ):
             raise ValueError("reserved_completion_tokens must be within the context window")
         if not counter.is_exact:
             raise ValueError("exact provider prompt counter is required for hard context limits")
