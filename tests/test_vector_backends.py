@@ -240,7 +240,26 @@ def qdrant_module(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
     module.FilterSelector = _FakeFilterSelector
     module.PointStruct = _FakePointStruct
     module.AsyncQdrantClient = _FakeAsyncQdrantClient
+    # Modern qdrant-client exposes payload/config types under .models.
+    # A package-shaped fake preserves core-only test isolation while the
+    # optional-backend matrix runs the same code against the real client.
+    module.__path__ = []
+    models = types.ModuleType("qdrant_client.models")
+    for name in (
+        "Distance",
+        "VectorParams",
+        "MatchValue",
+        "MatchAny",
+        "FieldCondition",
+        "Filter",
+        "PointIdsList",
+        "FilterSelector",
+        "PointStruct",
+    ):
+        setattr(models, name, getattr(module, name))
+    module.models = models
     monkeypatch.setitem(sys.modules, "qdrant_client", module)
+    monkeypatch.setitem(sys.modules, "qdrant_client.models", models)
     return module
 
 
