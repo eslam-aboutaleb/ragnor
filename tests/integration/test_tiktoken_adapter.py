@@ -11,8 +11,7 @@ from ragnor.evidence.tiktoken_adapter import TiktokenTokenizer
 def test_real_model_tokenizer_caps_every_chunk_in_multilingual_text() -> None:
     tokenizer = TiktokenTokenizer(encoding_name="cl100k_base")
     text = (
-        "# Policy\\n\\nArabic: مرحبا بكم. English refund rules. "
-        '中文文档和代码: {"a": 1}\n'
+        '# Policy\n\nArabic: مرحبا بكم. English refund rules. 中文文档和代码: {"a": 1}\n'
     ) * 15
     chunker = TokenAwareChunker(tokenizer, max_tokens=40, overlap_tokens=7)
     chunks = chunker.chunk(text)
