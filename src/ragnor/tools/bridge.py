@@ -104,9 +104,11 @@ class KnowledgeBridge:
         self.default_collection = default_collection
         self.default_budget_tokens = default_budget_tokens
         self.allow_management = allow_management
-        if production_mode and authorizer is None:
+        if production_mode and (
+            authorizer is None or not authorizer.has_explicit_restrictions
+        ):
             raise ValueError(
-                "production KnowledgeBridge requires an explicit host authorizer; "
+                "production KnowledgeBridge requires a restrictive host authorizer; "
                 "the development default allows all scopes"
             )
         self.authorizer = authorizer or ScopeAuthorizer(default_allow=True)

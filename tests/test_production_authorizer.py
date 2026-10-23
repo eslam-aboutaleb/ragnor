@@ -33,3 +33,12 @@ async def test_production_bridge_denies_unmapped_clients_with_host_policy() -> N
 def test_existing_nonproduction_bridge_stays_backwards_compatible() -> None:
     bridge = KnowledgeBridge(retriever=HostRetriever())
     assert bridge.authorizer.is_authorized(None, "default", None)
+
+
+def test_production_rejects_unrestricted_explicit_authorizer() -> None:
+    with pytest.raises(ValueError, match="restrictive"):
+        KnowledgeBridge(
+            retriever=HostRetriever(),
+            authorizer=ScopeAuthorizer(),
+            production_mode=True,
+        )
