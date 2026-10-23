@@ -17,11 +17,11 @@ if TYPE_CHECKING:
 
 def __getattr__(name: str) -> Any:
     if name in {"Ragnor", "RagnorBuilder"}:
-        from ragnor.builder import Ragnor, RagnorBuilder
+        from ragnor.builder import Ragnor, RagnorBuilder  # noqa: PLC0415
 
         return {"Ragnor": Ragnor, "RagnorBuilder": RagnorBuilder}[name]
     if name in {"Document", "Chunk", "SearchResult", "RetrievalError"}:
-        from ragnor.types import Chunk, Document, RetrievalError, SearchResult
+        from ragnor.types import Chunk, Document, RetrievalError, SearchResult  # noqa: PLC0415
 
         return {
             "Document": Document,
