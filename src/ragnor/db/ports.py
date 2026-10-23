@@ -7,10 +7,15 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
-from typing import TYPE_CHECKING, Any
+from typing import Any, Protocol, runtime_checkable
 
-if TYPE_CHECKING:
-    from ragnor.db.session import SessionProvider
+@runtime_checkable
+class SessionProvider(Protocol):
+    """Host-owned callable returning an async session context manager."""
+
+    def __call__(self) -> Any:
+        """Open a caller-owned database session."""
+        raise NotImplementedError
 
 
 class SQLFactory(ABC):

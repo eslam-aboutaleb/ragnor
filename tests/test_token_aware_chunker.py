@@ -73,7 +73,7 @@ def test_legacy_word_chunker_unchanged() -> None:
 def test_snapshot_invalidates_when_tokenizer_or_chunking_changes() -> None:
     first = TokenAwareChunker(CharacterTokenizer(), max_tokens=8)
     changed_tokens = TokenAwareChunker(
-        ExactTokenizerAdapter(lambda text: len(text), name="other-model"),
+        ExactTokenizerAdapter(len, name="other-model"),
         max_tokens=8,
     )
     changed_budget = TokenAwareChunker(CharacterTokenizer(), max_tokens=9)
