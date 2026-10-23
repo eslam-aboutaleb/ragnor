@@ -63,11 +63,9 @@ def _prohibited_imports(
     package_parts = module_path.split(".")[:-1]
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Import):
-            names.extend(
-                alias.name for alias in node.names if _is_forbidden_import(alias.name)
-            )
+            names.extend(alias.name for alias in node.names if _is_forbidden_import(alias.name))
         elif isinstance(node, ast.ImportFrom):
-            prefix = package_parts[:len(package_parts) - node.level + 1] if node.level else []
+            prefix = package_parts[: len(package_parts) - node.level + 1] if node.level else []
             resolved = ".".join([*prefix, node.module] if node.module else prefix)
             if not node.level:
                 resolved = node.module or ""
@@ -81,12 +79,16 @@ def _prohibited_imports(
                 )
     return names
 
+
 @pytest.mark.parametrize("relative_path", INNER_MODULES)
 def test_core_ports_and_use_cases_do_not_depend_on_vendor_adapters(
     relative_path: str,
 ) -> None:
     path = PACKAGE_ROOT / relative_path
-    forbidden = _prohibited_imports(path.read_text(encoding="utf-8"), module_path="ragnor." + relative_path.removesuffix(".py").replace("/", "."))
+    forbidden = _prohibited_imports(
+        path.read_text(encoding="utf-8"),
+        module_path="ragnor." + relative_path.removesuffix(".py").replace("/", "."),
+    )
     assert not forbidden, f"{relative_path} has forbidden inward dependencies: {forbidden}"
 
 
@@ -128,6 +130,7 @@ def test_custom_chunker_and_tokenizer_satisfy_existing_ports() -> None:
     assert isinstance(ExternalTokenizer(), Tokenizer)
     assert ExternalChunker().chunk("custom source")[0].text == "custom source"
     assert ExternalTokenizer().count_tokens("custom source") == 2
+
 
 def test_sql_port_is_importable_without_sqlalchemy() -> None:
     """Protocol must remain usable when optional SQLAlchemy is not installed."""

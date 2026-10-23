@@ -2,6 +2,7 @@
 
 This module intentionally does not import SQLAlchemy or any other provider.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -96,5 +97,3 @@ class SQLFactory(ABC):
             Nothing. The lock is held for the duration of the
             ``async with`` block.
         """
-
-
