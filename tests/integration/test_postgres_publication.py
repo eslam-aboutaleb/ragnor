@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ragnor.jobs.adapters.postgres import DDL, PostgresEmbeddingJobStore
@@ -201,5 +202,89 @@ async def test_strict_publication_mode_disallows_direct_ack_bypass() -> None:
         assert await publisher.get_active_generation("d") is None
         assert await publisher.activate_generation(job) is True
         assert await publisher.get_active_generation("d") == "immutable-key"
+    finally:
+        await engine.dispose()
+
+
+async def test_failed_completion_ack_rolls_back_manifest_publication_atomically() -> None:
+    """A database failure AFTER manifest mutation must not expose staged vectors."""
+    engine, sessions = await _configured()
+    scope = f"rollback-publish-{uuid4()}"
+    store = PostgresEmbeddingJobStore(sessions, scope=scope, require_publication=True)
+    try:
+        await store.enqueue(
+            {
+                "scope": scope,
+                "idempotency_key": "once",
+                "document_id": "policy",
+                "revision": 1,
+                "generation_key": "immutable-staged-generation",
+            }
+        )
+        job = (await store.claim_and_mark_processing(1, "owner"))[0]
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS ragnor_test_rejected_ack_scopes "
+                    "(scope text PRIMARY KEY)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO ragnor_test_rejected_ack_scopes(scope) VALUES(:scope) "
+                    "ON CONFLICT(scope) DO NOTHING"
+                ),
+                {"scope": scope},
+            )
+            await conn.execute(
+                text(
+                    "CREATE OR REPLACE FUNCTION ragnor_test_ack_failure() RETURNS trigger AS $$ "
+                    "BEGIN IF NEW.status = 'completed' AND EXISTS("
+                    "SELECT 1 FROM ragnor_test_rejected_ack_scopes WHERE scope=NEW.scope"
+                    ") THEN RAISE EXCEPTION 'forced test completion failure'; "
+                    "END IF; RETURN NEW; END; $$ LANGUAGE plpgsql"
+                )
+            )
+            await conn.execute(
+                text(
+                    "DROP TRIGGER IF EXISTS ragnor_test_ack_failure_trigger "
+                    "ON ragnor_embedding_jobs"
+                )
+            )
+            await conn.execute(
+                text(
+                    "CREATE TRIGGER ragnor_test_ack_failure_trigger BEFORE UPDATE "
+                    "ON ragnor_embedding_jobs FOR EACH ROW "
+                    "EXECUTE FUNCTION ragnor_test_ack_failure()"
+                )
+            )
+        try:
+            with pytest.raises(DBAPIError, match="forced test completion failure"):
+                await store.activate_generation(job)
+            # The manifest upsert was in the same failed PostgreSQL transaction.
+            assert await store.get_active_generation("policy") is None
+            async with sessions() as session:
+                row = await session.execute(
+                    text(
+                        "SELECT status, claim_generation FROM ragnor_embedding_jobs "
+                        "WHERE job_id=:job_id"
+                    ),
+                    {"job_id": job.job_id},
+                )
+                status, generation = row.one()
+                assert status == "processing"
+                assert generation == job.claim_generation
+        finally:
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text(
+                        "DROP TRIGGER IF EXISTS ragnor_test_ack_failure_trigger "
+                        "ON ragnor_embedding_jobs"
+                    )
+                )
+                await conn.execute(text("DELETE FROM ragnor_test_rejected_ack_scopes WHERE scope=:scope"), {"scope": scope})
+                await conn.execute(text("DROP FUNCTION IF EXISTS ragnor_test_ack_failure()"))
+        assert await store.activate_generation(job) is True
+        assert await store.get_active_generation("policy") == "immutable-staged-generation"
     finally:
         await engine.dispose()
