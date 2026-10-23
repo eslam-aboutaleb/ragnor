@@ -54,7 +54,6 @@ DDL: tuple[str, ...] = (
         activated_at timestamptz NOT NULL DEFAULT now(),
         PRIMARY KEY(scope, document_id)
     )""",
-
 )
 
 CLAIM_SQL = """
@@ -249,7 +248,7 @@ class PostgresEmbeddingJobStore:
         revision = job.payload.get("revision")
         generation_key = job.payload.get("generation_key")
         if scope_payload != self.scope:
-            raise ValueError("job scope must match manifest scope")
+            raise LostJobOwnershipError("job scope does not match manifest scope")
         if not isinstance(document_id, str) or not document_id.strip():
             raise ValueError("document_id must be non-empty")
         if not isinstance(revision, int) or isinstance(revision, bool) or revision < 0:
@@ -305,8 +304,12 @@ class PostgresEmbeddingJobStore:
                         "activated_at=now() "
                         "WHERE ragnor_active_generations.revision < EXCLUDED.revision"
                     ),
-                    {"scope": self.scope, "document_id": document_id,
-                     "revision": revision, "generation_key": generation_key},
+                    {
+                        "scope": self.scope,
+                        "document_id": document_id,
+                        "revision": revision,
+                        "generation_key": generation_key,
+                    },
                 )
             ack = await session.execute(
                 text(

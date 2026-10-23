@@ -52,8 +52,13 @@ async def test_uncommitted_vectors_are_invisible_and_crash_replay_activates_once
     document = "policy-a"
     try:
         await writer.enqueue(
-            {"scope": scope, "idempotency_key": "revision-one", "document_id": document,
-             "revision": 1, "generation_key": f"{scope}/policy-a/1"}
+            {
+                "scope": scope,
+                "idempotency_key": "revision-one",
+                "document_id": document,
+                "revision": 1,
+                "generation_key": f"{scope}/policy-a/1",
+            }
         )
         first = (await writer.claim_and_mark_processing(1, "host-one"))[0]
         await vectors.stage(first.payload["generation_key"], ("old-policy",))
@@ -62,8 +67,13 @@ async def test_uncommitted_vectors_are_invisible_and_crash_replay_activates_once
         assert await reader.read(scope, document) == ("old-policy",)
 
         await writer.enqueue(
-            {"scope": scope, "idempotency_key": "revision-two", "document_id": document,
-             "revision": 2, "generation_key": f"{scope}/policy-a/2"}
+            {
+                "scope": scope,
+                "idempotency_key": "revision-two",
+                "document_id": document,
+                "revision": 2,
+                "generation_key": f"{scope}/policy-a/2",
+            }
         )
         dying = (await writer.claim_and_mark_processing(1, "host-dying"))[0]
         await vectors.stage(dying.payload["generation_key"], ("new-policy",))
@@ -72,7 +82,9 @@ async def test_uncommitted_vectors_are_invisible_and_crash_replay_activates_once
 
         async with sessions() as session, session.begin():
             await session.execute(
-                text("UPDATE ragnor_embedding_jobs SET lease_expires_at=now()-interval '1 second' WHERE job_id=:id"),
+                text(
+                    "UPDATE ragnor_embedding_jobs SET lease_expires_at=now()-interval '1 second' WHERE job_id=:id"
+                ),
                 {"id": dying.job_id},
             )
         assert await writer.reclaim_stale() == 1
@@ -97,8 +109,13 @@ async def test_old_revision_cannot_roll_back_new_active_version() -> None:
     try:
         for rev in (1, 2):
             await writer.enqueue(
-                {"scope": scope, "idempotency_key": str(rev), "document_id": document,
-                 "revision": rev, "generation_key": f"{scope}/{document}/{rev}"}
+                {
+                    "scope": scope,
+                    "idempotency_key": str(rev),
+                    "document_id": document,
+                    "revision": rev,
+                    "generation_key": f"{scope}/{document}/{rev}",
+                }
             )
         old, new = await writer.claim_and_mark_processing(2, "host")
         await vectors.stage(old.payload["generation_key"], ("old",))
@@ -116,8 +133,13 @@ async def test_foreign_scope_and_bad_revision_rejected_before_publication() -> N
     b = PostgresEmbeddingJobStore(sessions, scope=f"right-{uuid4()}")
     try:
         await a.enqueue(
-            {"scope": a.scope, "idempotency_key": "a", "document_id": "d",
-             "revision": 1, "generation_key": "gen-a"}
+            {
+                "scope": a.scope,
+                "idempotency_key": "a",
+                "document_id": "d",
+                "revision": 1,
+                "generation_key": "gen-a",
+            }
         )
         job = (await a.claim_and_mark_processing(1, "host"))[0]
         with pytest.raises(LostJobOwnershipError):
@@ -135,8 +157,20 @@ async def test_invalid_manifest_coordinates_fail_closed() -> None:
     s = PostgresEmbeddingJobStore(sessions, scope=f"tenant-{uuid4()}")
     try:
         for payload in [
-            {"scope": s.scope, "idempotency_key": "x", "document_id": "", "revision": 1, "generation_key": "a"},
-            {"scope": s.scope, "idempotency_key": "y", "document_id": "a", "revision": -1, "generation_key": "b"},
+            {
+                "scope": s.scope,
+                "idempotency_key": "x",
+                "document_id": "",
+                "revision": 1,
+                "generation_key": "a",
+            },
+            {
+                "scope": s.scope,
+                "idempotency_key": "y",
+                "document_id": "a",
+                "revision": -1,
+                "generation_key": "b",
+            },
         ]:
             await s.enqueue(payload)
         jobs = await s.claim_and_mark_processing(2, "host")
