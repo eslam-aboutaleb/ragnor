@@ -30,7 +30,8 @@ Use unique tenant/source/revision/chunk/model generation values in idempotency k
 ### Known limitations: not yet production complete
 
 - **At least once**, not exactly once. A timed-out worker can still perform an external embedding/vector write before its ack is rejected. The host processor MUST stage writes and validate generation/manifest before activating any index. No generic guarantee is possible across arbitrary external vector stores.
-- No lease renewal/heartbeat yet; set leases above expected processing time and do not treat the adapter as fully crash-safe until heartbeat and replay tests pass.
+- Fenced `renew_lease(job, lease_seconds=...)` is available for host-driven heartbeats. Call it during long work, before lease expiry, at a cadence with margin for transient PostgreSQL latency. A stale or reclaimed worker is rejected. This adapter does not run a background heartbeat or cancel remote work on lease loss automatically.
+- The end-to-end worker still requires host integration for heartbeat scheduling, cancellation and staged, generation-safe vector writes. Do not treat it as fully crash-safe until replay tests pass.
 - The reference implementation requires PostgreSQL and SQLAlchemy async sessions; alternative adapters implement the same neutral ports and require their own real concurrency suites.
 - Migration rollout, SIGTERM draining, metrics, dead-letter retry policy overrides, idempotent vector content identifiers, worker clock drift and multi-process kill/restart fault injection are additional #26 acceptance work.
 - Do not use an in-memory implementation to claim distributed safety.
