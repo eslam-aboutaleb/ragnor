@@ -507,8 +507,7 @@ class RagnorBuilder:
             and declared != self._embedding_dim
         ):
             raise ValueError(
-                "production store embedding dimension does not match the configured "
-                "embedding_dim"
+                "production store embedding dimension does not match the configured embedding_dim"
             )
 
     async def build(self) -> Ragnor:
