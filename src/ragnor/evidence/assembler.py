@@ -54,7 +54,7 @@ class EvidenceAssembler:
       and stale index conditions.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         tokenizer: Tokenizer | None = None,
         compressor: EvidenceCompressor | None = None,
