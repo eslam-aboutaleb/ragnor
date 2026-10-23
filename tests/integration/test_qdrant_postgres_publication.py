@@ -19,7 +19,7 @@ from qdrant_client import AsyncQdrantClient  # noqa: E402
 
 from ragnor.jobs.adapters.generation_vectors import ImmutableGenerationVectorAdapter  # noqa: E402
 from ragnor.jobs.adapters.postgres import DDL, PostgresEmbeddingJobStore  # noqa: E402
-from ragnor.jobs.outbox import LostJobOwnershipError  # noqa: E402
+from ragnor.jobs.outbox import LostJobOwnershipError, process_pending_jobs  # noqa: E402
 from ragnor.jobs.publication import ActiveGenerationReader  # noqa: E402
 from ragnor.stores.qdrant import QdrantStore  # noqa: E402
 
@@ -95,6 +95,49 @@ async def test_crash_after_real_qdrant_write_before_db_activation_is_safe() -> N
         with pytest.raises(LostJobOwnershipError):
             await job_store.activate_generation(crashed)
         assert await reader.read(scope, "policy") == ("replacement revision",)
+    finally:
+        await client.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_worker_orchestrator_stages_then_publishes_without_direct_ack() -> None:
+    engine = create_async_engine(os.environ["RAGNOR_TEST_DATABASE_URL"])
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    client = AsyncQdrantClient(location=":memory:")
+    scope = f"integrated-{uuid4()}"
+    outbox = PostgresEmbeddingJobStore(sessions, scope=scope, require_publication=True)
+    vectors = ImmutableGenerationVectorAdapter(
+        store=QdrantStore(table_name="integrated_worker", embedding_dim=2, client=client),
+        scope=scope,
+    )
+
+    class StagingProcessor:
+        async def process(self, job):
+            await vectors.stage(
+                job.payload["generation_key"],
+                [{"id": "chunk-1", "text": "active grounded policy", "embedding": [0.3, 0.7]}],
+            )
+
+    try:
+        async with engine.begin() as connection:
+            for statement in DDL:
+                await connection.execute(text(statement))
+        await outbox.enqueue(
+            {"scope": scope, "idempotency_key": "revision", "document_id": "policy",
+             "revision": 1, "generation_key": "gen-policy"}
+        )
+        reader = ActiveGenerationReader(outbox, vectors)
+        assert await reader.read(scope, "policy") == ()
+        assert (
+            await process_pending_jobs(
+                outbox, StagingProcessor(), worker_id="production-worker",
+                require_atomic_claims=True,
+            )
+            == 1
+        )
+        assert await reader.read(scope, "policy") == ("active grounded policy",)
+        assert await outbox.get_status_counts() == {"completed": 1}
     finally:
         await client.close()
         await engine.dispose()

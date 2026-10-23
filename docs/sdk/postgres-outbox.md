@@ -60,3 +60,24 @@ reference. A wheel must include them; `pyproject.toml` specifies their
 package-data inclusion. Separate production database permissions and
 backup/rollback planning are still the host's responsibility.
 
+
+## Production worker composition and pluggable error policy
+
+`process_pending_jobs(store, processor, worker_id=..., require_atomic_claims=True,
+retry_policy=..., event_sink=...)` resolves the injected store's
+`require_publication` contract **before claiming any job**. When a store
+requires publication, a successful processor stage triggers
+`activate_generation(job)` (fenced manifest update + completion) rather than
+unsafe `mark_completed(job)`. A publication-required store lacking the
+activation port fails before any processor side effect. Real
+PostgreSQL + local-Qdrant integration verifies this complete call path.
+
+Optional `RetryPolicy.delay(error, attempt, max_attempts)` returns a
+positive `timedelta` to retry or `None` to dead-letter a permanently invalid
+job. The default historical 1/5/30 minute schedule is preserved. Hosts should
+supply provider-specific transient/permanent error classification for
+production. `JobEventSink.emit(JobEvent)` receives sanitized claimed,
+completed, failed/dead-letter and ownership-lost events; no raw job payloads
+or exception strings are included. Sink failures do not undo durable
+acknowledgments. The SDK does not bundle a metrics backend.
+
