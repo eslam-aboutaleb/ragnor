@@ -27,7 +27,7 @@ class DemoEmbedder:
         return (await self([text]))[0]
 
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return await self(texts]
+        return await self(texts)
 
 async def main() -> None:
     rag = await RagnorBuilder.local(DemoEmbedder(), embedding_dim=2).build()
