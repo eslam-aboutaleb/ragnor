@@ -13,11 +13,25 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1] / "src" / "ragnor"
-VENDOR_ROOTS = frozenset({
-    "sqlalchemy", "asyncpg", "litellm", "qdrant_client", "chromadb",
-    "faiss", "tiktoken", "fastapi", "django", "boto3", "httpx",
-    "watchfiles", "mcp", "pypdf", "opentelemetry",
-})
+VENDOR_ROOTS = frozenset(
+    {
+        "sqlalchemy",
+        "asyncpg",
+        "litellm",
+        "qdrant_client",
+        "chromadb",
+        "faiss",
+        "tiktoken",
+        "fastapi",
+        "django",
+        "boto3",
+        "httpx",
+        "watchfiles",
+        "mcp",
+        "pypdf",
+        "opentelemetry",
+    }
+)
 EXTERNAL_ADAPTERS = {
     "embeddings/litellm.py",
     "evidence/tiktoken_adapter.py",
@@ -25,7 +39,9 @@ EXTERNAL_ADAPTERS = {
     "telemetry/otel.py",
 }
 EXTERNAL_PREFIXES = (
-    "jobs/adapters/", "mcp/", "stores/",
+    "jobs/adapters/",
+    "mcp/",
+    "stores/",
 )
 EXTERNAL_NAMES = {
     "ingestion/connectors.py",
@@ -33,11 +49,20 @@ EXTERNAL_NAMES = {
     "ingestion/http_connector.py",
     "ingestion/object_connector.py",
     "connectors.py",
-    "builder.py", "registry.py",
+    "builder.py",
+    "registry.py",
 }
 INNER_DIRS = (
-    "chunking/", "embeddings/", "evaluation/", "evidence/", "ingestion/",
-    "jobs/", "retrieval/", "sync/", "telemetry/", "tools/",
+    "chunking/",
+    "embeddings/",
+    "evaluation/",
+    "evidence/",
+    "ingestion/",
+    "jobs/",
+    "retrieval/",
+    "sync/",
+    "telemetry/",
+    "tools/",
 )
 
 
@@ -48,7 +73,10 @@ def _inner_sources() -> list[Path]:
         if (rel := file.relative_to(ROOT).as_posix()) not in EXTERNAL_ADAPTERS
         and rel not in EXTERNAL_NAMES
         and not any(rel.startswith(prefix) for prefix in EXTERNAL_PREFIXES)
-        and (rel.startswith(INNER_DIRS) or rel in {"config.py", "lifecycle.py", "types.py", "validation.py"})
+        and (
+            rel.startswith(INNER_DIRS)
+            or rel in {"config.py", "lifecycle.py", "types.py", "validation.py"}
+        )
     ]
 
 
@@ -59,7 +87,9 @@ def _eager_vendor_imports(code: str) -> list[str]:
     # function or TYPE_CHECKING are permitted for compatibility.
     for node in tree.body:
         if isinstance(node, ast.Import):
-            results.extend(alias.name for alias in node.names if alias.name.split(".")[0] in VENDOR_ROOTS)
+            results.extend(
+                alias.name for alias in node.names if alias.name.split(".")[0] in VENDOR_ROOTS
+            )
         elif isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] in VENDOR_ROOTS:
             results.append(node.module or "")
     return results
@@ -100,6 +130,4 @@ def test_advisory_lock_compatibility_imports_without_optional_sqlalchemy() -> No
 
 def test_checker_distinguishes_local_lazy_from_eager_imports() -> None:
     assert _eager_vendor_imports("import sqlalchemy\n") == ["sqlalchemy"]
-    assert _eager_vendor_imports(
-        "def optional():\n    import sqlalchemy\n"
-    ) == []
+    assert _eager_vendor_imports("def optional():\n    import sqlalchemy\n") == []

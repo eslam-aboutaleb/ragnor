@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+
 @asynccontextmanager
 async def advisory_lock(session: Any, key: str) -> AsyncIterator[None]:
     """Hold a PostgreSQL advisory lock keyed by ``key``.

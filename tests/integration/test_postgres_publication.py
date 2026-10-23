@@ -282,7 +282,10 @@ async def test_failed_completion_ack_rolls_back_manifest_publication_atomically(
                         "ON ragnor_embedding_jobs"
                     )
                 )
-                await conn.execute(text("DELETE FROM ragnor_test_rejected_ack_scopes WHERE scope=:scope"), {"scope": scope})
+                await conn.execute(
+                    text("DELETE FROM ragnor_test_rejected_ack_scopes WHERE scope=:scope"),
+                    {"scope": scope},
+                )
                 await conn.execute(text("DROP FUNCTION IF EXISTS ragnor_test_ack_failure()"))
         assert await store.activate_generation(job) is True
         assert await store.get_active_generation("policy") == "immutable-staged-generation"

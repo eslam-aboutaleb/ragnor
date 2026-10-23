@@ -25,9 +25,9 @@ def test_recursive_all_extra_includes_each_supported_adapter_and_no_reserved_ext
 
 def test_extra_coverage_matrix_is_documented() -> None:
     doc = (ROOT / "docs" / "sdk" / "optional-extras.md").read_text(encoding="utf-8")
-    extras = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
-        "project"
-    ]["optional-dependencies"]
+    extras = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+        "optional-dependencies"
+    ]
     for name in extras:
         assert f"`{name}`" in doc, f"undocumented optional extra: {name}"
     assert "reserved" in doc.lower()
