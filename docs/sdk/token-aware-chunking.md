@@ -36,3 +36,24 @@ The implementation preserves original Unicode text spans and offset metadata;
 it does not yet offer sentence/heading-aware segmentation, a tiktoken optional
 provider, streaming performance optimizations, or evidence-budget accounting
 for complete rendered prompts. Those remain acceptance work under #27.
+
+
+## Optional tiktoken integration and strict evidence mode
+
+```python
+from ragnor.evidence.tiktoken_adapter import TiktokenTokenizer
+from ragnor.evidence.assembler import EvidenceAssembler
+
+tokenizer = TiktokenTokenizer(encoding_name="cl100k_base")
+assembler = EvidenceAssembler(tokenizer=tokenizer, exact_required=True)
+```
+
+Install `ragnor[tokenizers-tiktoken]` only in applications requiring that
+encoding. Unknown encodings raise instead of silently selecting a fallback.
+Constructing `EvidenceAssembler(exact_required=True)` with the approximate
+default raises a configuration error. Approximate-mode evidence assembly
+emits one warning per assembler instance, not a claim of hard model limits.
+
+The assembled evidence uses an exact counter for the **rendered evidence
+context**, including citation framing; the host must separately count user,
+system, tools and answer-budget tokens for the full model request.
