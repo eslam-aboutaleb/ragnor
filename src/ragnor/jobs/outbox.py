@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from time import perf_counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, runtime_checkable
@@ -172,6 +173,66 @@ async def _process_with_heartbeat(
 
 
 @runtime_checkable
+class GenerationPublishingJobStore(Protocol):
+    """Optional manifest publication port for production embedding workers."""
+
+    require_publication: bool
+
+    async def activate_generation(self, job: JobPayload) -> bool:
+        """Atomically publish the staged generation and complete the job."""
+        ...
+
+
+@runtime_checkable
+class RetryPolicy(Protocol):
+    """Compute delay; None means permanent failure or exhausted attempts."""
+
+    def delay(self, error: Exception, attempt: int, max_attempts: int) -> timedelta | None:
+        """Return a positive next-retry delay or terminal decision."""
+        ...
+
+
+class DefaultRetryPolicy:
+    """Historical 1/5/30-minute retry schedule, keeping local behavior stable."""
+
+    def delay(self, error: Exception, attempt: int, max_attempts: int) -> timedelta | None:
+        if attempt >= max_attempts:
+            return None
+        return RETRY_SCHEDULE[min(attempt - 1, len(RETRY_SCHEDULE) - 1)]
+
+
+@dataclass(frozen=True)
+class JobEvent:
+    """Safe structured telemetry with no payload body, exception text or credentials."""
+
+    kind: str
+    job_id: str
+    worker_id: str
+    attempt: int
+    elapsed_seconds: float
+    error_type: str | None = None
+
+
+@runtime_checkable
+class JobEventSink(Protocol):
+    """Optional observer that can forward metrics to an injected telemetry system."""
+
+    async def emit(self, event: JobEvent) -> None:
+        """Publish a sanitized job-state event."""
+        ...
+
+
+async def _emit_job_event(sink: JobEventSink | None, event: JobEvent) -> None:
+    if sink is None:
+        return
+    try:
+        await sink.emit(event)
+    except Exception as exc:
+        # Telemetry must never change a committed transaction's outcome.
+        logger.warning("Job event sink failed (%s)", type(exc).__name__)
+
+
+@runtime_checkable
 class JobProcessor(Protocol):
     """Per-job work: embed the job's payload and upsert it."""
 
@@ -187,6 +248,8 @@ async def process_pending_jobs(  # noqa: PLR0913 -- compatibility options are op
     worker_id: str | None = None,
     heartbeat_interval_seconds: float | None = None,
     require_atomic_claims: bool = False,
+    retry_policy: RetryPolicy | None = None,
+    event_sink: JobEventSink | None = None,
 ) -> int:
     """Process pending jobs.
 
@@ -210,6 +273,8 @@ async def process_pending_jobs(  # noqa: PLR0913 -- compatibility options are op
             processor is cancelled if the claim is lost.
         require_atomic_claims: Reject legacy two-step stores in multi-host
             operation. Leave False only for local, single-host use.
+        retry_policy: Optional injected backoff and permanent-error classifier.
+        event_sink: Optional injected observer of sanitized job lifecycle events.
 
     Returns:
         int: Number of jobs successfully processed.
@@ -229,6 +294,11 @@ async def process_pending_jobs(  # noqa: PLR0913 -- compatibility options are op
             "legacy two-step stores are local-only"
         )
 
+    if getattr(store, "require_publication", False) and not isinstance(
+        store, GenerationPublishingJobStore
+    ):
+        raise ValueError("publication-required store must implement activate_generation")
+
     if isinstance(store, AtomicClaimJobStore):
         jobs = await store.claim_and_mark_processing(limit, worker_id or "")
     else:
@@ -237,8 +307,14 @@ async def process_pending_jobs(  # noqa: PLR0913 -- compatibility options are op
         jobs = await store.claim_pending(limit, worker_id or "")
         jobs = await store.mark_processing(jobs, worker_id or "")
 
+    policy = retry_policy or DefaultRetryPolicy()
     processed = 0
     for job in jobs:
+        started = perf_counter()
+        await _emit_job_event(
+            event_sink,
+            JobEvent("claimed", job.job_id, worker_id or "", job.retry_count, 0.0),
+        )
         try:
             if heartbeat_interval_seconds is None:
                 await processor.process(job)
@@ -247,28 +323,63 @@ async def process_pending_jobs(  # noqa: PLR0913 -- compatibility options are op
 
             job.status = "completed"
             job.completed_at = datetime.now(UTC)
-            await store.mark_completed(job)
+            if getattr(store, "require_publication", False):
+                # Publishing performs the generation switch and the job ack in
+                # the same durable transaction; mark_completed is not safe.
+                await store.activate_generation(job)
+            else:
+                await store.mark_completed(job)
             processed += 1
+            await _emit_job_event(
+                event_sink,
+                JobEvent(
+                    "completed", job.job_id, worker_id or "",
+                    job.retry_count, perf_counter() - started,
+                ),
+            )
             logger.info("Processed job '%s'.", job.job_id)
         except LostJobOwnershipError:
-            # Do not turn an ownership conflict into a write by a stale worker.
+            await _emit_job_event(
+                event_sink,
+                JobEvent(
+                    "ownership_lost", job.job_id, worker_id or "",
+                    job.retry_count, perf_counter() - started,
+                ),
+            )
             raise
         except Exception as exc:
             job.retry_count += 1
-            if job.retry_count >= job.max_attempts:
+            delay = policy.delay(exc, job.retry_count, job.max_attempts)
+            if delay is not None and (
+                not isinstance(delay, timedelta) or delay.total_seconds() <= 0
+            ):
+                raise ValueError("retry policy must return a positive timedelta or None")
+            if delay is None:
                 job.status = "dead_letter"
-                job.status_detail = f"Exhausted {job.max_attempts} attempts ({type(exc).__name__})"
+                reason = (
+                    f"Exhausted {job.max_attempts} attempts"
+                    if job.retry_count >= job.max_attempts
+                    else "Permanent failure"
+                )
+                job.status_detail = f"{reason} ({type(exc).__name__})"
                 job.next_retry_at = None
                 job.locked_at = None
                 job.locked_by = None
             else:
-                backoff = RETRY_SCHEDULE[min(job.retry_count - 1, len(RETRY_SCHEDULE) - 1)]
-                job.next_retry_at = datetime.now(UTC) + backoff
+                job.next_retry_at = datetime.now(UTC) + delay
                 job.status = "failed"
                 job.status_detail = f"Retry scheduled ({type(exc).__name__})"
                 job.locked_at = None
                 job.locked_by = None
             await store.mark_failed(job, exc)
+            await _emit_job_event(
+                event_sink,
+                JobEvent(
+                    job.status, job.job_id, worker_id or "",
+                    job.retry_count, perf_counter() - started,
+                    error_type=type(exc).__name__,
+                ),
+            )
             logger.error(
                 "Job '%s' failed (retry %d): %s",
                 job.job_id,
