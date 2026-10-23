@@ -81,9 +81,15 @@ class ImmutableGenerationVectorAdapter:
                 raise ValueError("staged metadata cannot override generation identity")
             try:
                 canonical = json.dumps(
-                    {"source_id": source_id, "text": contents, "embedding": embedding,
-                     "metadata": dict(meta)},
-                    sort_keys=True, separators=(",", ":"), allow_nan=False,
+                    {
+                        "source_id": source_id,
+                        "text": contents,
+                        "embedding": embedding,
+                        "metadata": dict(meta),
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
                 )
             except (ValueError, TypeError) as exc:
                 raise ValueError("generation documents must be canonical JSON values") from exc
@@ -93,9 +99,13 @@ class ImmutableGenerationVectorAdapter:
                     "id": self._stable_id(self.scope, generation_key, source_id),
                     "text": contents,
                     "embedding": embedding,
-                    "metadata": {**meta, "scope": self.scope,
-                                 "generation_key": generation_key,
-                                 "content_digest": digest, "original_id": source_id},
+                    "metadata": {
+                        **meta,
+                        "scope": self.scope,
+                        "generation_key": generation_key,
+                        "content_digest": digest,
+                        "original_id": source_id,
+                    },
                 }
             )
 
@@ -112,8 +122,10 @@ class ImmutableGenerationVectorAdapter:
             if existing is not None:
                 actual = existing.get("metadata") or {}
                 expected = item["metadata"]
-                if any(actual.get(key) != expected[key] for key in
-                       ("scope", "generation_key", "content_digest")):
+                if any(
+                    actual.get(key) != expected[key]
+                    for key in ("scope", "generation_key", "content_digest")
+                ):
                     raise ValueError("immutable generation content mismatch on replay")
             else:
                 to_upsert.append(item)
