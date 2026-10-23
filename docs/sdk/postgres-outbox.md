@@ -37,3 +37,26 @@ Use unique tenant/source/revision/chunk/model generation values in idempotency k
 - Do not use an in-memory implementation to claim distributed safety.
 
 The GitHub Actions tests use a real PostgreSQL service and separate worker processes. They race two independent Python processes over 100 claims in two repeated trials, SIGKILL a worker after claim, reclaim its expired lease, and reject an obsolete acknowledgment. These tests do not certify side-effect idempotence across external vector databases or guarantee exactly-once remote execution. This is not a hosted job scheduler or message broker.
+
+## Versioned schema migrations (no runtime auto-DDL)
+
+Two schema migrations ship as read-only **SDK package resources**:
+
+- `ragnor/jobs/adapters/migrations/001_embedding_outbox.sql`
+- `ragnor/jobs/adapters/migrations/002_active_generation.sql`
+
+They must be applied in order, with your organization's migration runner
+or reviewed `psql -X -v ON_ERROR_STOP=1 -1 -f ...` commands, **before**
+enabling durable jobs. The SDK never imports a database just to install
+or create tables. The migrations use `CREATE TABLE/INDEX IF NOT EXISTS`
+and are verified twice against a real PostgreSQL service by CI.
+A production rollout from an incompatible manually created prior schema
+requires an explicit DBA-approved ALTER migration; IF NOT EXISTS alone
+does not correct mismatched existing table definitions.
+
+`tests/test_outbox_migration_distribution.py` enforces exact SQL drift
+detection between these files and the adapter's backward-compatible DDL
+reference. A wheel must include them; `pyproject.toml` specifies their
+package-data inclusion. Separate production database permissions and
+backup/rollback planning are still the host's responsibility.
+

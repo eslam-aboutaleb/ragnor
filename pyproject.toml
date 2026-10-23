@@ -115,4 +115,4 @@ ignore = [
 ]
 
 [tool.setuptools.package-data]
-ragnor = ["py.typed"]
+ragnor = ["py.typed", "jobs/adapters/migrations/*.sql"]
