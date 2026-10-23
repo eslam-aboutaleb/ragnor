@@ -31,6 +31,27 @@ jobs:
       coverage-min: 85
       build-distribution: true
 
+  adapter-contracts:
+    name: External adapter conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install core and test runner
+        run: |
+          python -m pip install -e .
+          python -m pip install "pytest>=8.3" "pytest-asyncio>=0.24"
+      - name: Verify host adapters and fail-closed contracts
+        run: |
+          python -m pytest -q tests/test_external_adapter_conformance.py tests/test_extended_adapter_conformance.py
+
   security:
     name: Shared security analysis
     uses: eslam-aboutaleb/ci-workflows/.github/workflows/security.yml@227a096a48326e07e5bcf128cfeafb9251706e78
@@ -108,7 +129,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-    needs: [python, security, workflow-validation, optional-backends]
+    needs: [python, adapter-contracts, security, workflow-validation, optional-backends]
     if: always()
     steps:
       - name: Require every qualification job to pass
