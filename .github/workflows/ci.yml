@@ -237,7 +237,7 @@ jobs:
           - extra: pgvector
             tests: tests/test_pgvector_store.py tests/test_pgvector_store_coverage.py tests/test_pgvector_strict_mode.py
           - extra: qdrant
-            tests: tests/test_vector_backends.py tests/test_qdrant_coverage.py
+            tests: tests/test_vector_backends.py tests/test_qdrant_coverage.py tests/integration/test_qdrant_generation_vectors.py
           - extra: chroma
             tests: tests/test_vector_backends.py
           - extra: faiss
