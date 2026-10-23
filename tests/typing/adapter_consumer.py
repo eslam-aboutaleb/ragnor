@@ -49,7 +49,7 @@ class HostEmbedder:
 
 
 class HostSearchStore:
-    async def vector_search(
+    async def vector_search(  # noqa: PLR0913, PLR0917
         self,
         embedding: list[float],
         n_results: int,
@@ -72,7 +72,7 @@ class HostSearchStore:
     ) -> list[dict[str, Any]]:
         return []
 
-    async def upsert(
+    async def upsert(  # noqa: PLR0913, PLR0917
         self,
         documents: list[dict[str, Any]],
         session: Any = None,
