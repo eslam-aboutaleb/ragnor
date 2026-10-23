@@ -357,11 +357,15 @@ class PostgresEmbeddingJobStore:
         params = self._ownership_params(job)
         # Exception messages may contain source content, PII or credentials:
         # only the type and fixed retry/terminal status go to the database.
-        detail = (
-            f"Exhausted {job.max_attempts} attempts ({type(error).__name__})"
-            if job.status == "dead_letter"
-            else f"Retry scheduled ({type(error).__name__})"
-        )
+        if job.status == "dead_letter":
+            reason = (
+                f"Exhausted {job.max_attempts} attempts"
+                if job.retry_count >= job.max_attempts
+                else "Permanent failure"
+            )
+            detail = f"{reason} ({type(error).__name__})"
+        else:
+            detail = f"Retry scheduled ({type(error).__name__})"
         params.update(
             {
                 "status": job.status,
