@@ -68,9 +68,15 @@ def test_type_requires_exactly_one_checked_option() -> None:
 
 
 def test_pending_independent_review_is_explicitly_accepted() -> None:
-    assert checker.validate(VALID.replace(
-        "Pending: independent review is required for storage concurrency.", "N/A: docs-only change."
-    )) == []
+    assert (
+        checker.validate(
+            VALID.replace(
+                "Pending: independent review is required for storage concurrency.",
+                "N/A: docs-only change.",
+            )
+        )
+        == []
+    )
 
 
 def test_security_review_cannot_be_invisible() -> None:
@@ -81,6 +87,9 @@ def test_security_review_cannot_be_invisible() -> None:
 
 
 def test_missing_checklist_is_not_accepted() -> None:
-    assert any("Checklist" in error for error in checker.validate(VALID.replace(
-        "- [x] I have updated documentation where appropriate", ""
-    )))
+    assert any(
+        "Checklist" in error
+        for error in checker.validate(
+            VALID.replace("- [x] I have updated documentation where appropriate", "")
+        )
+    )

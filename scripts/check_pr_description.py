@@ -73,7 +73,8 @@ def validate(body: str) -> list[str]:
 
     if "Type of Change" in pieces:
         checked = [
-            label for state, label in ITEM.findall(pieces["Type of Change"])
+            label
+            for state, label in ITEM.findall(pieces["Type of Change"])
             if state.lower() == "x" and label in TYPES
         ]
         if len(checked) != 1:
@@ -83,9 +84,7 @@ def validate(body: str) -> list[str]:
                 errors.append(f"Type of Change missing template option: {value}")
 
     verification = pieces.get("Verification Evidence", "")
-    if verification and (
-        not EVIDENCE.search(verification) or not OUTCOME.search(verification)
-    ):
+    if verification and (not EVIDENCE.search(verification) or not OUTCOME.search(verification)):
         errors.append(
             "Verification Evidence must name a concrete test or CI run and "
             "give its result or an explicit pending/unverified status"
