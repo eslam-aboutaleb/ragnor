@@ -201,6 +201,31 @@ class DefaultRetryPolicy:
         return RETRY_SCHEDULE[min(attempt - 1, len(RETRY_SCHEDULE) - 1)]
 
 
+def _schedule_job_failure(job: JobPayload, error: Exception, policy: RetryPolicy) -> None:
+    """Apply a host-selected retry/dead-letter outcome without raw error details."""
+    job.retry_count += 1
+    delay = policy.delay(error, job.retry_count, job.max_attempts)
+    if delay is not None and (
+        not isinstance(delay, timedelta) or delay.total_seconds() <= 0
+    ):
+        raise ValueError("retry policy must return a positive timedelta or None") from error
+    if delay is None:
+        job.status = "dead_letter"
+        reason = (
+            f"Exhausted {job.max_attempts} attempts"
+            if job.retry_count >= job.max_attempts
+            else "Permanent failure"
+        )
+        job.status_detail = f"{reason} ({type(error).__name__})"
+        job.next_retry_at = None
+    else:
+        job.next_retry_at = datetime.now(UTC) + delay
+        job.status = "failed"
+        job.status_detail = f"Retry scheduled ({type(error).__name__})"
+    job.locked_at = None
+    job.locked_by = None
+
+
 @dataclass(frozen=True)
 class JobEvent:
     """Safe structured telemetry with no payload body, exception text or credentials."""
@@ -348,29 +373,7 @@ async def process_pending_jobs(  # noqa: PLR0913 -- compatibility options are op
             )
             raise
         except Exception as exc:
-            job.retry_count += 1
-            delay = policy.delay(exc, job.retry_count, job.max_attempts)
-            if delay is not None and (
-                not isinstance(delay, timedelta) or delay.total_seconds() <= 0
-            ):
-                raise ValueError("retry policy must return a positive timedelta or None")
-            if delay is None:
-                job.status = "dead_letter"
-                reason = (
-                    f"Exhausted {job.max_attempts} attempts"
-                    if job.retry_count >= job.max_attempts
-                    else "Permanent failure"
-                )
-                job.status_detail = f"{reason} ({type(exc).__name__})"
-                job.next_retry_at = None
-                job.locked_at = None
-                job.locked_by = None
-            else:
-                job.next_retry_at = datetime.now(UTC) + delay
-                job.status = "failed"
-                job.status_detail = f"Retry scheduled ({type(exc).__name__})"
-                job.locked_at = None
-                job.locked_by = None
+            _schedule_job_failure(job, exc, policy)
             await store.mark_failed(job, exc)
             await _emit_job_event(
                 event_sink,
