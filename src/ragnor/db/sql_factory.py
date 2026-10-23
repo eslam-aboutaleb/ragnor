@@ -14,16 +14,13 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from ragnor.db.ports import SQLFactory
-
-if TYPE_CHECKING:
-    from ragnor.db.session import SessionProvider
+from ragnor.db.ports import SQLFactory, SessionProvider
 
 logger = logging.getLogger(__name__)
 
