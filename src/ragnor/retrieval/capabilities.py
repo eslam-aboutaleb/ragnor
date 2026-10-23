@@ -166,7 +166,7 @@ DEFAULT_PGVECTOR_CAPABILITIES = StoreCapabilities(
 
 
 def get_backend_capabilities(backend: Any) -> StoreCapabilities:
-    """Extract declared capabilities from ``backend`` or infer defaults.
+    """Extract explicitly declared capabilities; unknown backends get none.
 
     Args:
         backend: A vector index, lexical index, document store, or vector store.
@@ -177,23 +177,8 @@ def get_backend_capabilities(backend: Any) -> StoreCapabilities:
     if hasattr(backend, "capabilities") and isinstance(backend.capabilities, StoreCapabilities):
         return backend.capabilities
 
-    # Infer capabilities from type or attributes
-    type_name = type(backend).__name__.lower()
-    if "memory" in type_name:
-        return DEFAULT_MEMORY_CAPABILITIES
-    if "pgvector" in type_name:
-        return DEFAULT_PGVECTOR_CAPABILITIES
-
-    # Default fallback: minimal equality filter & fetch/delete if methods exist
-    features: set[str] = {BackendFeature.EQUALITY_FILTER}
-    if hasattr(backend, "get"):
-        features.add(BackendFeature.DOCUMENT_FETCH)
-    if hasattr(backend, "delete"):
-        features.add(BackendFeature.DOCUMENT_DELETE)
-    if hasattr(backend, "keyword_search"):
-        features.add(BackendFeature.APPROXIMATE_LEXICAL_SEARCH)
-
-    return StoreCapabilities(
-        filter_operators=frozenset({FilterOperator.EQ}),
-        features=frozenset(features),
-    )
+    # Unknown adapters have no verified capabilities. Inspecting class names
+    # ("PgVector" / "Memory") or presence of a method cannot establish
+    # transaction, tenant isolation or filter semantics. Return none and
+    # require explicit capability declarations for guarded operations.
+    return StoreCapabilities()
