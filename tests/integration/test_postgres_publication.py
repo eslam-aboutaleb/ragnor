@@ -179,3 +179,21 @@ async def test_invalid_manifest_coordinates_fail_closed() -> None:
                 await s.activate_generation(job)
     finally:
         await engine.dispose()
+
+async def test_strict_publication_mode_disallows_direct_ack_bypass() -> None:
+    engine, sessions = await _configured()
+    scope = f"strict-{uuid4()}"
+    publisher = PostgresEmbeddingJobStore(sessions, scope=scope, require_publication=True)
+    try:
+        await publisher.enqueue(
+            {"scope": scope, "idempotency_key": "first", "document_id": "d",
+             "revision": 1, "generation_key": "immutable-key"}
+        )
+        job = (await publisher.claim_and_mark_processing(1, "host"))[0]
+        with pytest.raises(RuntimeError, match="activate_generation"):
+            await publisher.mark_completed(job)
+        assert await publisher.get_active_generation("d") is None
+        assert await publisher.activate_generation(job) is True
+        assert await publisher.get_active_generation("d") == "immutable-key"
+    finally:
+        await engine.dispose()

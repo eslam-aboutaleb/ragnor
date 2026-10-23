@@ -84,3 +84,15 @@ async def test_invalid_heartbeat_interval_is_rejected() -> None:
             WaitingProcessor(asyncio.Event()),
             heartbeat_interval_seconds=0,
         )
+
+@pytest.mark.asyncio
+async def test_multi_host_claim_requirement_rejects_non_atomic_local_store() -> None:
+    store = InMemoryEmbeddingJobStore([JobPayload(job_id="local")])
+    processor = WaitingProcessor(asyncio.Event())
+    with pytest.raises(ValueError, match="atomic"):
+        await process_pending_jobs(
+            store,
+            processor,
+            worker_id="multiple-hosts",
+            require_atomic_claims=True,
+        )
