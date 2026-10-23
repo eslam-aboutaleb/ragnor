@@ -19,12 +19,16 @@ class GenerationManifest(Protocol):
     async def get_active_generation(self, document_id: str) -> str | None:
         """Read a committed active generation for this document."""
         raise NotImplementedError
+
+
 class GenerationVectorReader(Protocol[T]):
     """Provider adapter that only reads one immutable generation key."""
 
     async def read_generation(self, generation_key: str) -> T:
         """Return content from exactly the specified immutable generation."""
         raise NotImplementedError
+
+
 class ActiveGenerationReader:
     """Fail closed when scope or active generation is missing.
 

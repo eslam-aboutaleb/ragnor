@@ -96,6 +96,7 @@ class EmbeddingJobStore(Protocol):
         using ``FOR UPDATE SKIP LOCKED`` so concurrent workers never
         claim the same row."""
         raise NotImplementedError
+
     async def mark_processing(self, jobs: list[JobPayload], worker_id: str) -> list[JobPayload]:
         """Transition jobs to ``processing`` and stamp the lock.
 
@@ -104,15 +105,19 @@ class EmbeddingJobStore(Protocol):
         processed twice.
         """
         raise NotImplementedError
+
     async def mark_completed(self, job: JobPayload) -> None:
         """Persist a successfully processed job as ``completed``."""
         raise NotImplementedError
+
     async def mark_failed(self, job: JobPayload, error: Exception) -> None:
         """Persist a failed job's retry/dead-letter transition."""
         raise NotImplementedError
+
     async def reclaim_stale(self, stale_after_seconds: float | None = None) -> int:
         """Reset jobs abandoned in ``processing`` back to ``pending``."""
         raise NotImplementedError
+
     async def enqueue(self, payload: dict[str, Any], session: Any = None) -> None:
         """Write a new pending job row.
 
@@ -122,6 +127,8 @@ class EmbeddingJobStore(Protocol):
         own transaction and commits.
         """
         raise NotImplementedError
+
+
 class LostJobOwnershipError(RuntimeError):
     """Stale owner/lease/generation cannot alter an outbox job."""
 
@@ -133,6 +140,8 @@ class AtomicClaimJobStore(Protocol):
     async def claim_and_mark_processing(self, limit: int, worker_id: str) -> list[JobPayload]:
         """Claim and transition jobs in one durable transaction."""
         raise NotImplementedError
+
+
 @runtime_checkable
 class LeaseRenewalJobStore(Protocol):
     """Optional host-driven lease extension for long-running jobs."""
@@ -140,6 +149,8 @@ class LeaseRenewalJobStore(Protocol):
     async def renew_lease(self, job: JobPayload, *, lease_seconds: float | None = None) -> None:
         """Renew only the active owner and claim-generation lease."""
         raise NotImplementedError
+
+
 async def _process_with_heartbeat(
     store: LeaseRenewalJobStore,
     processor: JobProcessor,
@@ -170,6 +181,8 @@ class GenerationPublishingJobStore(Protocol):
     async def activate_generation(self, job: JobPayload) -> bool:
         """Atomically publish the staged generation and complete the job."""
         raise NotImplementedError
+
+
 @runtime_checkable
 class RetryPolicy(Protocol):
     """Compute delay; None means permanent failure or exhausted attempts."""
@@ -177,6 +190,8 @@ class RetryPolicy(Protocol):
     def delay(self, error: Exception, attempt: int, max_attempts: int) -> timedelta | None:
         """Return a positive next-retry delay or terminal decision."""
         raise NotImplementedError
+
+
 class DefaultRetryPolicy:
     """Historical 1/5/30-minute retry schedule, keeping local behavior stable."""
 
@@ -228,6 +243,8 @@ class JobEventSink(Protocol):
     async def emit(self, event: JobEvent) -> None:
         """Publish a sanitized job-state event."""
         raise NotImplementedError
+
+
 async def _emit_job_event(sink: JobEventSink | None, event: JobEvent) -> None:
     if sink is None:
         return
@@ -245,6 +262,8 @@ class JobProcessor(Protocol):
     async def process(self, job: JobPayload) -> None:
         """Process one claimed job. Raises on failure."""
         raise NotImplementedError
+
+
 async def process_pending_jobs(  # noqa: PLR0913 -- compatibility options are opt-in
     store: EmbeddingJobStore,
     processor: JobProcessor,

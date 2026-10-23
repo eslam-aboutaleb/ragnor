@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from ragnor.db.ports import SessionProvider
 
+
 def create_session_factory(database_url: str) -> SessionProvider:
     """Build a session factory bound to a new async engine.
 

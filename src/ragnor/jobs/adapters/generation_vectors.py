@@ -26,11 +26,14 @@ class GenerationDocumentStore(Protocol):
     ) -> list[dict[str, Any]]:
         """Return documents with id, document, and selected payload metadata."""
         raise NotImplementedError
+
     async def upsert(
         self, documents: list[dict[str, Any]], session: Any = None, **kwargs: Any
     ) -> None:
         """Persist immutable generation-qualified document ids."""
         raise NotImplementedError
+
+
 class ImmutableGenerationVectorAdapter:
     """Stage retry-safe, tenant-qualified vectors and read exactly one generation.
 

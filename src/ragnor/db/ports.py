@@ -9,6 +9,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import Any, Protocol, runtime_checkable
 
+
 @runtime_checkable
 class SessionProvider(Protocol):
     """Host-owned callable returning an async session context manager."""
