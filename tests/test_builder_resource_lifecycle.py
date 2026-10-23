@@ -120,8 +120,7 @@ async def test_async_context_cleans_up_after_body_exception() -> None:
             raise ValueError("body")
     assert events == ["owned"]
     with pytest.raises(RuntimeError, match="closed"):
-        async with rag:
-            pass
+        await rag.__aenter__()
 
 
 @pytest.mark.asyncio

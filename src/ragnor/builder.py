@@ -26,6 +26,7 @@ no driver, and no API key.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -543,13 +544,17 @@ class RagnorBuilder:
             strategy=strategy,
             event_sink=self._event_sink,
         )
+        # Transfer ownership exactly once: a reusable builder must never
+        # accidentally register the same closeable in two SDK clients.
+        owned_resources = tuple(self._owned_resources)
+        self._owned_resources.clear()
         return Ragnor(
             store=store,
             pipeline=pipeline,
             retriever=retriever,
             version_store=version_store,
             settings=settings,
-            owned_resources=tuple(self._owned_resources),
+            owned_resources=owned_resources,
         )
 
 
@@ -591,6 +596,7 @@ class Ragnor:
         self._settings = settings
         self._owned_resources = owned_resources
         self._closed = False
+        self._close_task: asyncio.Task[None] | None = None
 
     def _ensure_open(self) -> None:
         if self._closed:
@@ -605,15 +611,7 @@ class Ragnor:
         """Close explicitly owned resources, leaving borrowed clients open."""
         await self.aclose()
 
-    async def aclose(self) -> None:
-        """Close owned async resources once, in reverse registration order.
-
-        All resources are attempted even if one raises. Multiple cleanup
-        failures are grouped so no error is silently discarded.
-        """
-        if self._closed:
-            return
-        self._closed = True
+    async def _close_owned_resources(self) -> None:
         errors: list[Exception] = []
         for resource in reversed(self._owned_resources):
             try:
@@ -624,6 +622,24 @@ class Ragnor:
             raise ExceptionGroup("Ragnor resource cleanup failed", errors)
         if errors:
             raise errors[0]
+
+    async def aclose(self) -> None:
+        """Close explicitly owned resources exactly once.
+
+        All callers await the same cleanup task. Cancelling a caller does not
+        abandon disposal of remaining SDK-owned resources.
+        """
+        if self._close_task is None:
+            self._closed = True
+            self._close_task = asyncio.create_task(self._close_owned_resources())
+        try:
+            await asyncio.shield(self._close_task)
+        except asyncio.CancelledError:
+            # Complete owned-resource cleanup before surfacing caller
+            # cancellation. The shield prevents cancellation propagation
+            # into the owned cleanup task.
+            await asyncio.shield(self._close_task)
+            raise
 
     async def ingest(
         self,

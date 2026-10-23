@@ -15,4 +15,4 @@ class AsyncCloseable(Protocol):
 
     async def aclose(self) -> None:
         """Release the resource; may be called only once by SDK lifecycle."""
-        ...
+        raise NotImplementedError
