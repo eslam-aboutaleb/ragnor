@@ -111,3 +111,6 @@ ignore = [
 "src/ragnor/stores/pgvector.py" = [
     "S608",
 ]
+
+[tool.setuptools.package-data]
+ragnor = ["py.typed"]
