@@ -97,6 +97,7 @@ class PostgresEmbeddingJobStore:
         *,
         scope: str,
         lease_seconds: float = 300.0,
+        require_publication: bool = False,
     ) -> None:
         if not scope or not scope.strip():
             raise ValueError("scope must be non-empty")
@@ -105,6 +106,7 @@ class PostgresEmbeddingJobStore:
         self._sessions = sessions
         self.scope = scope
         self.lease_seconds = lease_seconds
+        self.require_publication = require_publication
 
     async def enqueue(self, payload: dict[str, Any], session: Any = None) -> None:
         if payload.get("scope") != self.scope:
@@ -328,6 +330,10 @@ class PostgresEmbeddingJobStore:
         return activate or same
 
     async def mark_completed(self, job: JobPayload) -> None:
+        if self.require_publication:
+            raise RuntimeError(
+                "strict publication requires activate_generation() instead of direct completion"
+            )
         params = self._ownership_params(job)
         async with self._sessions() as session, session.begin():
             result = await session.execute(

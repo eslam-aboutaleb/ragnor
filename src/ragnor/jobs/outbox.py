@@ -186,6 +186,7 @@ async def process_pending_jobs(
     limit: int = 10,
     worker_id: str | None = None,
     heartbeat_interval_seconds: float | None = None,
+    require_atomic_claims: bool = False,
 ) -> int:
     """Process pending jobs.
 
@@ -207,6 +208,8 @@ async def process_pending_jobs(
         heartbeat_interval_seconds: Optional positive renewal cadence. When
             supplied, the adapter MUST implement ``renew_lease`` and the
             processor is cancelled if the claim is lost.
+        require_atomic_claims: Reject legacy two-step stores in multi-host
+            operation. Leave False only for local, single-host use.
 
     Returns:
         int: Number of jobs successfully processed.
@@ -219,6 +222,12 @@ async def process_pending_jobs(
         lease = getattr(store, "lease_seconds", None)
         if isinstance(lease, (int, float)) and heartbeat_interval_seconds >= lease:
             raise ValueError("heartbeat_interval_seconds must be shorter than lease_seconds")
+
+    if require_atomic_claims and not isinstance(store, AtomicClaimJobStore):
+        raise ValueError(
+            "multi-host processing requires an atomic claim-and-mark adapter; "
+            "legacy two-step stores are local-only"
+        )
 
     if isinstance(store, AtomicClaimJobStore):
         jobs = await store.claim_and_mark_processing(limit, worker_id or "")

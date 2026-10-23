@@ -54,3 +54,18 @@ Remaining independent gates: real production vector backend API-level
 fencing; query authorization/RLS; DB disconnect midway through transaction;
 fault injection across all provider write boundaries; performance/retention
 baselines and human concurrency/security review.
+
+## Enforcing the contract in production
+
+Instantiate `PostgresEmbeddingJobStore(..., require_publication=True)` when
+job payloads stage external vectors. This explicitly **disables**
+`mark_completed` as a bypass around the durable active-generation manifest.
+The host must stage immutable vectors, then call `activate_generation(job)`.
+The generic legacy `process_pending_jobs` worker still calls
+`mark_completed` and therefore is **not** a publication worker in strict
+mode; do not silently route strict jobs through that generic loop.
+
+For any multi-host worker using the generic processing API, pass
+`require_atomic_claims=True` to reject local two-step stores up front.
+These flags are opt-in for backward compatibility, so production
+configuration validation must explicitly enable them.
