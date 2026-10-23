@@ -147,13 +147,13 @@ def test_sql_port_is_importable_without_sqlalchemy() -> None:
         "assert SQLFactory.__name__ == 'SQLFactory'\n"
     )
     env = dict(os.environ)
-    completed = subprocess.run(
+    completed = subprocess.run(  # noqa: S603 -- constant script; no shell or user input
         [sys.executable, "-c", script],
         capture_output=True,
         text=True,
         check=False,
         env=env,
-    )  # noqa: S603 -- fixed interpreter and constant source, no shell or user input
+    )
     assert completed.returncode == 0, completed.stderr
 
 
