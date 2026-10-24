@@ -174,6 +174,21 @@ class RelationalEmbeddingJobStore:
                 for column in table.columns:
                     if column.name not in actual:
                         missing.append(f"{table.name}.{column.name}")
+                primary = set(
+                    inspector.get_pk_constraint(table.name).get("constrained_columns") or ()
+                )
+                expected_primary = {column.name for column in table.primary_key.columns}
+                if primary != expected_primary:
+                    missing.append(f"{table.name} primary key")
+            if inspector.has_table(jobs.name):
+                unique_sets = {
+                    frozenset(item.get("column_names") or ())
+                    for item in inspector.get_unique_constraints(jobs.name)
+                }
+                if frozenset(("scope", "idempotency_key")) not in unique_sets:
+                    missing.append(
+                        "ragnor_embedding_jobs(scope, idempotency_key) unique constraint"
+                    )
             if missing:
                 raise RuntimeError(
                     "host database schema is missing required outbox objects: " + ", ".join(missing)
