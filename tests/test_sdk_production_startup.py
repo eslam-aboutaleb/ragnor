@@ -378,3 +378,33 @@ async def test_production_settings_cannot_silently_select_local_fallbacks():
     )
     with pytest.raises(ConfigurationError, match="explicit"):
         await candidate.build()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", ["not_callable", "embed_query", "embed_documents"])
+async def test_generic_production_provider_rejects_nonexecutable_embedding_ports(invalid):
+    from ragnor.exceptions import ConfigurationError
+
+    candidate = builder("host-provider-model", 2)
+    if invalid == "not_callable":
+        candidate._embedder = object()
+    else:
+        setattr(candidate._embedder, invalid, None)
+    with pytest.raises(ConfigurationError, match="embedder"):
+        await candidate.build()
+
+
+@pytest.mark.asyncio
+async def test_generic_batch_callable_can_run_readiness_without_a_vendor_sdk():
+    calls = []
+
+    async def host_provider(texts):
+        calls.append(texts)
+        return [[1.0, 0.0] for _ in texts]
+
+    async def ready():
+        assert await host_provider(["readiness"]) == [[1.0, 0.0]]
+
+    candidate = builder("host-provider-model", 2).with_embedder(host_provider)
+    async with await candidate.with_startup_check(ready).build():
+        assert calls == [["readiness"]]

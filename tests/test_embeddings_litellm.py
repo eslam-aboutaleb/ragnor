@@ -4,12 +4,12 @@ Covers the ``cache_max_entries`` LRU cache (hit, eviction, mixed
 hit/miss ordering), the ``max_batch_size`` splitting, the unchanged
 defaults (single call, no cache), the ``embed_query`` /
 ``embed_documents`` surface, and constructor validation.
-``litellm.embedding`` is mocked so no network call happens.
+``litellm.aembedding`` is mocked so no network call happens.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -31,10 +31,10 @@ def _expected_vector(text: str) -> list[float]:
 
 def _recording_embedding(
     calls: list[tuple[list[str], dict[str, Any]]],
-) -> Callable[..., MagicMock]:
-    """Build a fake ``litellm.embedding`` recording inputs and kwargs."""
+) -> Callable[..., Awaitable[MagicMock]]:
+    """Build a fake ``litellm.aembedding`` recording inputs and kwargs."""
 
-    def _fake_embedding(**kwargs: Any) -> MagicMock:
+    async def _fake_embedding(**kwargs: Any) -> MagicMock:
         batch = list(kwargs["input"])
         calls.append((batch, kwargs))
         return _mock_response([_expected_vector(text) for text in batch])
@@ -48,7 +48,7 @@ class TestLitellmEmbeddingFunctionDefaults:
         calls: list[tuple[list[str], dict[str, Any]]] = []
 
         with patch(
-            "ragnor.embeddings.litellm.litellm.embedding",
+            "ragnor.embeddings.litellm.litellm.aembedding",
             side_effect=_recording_embedding(calls),
         ) as mock_embed:
             first = await fn(["hello", "world"])
@@ -74,7 +74,7 @@ class TestLitellmEmbeddingFunctionDefaults:
         calls: list[tuple[list[str], dict[str, Any]]] = []
 
         with patch(
-            "ragnor.embeddings.litellm.litellm.embedding",
+            "ragnor.embeddings.litellm.litellm.aembedding",
             side_effect=_recording_embedding(calls),
         ):
             await fn(["hello"])
@@ -87,7 +87,7 @@ class TestLitellmEmbeddingFunctionDefaults:
     async def test_embed_query_returns_a_single_vector(self) -> None:
         fn = LitellmEmbeddingFunction(api_key="k", model_name="m")
 
-        with patch("ragnor.embeddings.litellm.litellm.embedding") as mock_embed:
+        with patch("ragnor.embeddings.litellm.litellm.aembedding") as mock_embed:
             mock_embed.return_value = _mock_response([_expected_vector("hello")])
             result = await fn.embed_query("hello")
 
@@ -97,7 +97,7 @@ class TestLitellmEmbeddingFunctionDefaults:
     async def test_embed_query_accepts_a_single_element_list(self) -> None:
         fn = LitellmEmbeddingFunction(api_key="k", model_name="m")
 
-        with patch("ragnor.embeddings.litellm.litellm.embedding") as mock_embed:
+        with patch("ragnor.embeddings.litellm.litellm.aembedding") as mock_embed:
             mock_embed.return_value = _mock_response([_expected_vector("hello")])
             result = await fn.embed_query(["hello"])
 
@@ -106,7 +106,7 @@ class TestLitellmEmbeddingFunctionDefaults:
     async def test_embed_documents_returns_one_vector_per_document(self) -> None:
         fn = LitellmEmbeddingFunction(api_key="k", model_name="m")
 
-        with patch("ragnor.embeddings.litellm.litellm.embedding") as mock_embed:
+        with patch("ragnor.embeddings.litellm.litellm.aembedding") as mock_embed:
             mock_embed.return_value = _mock_response([_expected_vector("a"), _expected_vector("b")])
             result = await fn.embed_documents(["a", "b"])
 
@@ -119,7 +119,7 @@ class TestLitellmEmbeddingFunctionCache:
         calls: list[tuple[list[str], dict[str, Any]]] = []
 
         with patch(
-            "ragnor.embeddings.litellm.litellm.embedding",
+            "ragnor.embeddings.litellm.litellm.aembedding",
             side_effect=_recording_embedding(calls),
         ) as mock_embed:
             first = await fn(["alpha", "beta"])
@@ -141,7 +141,7 @@ class TestLitellmEmbeddingFunctionCache:
         calls: list[tuple[list[str], dict[str, Any]]] = []
 
         with patch(
-            "ragnor.embeddings.litellm.litellm.embedding",
+            "ragnor.embeddings.litellm.litellm.aembedding",
             side_effect=_recording_embedding(calls),
         ) as mock_embed:
             await fn(["alpha"])
@@ -157,7 +157,7 @@ class TestLitellmEmbeddingFunctionCache:
         calls: list[tuple[list[str], dict[str, Any]]] = []
 
         with patch(
-            "ragnor.embeddings.litellm.litellm.embedding",
+            "ragnor.embeddings.litellm.litellm.aembedding",
             side_effect=_recording_embedding(calls),
         ):
             await fn(["alpha", "omega"])
@@ -185,7 +185,7 @@ class TestLitellmEmbeddingFunctionBatching:
         calls: list[tuple[list[str], dict[str, Any]]] = []
 
         with patch(
-            "ragnor.embeddings.litellm.litellm.embedding",
+            "ragnor.embeddings.litellm.litellm.aembedding",
             side_effect=_recording_embedding(calls),
         ) as mock_embed:
             result = await fn(texts)
@@ -204,7 +204,7 @@ class TestLitellmEmbeddingFunctionBatching:
         calls: list[tuple[list[str], dict[str, Any]]] = []
 
         with patch(
-            "ragnor.embeddings.litellm.litellm.embedding",
+            "ragnor.embeddings.litellm.litellm.aembedding",
             side_effect=_recording_embedding(calls),
         ):
             await fn(["a", "b", "c"])
@@ -219,7 +219,7 @@ class TestLitellmEmbeddingFunctionBatching:
         calls: list[tuple[list[str], dict[str, Any]]] = []
 
         with patch(
-            "ragnor.embeddings.litellm.litellm.embedding",
+            "ragnor.embeddings.litellm.litellm.aembedding",
             side_effect=_recording_embedding(calls),
         ) as mock_embed:
             await fn(["alpha", "beta"])
@@ -249,3 +249,24 @@ class TestLitellmEmbeddingFunctionValidation:
 
         assert fn.cache_max_entries == 0
         assert fn.max_batch_size is None
+
+
+@pytest.mark.parametrize("cache_max_entries", [0, 8])
+async def test_wrong_batch_count_is_rejected_without_caching(cache_max_entries: int) -> None:
+    fn = LitellmEmbeddingFunction(
+        api_key="k", model_name="m", cache_max_entries=cache_max_entries, max_batch_size=2
+    )
+    with patch(
+        "ragnor.embeddings.litellm.litellm.aembedding",
+        return_value=_mock_response([[1.0]]),
+    ):
+        with pytest.raises(ValueError, match="embedding count"):
+            await fn(["first", "second", "third"])
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+    with patch(
+        "ragnor.embeddings.litellm.litellm.aembedding", side_effect=_recording_embedding(calls)
+    ):
+        assert await fn(["first", "second", "third"]) == [
+            _expected_vector(text) for text in ["first", "second", "third"]
+        ]
+    assert [batch for batch, _ in calls] == [["first", "second"], ["third"]]
