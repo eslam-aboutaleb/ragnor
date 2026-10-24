@@ -1,7 +1,7 @@
 """Tests for ragnor.embeddings.
 
 Covers the LiteLLM embedding function (with
-``litellm.embedding`` mocked), the settings-driven provider
+``litellm.aembedding`` mocked), the settings-driven provider
 factory, the provider registry, and the dimension registry
 including its warn-and-fallback path.
 """
@@ -55,7 +55,7 @@ class TestLitellmEmbeddingFunction:
         response = _mock_response([[0.1, 0.2], [0.3, 0.4]])
 
         with patch(
-            "ragnor.embeddings.litellm.litellm.embedding", return_value=response
+            "ragnor.embeddings.litellm.litellm.aembedding", return_value=response
         ) as mock_embed:
             result = await fn(["hello", "world"])
 
@@ -75,7 +75,7 @@ class TestLitellmEmbeddingFunction:
         response = _mock_response([[0.1, 0.2]])
 
         with patch(
-            "ragnor.embeddings.litellm.litellm.embedding", return_value=response
+            "ragnor.embeddings.litellm.litellm.aembedding", return_value=response
         ) as mock_embed:
             result = await fn(["hello"])
 
@@ -92,7 +92,7 @@ class TestLitellmEmbeddingFunction:
         response = _mock_response([[0.5, 0.6]])
 
         with patch(
-            "ragnor.embeddings.litellm.litellm.embedding", return_value=response
+            "ragnor.embeddings.litellm.litellm.aembedding", return_value=response
         ) as mock_embed:
             result = await fn.embed_query("hello")
 
@@ -103,7 +103,7 @@ class TestLitellmEmbeddingFunction:
         fn = LitellmEmbeddingFunction(api_key="k", model_name="m")
         response = _mock_response([[0.7, 0.8]])
 
-        with patch("ragnor.embeddings.litellm.litellm.embedding", return_value=response):
+        with patch("ragnor.embeddings.litellm.litellm.aembedding", return_value=response):
             result = await fn.embed_query(["hello"])
 
         assert result == [0.7, 0.8]
@@ -112,7 +112,7 @@ class TestLitellmEmbeddingFunction:
         fn = LitellmEmbeddingFunction(api_key="k", model_name="m")
         response = _mock_response([[0.1, 0.2], [0.3, 0.4]])
 
-        with patch("ragnor.embeddings.litellm.litellm.embedding", return_value=response):
+        with patch("ragnor.embeddings.litellm.litellm.aembedding", return_value=response):
             result = await fn.embed_documents(["a", "b"])
 
         assert result == [[0.1, 0.2], [0.3, 0.4]]
