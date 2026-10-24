@@ -236,13 +236,15 @@ def _handle_retrieval_exception(exc: Exception, stage: str, strict: bool) -> lis
         ),
     ):
         raise exc
-    logger.error("%s retrieval failed: %s", stage, exc)
+    logger.error("%s retrieval failed: %s", stage, type(exc).__name__)
     if strict:
         if isinstance(exc, RetrievalError):
             raise exc
         if isinstance(exc, TimeoutError):
-            raise OperationTimeoutError(f"{stage} retrieval timed out: {exc}") from exc
-        raise BackendUnavailableError(f"{stage} retrieval failed: {exc}") from exc
+            raise OperationTimeoutError(
+                f"{stage} retrieval timed out ({type(exc).__name__})"
+            ) from exc
+        raise BackendUnavailableError(f"{stage} retrieval failed ({type(exc).__name__})") from exc
     return []
 
 

@@ -565,5 +565,5 @@ class ChromaStore(HybridVectorStore):
             )
             logger.info("Upserted %d documents to %s.", len(documents), self.table_name)
         except Exception as exc:
-            logger.error("Upsert failed on %s: %s", self.table_name, exc)
+            logger.error("Upsert failed on %s: %s", self.table_name, type(exc).__name__)
             raise

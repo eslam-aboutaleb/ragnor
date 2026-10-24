@@ -595,7 +595,7 @@ class TestQdrantStore:
 
         store = _qdrant_store(_FailingClient())
 
-        with pytest.raises(RetrievalError, match="qdrant down"):
+        with pytest.raises(RetrievalError) as caught:
             await store.hybrid_search(
                 QUERY,
                 QUERY_EMBEDDING,
@@ -603,6 +603,10 @@ class TestQdrantStore:
                 threshold=THRESHOLD,
                 strict=True,
             )
+
+        assert caught.value.code == "ERR_BACKEND_UNAVAILABLE"
+        assert str(caught.value.__cause__) == "qdrant down"
+        assert "qdrant down" not in str(caught.value)
 
         assert (
             await store.hybrid_search(QUERY, QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD)
@@ -960,7 +964,7 @@ class TestChromaStore:
 
         store = _chroma_store(_FailingClient())
 
-        with pytest.raises(RetrievalError, match="chroma down"):
+        with pytest.raises(RetrievalError) as caught:
             await store.hybrid_search(
                 QUERY,
                 QUERY_EMBEDDING,
@@ -968,6 +972,10 @@ class TestChromaStore:
                 threshold=THRESHOLD,
                 strict=True,
             )
+
+        assert caught.value.code == "ERR_BACKEND_UNAVAILABLE"
+        assert str(caught.value.__cause__) == "chroma down"
+        assert "chroma down" not in str(caught.value)
 
         assert (
             await store.hybrid_search(QUERY, QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD)
@@ -1063,8 +1071,12 @@ class TestChromaStore:
 
         store = _chroma_store(_FailingClient())
 
-        with pytest.raises(RetrievalError, match="chroma down"):
+        with pytest.raises(RetrievalError) as caught:
             await store.count(strict=True)
+
+        assert caught.value.code == "ERR_BACKEND_UNAVAILABLE"
+        assert str(caught.value.__cause__) == "chroma down"
+        assert "chroma down" not in str(caught.value)
 
         assert await store.count() == 0
 
@@ -1403,7 +1415,7 @@ class TestFaissStore:
 
         store = _faiss_store(_FailingIndex())
 
-        with pytest.raises(RetrievalError, match="faiss down"):
+        with pytest.raises(RetrievalError) as caught:
             await store.hybrid_search(
                 QUERY,
                 QUERY_EMBEDDING,
@@ -1411,6 +1423,10 @@ class TestFaissStore:
                 threshold=THRESHOLD,
                 strict=True,
             )
+
+        assert caught.value.code == "ERR_BACKEND_UNAVAILABLE"
+        assert str(caught.value.__cause__) == "faiss down"
+        assert "faiss down" not in str(caught.value)
 
         assert (
             await store.hybrid_search(QUERY, QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD)

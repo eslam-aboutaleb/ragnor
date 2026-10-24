@@ -22,7 +22,11 @@ async def test_real_postgres_migrations_are_idempotent_and_have_required_columns
     try:
         for _ in range(2):
             async with engine.begin() as connection:
-                for filename in ("001_embedding_outbox.sql", "002_active_generation.sql"):
+                for filename in (
+                    "001_embedding_outbox.sql",
+                    "002_active_generation.sql",
+                    "003_generation_reservations.sql",
+                ):
                     resource = files("ragnor.jobs.adapters").joinpath("migrations", filename)
                     for statement in resource.read_text(encoding="utf-8").split(";"):
                         if statement.strip():

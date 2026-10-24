@@ -410,11 +410,15 @@ class EmbeddingExecutor:
             except Exception as exc:  # noqa: BLE001
                 is_transient, retry_after = _classify_exception(exc)
                 if not is_transient:
-                    raise EmbeddingPermanentError(str(exc)) from exc
-                last_exc = EmbeddingTransientError(str(exc), retry_after=retry_after)
+                    raise EmbeddingPermanentError(
+                        f"Embedding provider failed ({type(exc).__name__})"
+                    ) from exc
+                last_exc = EmbeddingTransientError(
+                    f"Embedding provider failed ({type(exc).__name__})", retry_after=retry_after
+                )
                 if attempt == self._max_retries:
                     raise EmbeddingTransientError(
-                        f"Exhausted {self._max_retries} retries: {exc}",
+                        f"Exhausted {self._max_retries} retries ({type(exc).__name__})",
                         retry_after=retry_after,
                     ) from exc
 

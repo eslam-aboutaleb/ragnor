@@ -35,3 +35,10 @@ with SyncRagnor.from_builder(make_builder) as client:
    - `client.close()` shuts down the underlying async resources via `await ragnor.aclose()`, stops the background event loop, and joins the worker thread.
    - `close()` is idempotent; multiple calls are safe no-ops.
    - Operations support an explicit `timeout` parameter and raise `OperationTimeoutError` upon expiration.
+
+
+The PostgreSQL integration suite exercises cancellation of an actual
+`pg_sleep` query through the synchronous timeout boundary, then verifies
+connection checkout, pool disposal and managed thread/loop shutdown. This
+qualifies the tested SQL driver path; other owned resources must honor
+cancellation and their own close contracts.

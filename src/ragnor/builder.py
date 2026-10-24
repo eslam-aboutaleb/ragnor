@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from ragnor.chunking import SlidingWindowChunker
 from ragnor.chunking.base import Chunker
-from ragnor.config import RagSettings
+from ragnor.config import DeploymentMode, RagSettings
 from ragnor.embeddings.base import EmbeddingFunction
 from ragnor.embeddings.dimensions import (
     has_registered_embedding_dimension,
@@ -315,7 +315,9 @@ class RagnorBuilder:
         self._job_store = job_store
         self._authorizer = authorizer
         self._event_sink = event_sink
-        self._production_mode = production_mode
+        self._production_mode = production_mode or (
+            getattr(settings, "deployment_mode", None) == DeploymentMode.PRODUCTION
+        )
         self._owned_resources: list[AsyncCloseable] = []
 
     def __repr__(self) -> str:
@@ -484,6 +486,8 @@ class RagnorBuilder:
         return self
 
     def _validate_production_dependencies(self) -> None:
+        if getattr(self._settings, "deployment_mode", None) == DeploymentMode.PRODUCTION:
+            self._production_mode = True
         if not self._production_mode:
             return
         required = {
@@ -549,6 +553,25 @@ class RagnorBuilder:
             raise ConfigurationError(
                 "production store embedding dimension does not match the configured embedding_dim"
             )
+
+        # Validate the executable ports, not just descriptive capability flags.
+        for name, component, methods in (
+            (
+                "version_store",
+                self._version_store,
+                ("find_active", "close_active", "create_version", "delete_chunks"),
+            ),
+            ("store", self._store, ("upsert", "count")),
+        ):
+            missing_methods = [
+                method for method in methods if not callable(getattr(component, method, None))
+            ]
+            if missing_methods:
+                raise ConfigurationError(
+                    f"production {name} must implement: " + ", ".join(missing_methods)
+                )
+        if not callable(self._session_factory):
+            raise ConfigurationError("production session_factory must be callable")
 
     async def build(self) -> Ragnor:
         """Wire the components into a :class:`Ragnor` facade.
@@ -779,10 +802,10 @@ class Ragnor:
             except OperationTimeoutError:
                 raise
             except TimeoutError as exc:
-                raise OperationTimeoutError(f"Ingestion timed out: {exc}") from exc
+                raise OperationTimeoutError(f"Ingestion timed out ({type(exc).__name__})") from exc
             except ConnectionError as exc:
                 raise BackendUnavailableError(
-                    f"Ingestion backend connection failed: {exc}"
+                    f"Ingestion backend connection failed ({type(exc).__name__})"
                 ) from exc
 
     async def search(
@@ -809,9 +832,11 @@ class Ragnor:
             except OperationTimeoutError:
                 raise
             except TimeoutError as exc:
-                raise OperationTimeoutError(f"Count timed out: {exc}") from exc
+                raise OperationTimeoutError(f"Count timed out ({type(exc).__name__})") from exc
             except ConnectionError as exc:
-                raise BackendUnavailableError(f"Count backend connection failed: {exc}") from exc
+                raise BackendUnavailableError(
+                    f"Count backend connection failed ({type(exc).__name__})"
+                ) from exc
 
     def assemble_evidence(
         self,

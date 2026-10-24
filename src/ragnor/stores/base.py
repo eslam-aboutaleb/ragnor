@@ -491,14 +491,14 @@ class HybridVectorStore(VectorStore):
             )
             return fuse_hybrid(vector_results, keyword_results, n_results)
         except Exception as exc:
-            logger.error("Hybrid search failed on %s: %s", self.table_name, exc)
+            logger.error("Hybrid search failed on %s: %s", self.table_name, type(exc).__name__)
             if strict:
                 if isinstance(exc, TimeoutError):
                     raise OperationTimeoutError(
-                        f"Hybrid search timed out on {self.table_name}: {exc}"
+                        f"Hybrid search timed out on {self.table_name} ({type(exc).__name__})"
                     ) from exc
                 raise BackendUnavailableError(
-                    f"Hybrid search failed on {self.table_name}: {exc}"
+                    f"Hybrid search failed on {self.table_name} ({type(exc).__name__})"
                 ) from exc
             return []
 

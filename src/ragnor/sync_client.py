@@ -139,7 +139,9 @@ class SyncRagnor:
                 ) from exc
             if isinstance(exc, RagnorError):
                 raise
-            raise ConfigurationError(f"Failed to build Ragnor instance: {exc}") from exc
+            raise ConfigurationError(
+                f"Failed to build Ragnor instance ({type(exc).__name__})"
+            ) from exc
 
         return cls(ragnor_instance, loop=loop, thread=thread, default_timeout=timeout)
 
@@ -212,7 +214,7 @@ class SyncRagnor:
         except (RagnorError, RuntimeError, ValueError):
             raise
         except Exception as exc:
-            raise RagnorError(f"Sync operation failed: {exc}") from exc
+            raise RagnorError(f"Sync operation failed ({type(exc).__name__})") from exc
 
     def ingest(
         self,

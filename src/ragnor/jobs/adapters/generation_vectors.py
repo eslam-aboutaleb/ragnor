@@ -36,20 +36,47 @@ class GenerationDocumentStore(Protocol):
         raise NotImplementedError
 
 
+class GenerationReservations(Protocol):
+    """Atomically bind a tenant's generation to one complete content digest.
+
+    Reservations must commit durably before returning, survive failed vector
+    writes and reject a different digest forever while the generation can be
+    read or replayed. Identical retries may proceed concurrently.
+    """
+
+    scope: str
+
+    async def reserve_generation(self, generation_key: str, content_digest: str) -> None:
+        """Reserve once, allow identical retries, reject conflicting content."""
+        raise NotImplementedError
+
+
 class ImmutableGenerationVectorAdapter:
     """Stage retry-safe, tenant-qualified vectors and read exactly one generation.
 
     Caller MUST first stage all chunks, then atomically publish the generation
     through an independent durable manifest. Do not expose `store` as the
-    application's unfiltered reader. Concurrent conflicting stages of the
-    same generation require external serialization/content-addressed keys;
-    the read-then-write check is not cross-provider atomic.
+    application's unfiltered reader. A durable, atomic reservation binds the
+    entire generation contents before
+    any provider read/write. Concurrent retries therefore write identical IDs
+    and contents, even after a partial provider write or process crash.
     """
 
-    def __init__(self, *, store: GenerationDocumentStore, scope: str) -> None:
+    def __init__(
+        self,
+        *,
+        store: GenerationDocumentStore,
+        scope: str,
+        reservations: GenerationReservations,
+    ) -> None:
         if not scope or not scope.strip():
             raise ValueError("scope must be nonempty")
+        if getattr(reservations, "scope", None) != scope:
+            raise ScopeDeniedError("generation reservations must use the vector adapter scope")
+        if not callable(getattr(reservations, "reserve_generation", None)):
+            raise ValueError("atomic generation reservations are required")
         self._store = store
+        self._reservations = reservations
         self.scope = scope
 
     @staticmethod
@@ -113,6 +140,13 @@ class ImmutableGenerationVectorAdapter:
 
         if not staged:
             raise ValueError("refusing to activate an empty generation")
+        identity = sorted((item["id"], item["metadata"]["content_digest"]) for item in staged)
+        batch_digest = hashlib.sha256(
+            json.dumps(identity, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        # This durable CAS must commit independently of the external write. A
+        # partial write can only be retried with the exact same complete batch.
+        await self._reservations.reserve_generation(generation_key, batch_digest)
         prior = await self._store.get(
             ids=[x["id"] for x in staged],
             metadata_fields=["scope", "generation_key", "content_digest"],

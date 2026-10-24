@@ -95,3 +95,10 @@ def run_cli_command(fn) -> int:
         sys.stderr.write(f"{prefix} {exc.code}: {exc.message}\n")
         return 75 if exc.retryable else 1
 ```
+
+
+SDK-generated provider failure logs and wrapping error messages report the
+operation and exception type, not the provider exception text. Original
+causes remain available through `__cause__` for compatibility; application
+logging of a complete chained traceback must apply the host's redaction
+policy. SDK logs do not attach those tracebacks or raw query text.

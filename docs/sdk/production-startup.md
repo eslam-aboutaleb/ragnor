@@ -26,3 +26,11 @@ Those require real adapter conformance tests and operational approval.
 No credentials or raw connection URLs are interpolated into startup exceptions.
 Use a restrictive `ScopeAuthorizer` when `KnowledgeBridge(production_mode=True)`
 exposes scoped documents.
+
+
+Production mode also applies when `RagnorConfig.deployment_mode` is
+`PRODUCTION`, including settings supplied through `with_settings`.
+The builder checks callable storage/version/session ports before writes;
+plain objects or capability labels alone are insufficient. These structural
+checks do not verify persistence or authorize a tenant. Supply tested durable
+adapters and bind authenticated tenant scope in the host session/provider.

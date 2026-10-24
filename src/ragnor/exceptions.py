@@ -196,6 +196,7 @@ def classify_exception(  # noqa: PLR0911, PLR0912
     failures (timeouts, connection errors, HTTP 429/5xx) from permanent
     failures (auth 401/403, invalid configuration, capability/scope errors).
     """
+    error_type = type(exc).__name__
     if isinstance(exc, RagnorError):
         if exc.trace_id is None and trace_id is not None:
             exc.trace_id = sanitize_message(trace_id)
@@ -205,7 +206,7 @@ def classify_exception(  # noqa: PLR0911, PLR0912
     if isinstance(exc, TimeoutError):
         return _attach_cause(
             OperationTimeoutError(
-                f"{default_stage} timed out: {exc}",
+                f"{default_stage} timed out ({error_type})",
                 retryable=True,
                 trace_id=trace_id,
             ),
@@ -215,7 +216,7 @@ def classify_exception(  # noqa: PLR0911, PLR0912
     if isinstance(exc, PermissionError):
         return _attach_cause(
             ScopeDeniedError(
-                f"{default_stage} permission denied: {exc}",
+                f"{default_stage} permission denied ({error_type})",
                 retryable=False,
                 trace_id=trace_id,
             ),
@@ -230,7 +231,7 @@ def classify_exception(  # noqa: PLR0911, PLR0912
             )
             return _attach_cause(
                 cls(
-                    f"{default_stage} authentication failed (status {status}): {exc}",
+                    f"{default_stage} authentication failed (status {status}) ({error_type})",
                     code="ERR_AUTH_FAILED",
                     retryable=False,
                     details={"status_code": status},
@@ -244,7 +245,7 @@ def classify_exception(  # noqa: PLR0911, PLR0912
             )
             return _attach_cause(
                 cls(
-                    f"{default_stage} rate limited (status 429): {exc}",
+                    f"{default_stage} rate limited (status 429) ({error_type})",
                     code="ERR_RATE_LIMITED",
                     retryable=True,
                     details={"status_code": 429},
@@ -258,7 +259,7 @@ def classify_exception(  # noqa: PLR0911, PLR0912
             )
             return _attach_cause(
                 cls(
-                    f"{default_stage} upstream server error (status {status}): {exc}",
+                    f"{default_stage} upstream server error (status {status}) ({error_type})",
                     code="ERR_UPSTREAM_5XX",
                     retryable=True,
                     details={"status_code": status},
@@ -269,7 +270,7 @@ def classify_exception(  # noqa: PLR0911, PLR0912
         if 400 <= status < 500:
             return _attach_cause(
                 ConfigurationError(
-                    f"{default_stage} rejected invalid request (status {status}): {exc}",
+                    f"{default_stage} rejected invalid request (status {status}) ({error_type})",
                     code="ERR_INVALID_REQUEST",
                     retryable=False,
                     details={"status_code": status},
@@ -281,7 +282,7 @@ def classify_exception(  # noqa: PLR0911, PLR0912
     if isinstance(exc, (ConnectionError, OSError)):
         return _attach_cause(
             BackendUnavailableError(
-                f"{default_stage} backend connection failed: {exc}",
+                f"{default_stage} backend connection failed ({error_type})",
                 retryable=True,
                 trace_id=trace_id,
             ),
@@ -291,7 +292,7 @@ def classify_exception(  # noqa: PLR0911, PLR0912
     if isinstance(exc, (ValueError, TypeError)):
         return _attach_cause(
             ConfigurationError(
-                f"{default_stage} configuration or validation error: {exc}",
+                f"{default_stage} configuration or validation error ({error_type})",
                 retryable=False,
                 trace_id=trace_id,
             ),
@@ -303,7 +304,7 @@ def classify_exception(  # noqa: PLR0911, PLR0912
         cls = EmbeddingProviderError if default_stage == "embedding" else BackendUnavailableError
         return _attach_cause(
             cls(
-                f"{default_stage} authentication failed: {exc}",
+                f"{default_stage} authentication failed ({error_type})",
                 code="ERR_AUTH_FAILED",
                 retryable=False,
                 trace_id=trace_id,
@@ -314,7 +315,7 @@ def classify_exception(  # noqa: PLR0911, PLR0912
         cls = EmbeddingProviderError if default_stage == "embedding" else BackendUnavailableError
         return _attach_cause(
             cls(
-                f"{default_stage} rate limited: {exc}",
+                f"{default_stage} rate limited ({error_type})",
                 code="ERR_RATE_LIMITED",
                 retryable=True,
                 trace_id=trace_id,
@@ -325,7 +326,7 @@ def classify_exception(  # noqa: PLR0911, PLR0912
     if default_stage in {"retrieval", "backend", "search"}:
         return _attach_cause(
             BackendUnavailableError(
-                f"{default_stage} failed: {exc}",
+                f"{default_stage} failed ({error_type})",
                 retryable=True,
                 trace_id=trace_id,
             ),
@@ -334,7 +335,7 @@ def classify_exception(  # noqa: PLR0911, PLR0912
     if default_stage == "embedding":
         return _attach_cause(
             EmbeddingProviderError(
-                f"embedding failed: {exc}",
+                f"embedding failed ({error_type})",
                 retryable=False,
                 trace_id=trace_id,
             ),
@@ -342,7 +343,7 @@ def classify_exception(  # noqa: PLR0911, PLR0912
         )
     return _attach_cause(
         RagnorError(
-            f"{default_stage} failed: {exc}",
+            f"{default_stage} failed ({error_type})",
             retryable=False,
             trace_id=trace_id,
         ),

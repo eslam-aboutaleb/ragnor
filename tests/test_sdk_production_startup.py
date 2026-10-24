@@ -9,6 +9,8 @@ import pytest
 from ragnor.builder import RagnorBuilder
 from ragnor.retrieval.capabilities import BackendFeature, FilterOperator, StoreCapabilities
 
+from tests.production_doubles import StoragePort, VersionPort
+
 
 class Embedder:
     async def __call__(self, texts: list[str]) -> list[list[float]]:
@@ -21,7 +23,7 @@ class Embedder:
         return await self(texts)
 
 
-class HostStore:
+class HostStore(StoragePort):
     capabilities = StoreCapabilities(
         filter_operators=frozenset({FilterOperator.EQ}),
         features=frozenset({BackendFeature.ISOLATION_SCOPE}),
@@ -40,7 +42,7 @@ def builder(model: str, dimension: int | None):
         embedding_model=model,
         embedding_dim=dimension,
         store=HostStore(),
-        version_store=object(),
+        version_store=VersionPort(),
         session_factory=sessions,
         production_mode=True,
     )
@@ -124,7 +126,7 @@ async def test_production_factory_lock_key_and_health_check() -> None:
             RagnorBuilder.production(
                 Embedder(),
                 store=HostStore(),
-                version_store=object(),
+                version_store=VersionPort(),
                 session_factory=sessions,
                 embedding_dim=2,
             )
@@ -348,3 +350,31 @@ async def test_real_sqlite_production_host_ingest_idempotency_and_rollback() -> 
         assert vec_rows == ["Original SQLite policy"]
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("component", ["version_store", "store", "session_factory"])
+async def test_production_rejects_nonfunctional_injected_ports_before_writes(component):
+    from ragnor.exceptions import ConfigurationError
+
+    candidate = builder("validated-model", 2)
+    if component == "version_store":
+        candidate._version_store = object()
+    elif component == "store":
+        candidate._store.upsert = None
+    else:
+        candidate._session_factory = object()
+    with pytest.raises(ConfigurationError, match=component):
+        await candidate.build()
+
+
+@pytest.mark.asyncio
+async def test_production_settings_cannot_silently_select_local_fallbacks():
+    from ragnor.config import DeploymentMode, RagnorConfig
+    from ragnor.exceptions import ConfigurationError
+
+    candidate = RagnorBuilder.local(Embedder()).with_settings(
+        RagnorConfig(deployment_mode=DeploymentMode.PRODUCTION)
+    )
+    with pytest.raises(ConfigurationError, match="explicit"):
+        await candidate.build()
