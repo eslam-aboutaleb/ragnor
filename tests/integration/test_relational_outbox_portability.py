@@ -6,7 +6,7 @@ import asyncio
 from datetime import timedelta
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import Column, MetaData, Table, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from ragnor import RagnorBuilder
@@ -32,6 +32,29 @@ async def test_missing_host_schema_fails_before_claim(tmp_path):
     store = RelationalJobStoreFactory(sessions).job_store(scope="tenant")
     try:
         with pytest.raises(RuntimeError, match="host database schema is missing"):
+            await store.claim_and_mark_processing(1, "worker")
+    finally:
+        await engine.dispose()
+
+
+async def test_host_schema_without_scoped_unique_constraint_fails_before_claim(tmp_path):
+    engine = create_sqlite_engine(f"sqlite+aiosqlite:///{tmp_path / 'unsafe.db'}")
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    store = RelationalJobStoreFactory(sessions).job_store(scope="tenant")
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(metadata.create_all)
+            await connection.run_sync(jobs.drop)
+            unsafe_jobs = Table(
+                jobs.name,
+                MetaData(),
+                *(
+                    Column(column.name, column.type, primary_key=column.primary_key)
+                    for column in jobs.columns
+                ),
+            )
+            await connection.run_sync(unsafe_jobs.create)
+        with pytest.raises(RuntimeError, match="unique constraint"):
             await store.claim_and_mark_processing(1, "worker")
     finally:
         await engine.dispose()
