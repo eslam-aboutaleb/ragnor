@@ -93,3 +93,41 @@ def test_missing_checklist_is_not_accepted() -> None:
             VALID.replace("- [x] I have updated documentation where appropriate", "")
         )
     )
+
+
+def test_cli_validates_actual_human_event_and_rejects_empty_body(tmp_path) -> None:
+    import json
+    import subprocess
+    import sys
+
+    event = tmp_path / "event.json"
+    for body, expected in ((VALID, 0), ("", 1)):
+        event.write_text(
+            json.dumps({"pull_request": {"user": {"login": "maintainer"}, "body": body}})
+        )
+        result = subprocess.run(  # noqa: S603 - fixed interpreter and local checker
+            [sys.executable, str(MODULE), "--event", str(event)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == expected, result.stdout
+
+
+def test_cli_exempts_automation_event(tmp_path) -> None:
+    import json
+    import subprocess
+    import sys
+
+    event = tmp_path / "event.json"
+    event.write_text(
+        json.dumps({"pull_request": {"user": {"login": "dependabot[bot]"}, "body": ""}})
+    )
+    result = subprocess.run(  # noqa: S603 - fixed interpreter and local checker
+        [sys.executable, str(MODULE), "--event", str(event)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert "Automation-authored" in result.stdout
