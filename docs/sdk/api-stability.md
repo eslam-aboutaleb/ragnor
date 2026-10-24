@@ -8,8 +8,14 @@ from ragnor import Ragnor, RagnorBuilder, Document, Chunk, SearchResult, Retriev
 
 | Root public symbol | Canonical implementation | Compatibility |
 |---|---|---|
-| `Ragnor`, `RagnorBuilder` | `ragnor.builder` | Old module imports remain valid |
-| `Document`, `Chunk`, `SearchResult`, `RetrievalError` | `ragnor.types` | Old module imports remain valid |
+| `Ragnor`, `RagnorBuilder` | `ragnor.client.builder` | `ragnor.builder` imports remain valid |
+| `Document`, `Chunk`, `SearchResult`, `RetrievalError` | `ragnor.core.types` | `ragnor.types` imports remain valid |
+
+The `ragnor.core` package contains shared types, configuration, exceptions
+and validation. The `ragnor.client` package contains the async builder and
+synchronous facade. Existing imports from `ragnor.builder`, `ragnor.types`,
+`ragnor.config` and the other established module paths continue to resolve
+to the same implementations, including their type annotations.
 
 All root exports are **lazy**. Importing `ragnor` must not initialize databases, model clients, telemetry pipelines, or optional vendor dependencies. The root exports are deliberately small. Power users can import the established extension protocols from `ragnor.chunking.base`, `ragnor.embeddings.base`, `ragnor.stores.base`, `ragnor.jobs.outbox`, and `ragnor.evidence.tokenizer`.
 

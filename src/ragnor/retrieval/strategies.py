@@ -33,7 +33,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Protocol, runtime_checkable
 
-from ragnor.exceptions import (
+from ragnor.core.exceptions import (
     BackendUnavailableError,
     ConfigurationError,
     OperationTimeoutError,
@@ -55,7 +55,7 @@ from ragnor.retrieval.types import (
 )
 from ragnor.stores._scoring import fuse_hybrid
 from ragnor.stores.base import EmbeddingFunction, LexicalIndex, VectorIndex
-from ragnor.types import RetrievalError
+from ragnor.core.types import RetrievalError
 
 logger = logging.getLogger(__name__)
 

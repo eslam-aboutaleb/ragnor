@@ -1,18 +1,14 @@
-"""Structural lifecycle port for SDK-owned asynchronous resources."""
+"""Compatibility import for :mod:`ragnor.core.lifecycle`."""
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+import sys
+from typing import TYPE_CHECKING
 
+from ragnor.core import lifecycle as _implementation
 
-@runtime_checkable
-class AsyncCloseable(Protocol):
-    """A resource with an asynchronous close method.
+if TYPE_CHECKING:
+    from ragnor.core.lifecycle import *  # noqa: F403 - preserve legacy type-checker exports
 
-    Implementations live in host applications or optional infrastructure
-    adapters. Ragnor only closes instances explicitly registered as owned.
-    """
-
-    async def aclose(self) -> None:
-        """Release the resource; may be called only once by SDK lifecycle."""
-        raise NotImplementedError
+# Keep module identity, private helpers and patch targets compatible too.
+sys.modules[__name__] = _implementation

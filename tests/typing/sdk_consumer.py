@@ -9,14 +9,14 @@ from ragnor import (
     RagnorBuilder,
     SearchResult,
 )
-from ragnor.config import DeploymentMode, RagnorConfig
-from ragnor.exceptions import (
+from ragnor.core.config import DeploymentMode, RagnorConfig
+from ragnor.core.exceptions import (
     ConfigurationError,
     RagnorError,
     classify_exception,
     is_retryable_exception,
 )
-from ragnor.sync_client import AsyncRagnorOperations, SyncRagnor
+from ragnor.client.sync_client import AsyncRagnorOperations, SyncRagnor
 
 
 document = Document(id="policy", text="real text")

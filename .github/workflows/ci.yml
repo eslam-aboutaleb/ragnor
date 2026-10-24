@@ -124,7 +124,7 @@ jobs:
           python -m pip install -e ".[pgvector]"
           python -m pip install "asyncpg>=0.29" "pytest>=8.3" "pytest-asyncio>=0.24" "qdrant-client>=1.9"
       - name: Verify transactional SQL and real advisory locking
-        run: python -m pytest -q tests/integration/test_postgres_adapter_contract.py tests/integration/test_postgres_job_outbox.py tests/integration/test_postgres_process_outbox.py tests/integration/test_postgres_publication.py tests/integration/test_postgres_sdk_host.py tests/integration/test_postgres_sql_migrations.py tests/integration/test_qdrant_postgres_publication.py tests/integration/test_postgres_job_policy.py tests/test_hybrid_search_session_injection.py tests/integration/test_postgres_security_lifecycle.py
+        run: python -m pytest -q tests/integration/test_postgres_adapter_contract.py tests/integration/test_postgres_job_outbox.py tests/integration/test_postgres_process_outbox.py tests/integration/test_postgres_publication.py tests/integration/test_postgres_sdk_host.py tests/integration/test_postgres_sql_migrations.py tests/integration/test_qdrant_postgres_publication.py tests/integration/test_postgres_job_policy.py tests/test_hybrid_search_session_injection.py tests/integration/test_postgres_security_lifecycle.py tests/test_pgvector_strict_mode.py tests/integration/test_qdrant_generation_vectors.py
       - name: Record 1/2/4-worker PostgreSQL contention baseline
         run: python benchmarks/postgres_outbox_profile.py
 
@@ -189,18 +189,20 @@ jobs:
           "$RUNNER_TEMP/ragnor-typing-venv/bin/python" -m pip install --no-deps dist/ragnor-*.whl
           "$RUNNER_TEMP/ragnor-typing-venv/bin/python" -m pip install "mypy==1.17.1"
           cd "$RUNNER_TEMP"
-          "$RUNNER_TEMP/ragnor-typing-venv/bin/python" -m mypy --no-incremental --strict --follow-imports=silent "$GITHUB_WORKSPACE/tests/typing/sdk_consumer.py" "$GITHUB_WORKSPACE/tests/typing/adapter_consumer.py"
+          "$RUNNER_TEMP/ragnor-typing-venv/bin/python" -m mypy --no-incremental --strict --follow-imports=silent "$GITHUB_WORKSPACE/tests/typing/sdk_consumer.py" "$GITHUB_WORKSPACE/tests/typing/adapter_consumer.py" "$GITHUB_WORKSPACE/tests/typing/legacy_sdk_consumer.py"
       - name: Prove type-checker rejects incompatible SDK API values
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP"
-          if "$RUNNER_TEMP/ragnor-typing-venv/bin/python" -m mypy --no-incremental --strict --follow-imports=silent "$GITHUB_WORKSPACE/tests/typing/invalid_sdk_consumer.py" > invalid-types.txt 2>&1; then
-            echo "::error::mypy unexpectedly accepted wrong public SDK argument types"
-            cat invalid-types.txt
-            exit 1
-          fi
-          grep -q "incompatible type" invalid-types.txt
-          grep -q "Document" invalid-types.txt
+          for consumer in invalid_sdk_consumer.py invalid_legacy_sdk_consumer.py; do
+            if "$RUNNER_TEMP/ragnor-typing-venv/bin/python" -m mypy --no-incremental --strict --follow-imports=silent "$GITHUB_WORKSPACE/tests/typing/$consumer" > invalid-types.txt 2>&1; then
+              echo "::error::mypy unexpectedly accepted wrong SDK argument types in $consumer"
+              cat invalid-types.txt
+              exit 1
+            fi
+            grep -q "incompatible type" invalid-types.txt
+            grep -q "Document" invalid-types.txt
+          done
 
   tokenizer-contracts:
     name: Optional exact tokenizer contract

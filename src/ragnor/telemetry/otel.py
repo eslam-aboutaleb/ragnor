@@ -55,7 +55,7 @@ class OpenTelemetryEventSink:
 
         # Initialize standard instruments
         self._event_counter = self._meter.create_counter(
-            name="ragnor.events.total",
+            name="ragnor.telemetry.events.total",
             description="Total count of ragnor telemetry events emitted",
             unit="1",
         )

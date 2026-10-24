@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, cast, runtime_checkable
 
-from ragnor.exceptions import (
+from ragnor.core.exceptions import (
     IndexConsistencyError,
     RagnorError,
     is_retryable_exception,

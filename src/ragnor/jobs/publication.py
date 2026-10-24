@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Protocol, TypeVar
 
-from ragnor.exceptions import ScopeDeniedError
+from ragnor.core.exceptions import ScopeDeniedError
 
 T_co = TypeVar("T_co", covariant=True)
 

@@ -1,28 +1,14 @@
-"""Convenience re-exports for ragnor events and sinks."""
+"""Compatibility import for :mod:`ragnor.telemetry.events`."""
 
 from __future__ import annotations
 
-import ragnor.telemetry.events as _events
+import sys
+from typing import TYPE_CHECKING
 
-CompositeEventSink = _events.CompositeEventSink
-EventKind = _events.EventKind
-EventSink = _events.EventSink
-LoggingEventSink = _events.LoggingEventSink
-MemoryEventSink = _events.MemoryEventSink
-NullEventSink = _events.NullEventSink
-RedactionConfig = _events.RedactionConfig
-TelemetryEvent = _events.TelemetryEvent
-sanitize_error_category = _events.sanitize_error_category
+from ragnor.telemetry import events as _implementation
 
+if TYPE_CHECKING:
+    from ragnor.telemetry.events import *  # noqa: F403 - preserve legacy type-checker exports
 
-__all__ = [
-    "CompositeEventSink",
-    "EventKind",
-    "EventSink",
-    "LoggingEventSink",
-    "MemoryEventSink",
-    "NullEventSink",
-    "RedactionConfig",
-    "TelemetryEvent",
-    "sanitize_error_category",
-]
+# Keep module identity, private helpers and patch targets compatible too.
+sys.modules[__name__] = _implementation

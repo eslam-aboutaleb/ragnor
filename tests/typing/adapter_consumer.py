@@ -15,7 +15,7 @@ from ragnor.evidence.tokenizer import Tokenizer
 from ragnor.jobs.outbox import JobEvent, JobEventSink, JobPayload, JobProcessor
 from ragnor.jobs.publication import GenerationVectorReader
 from ragnor.stores.base import DocumentStore, LexicalIndex, VectorIndex
-from ragnor.types import Chunk
+from ragnor.core.types import Chunk
 
 
 class HostTokenizer:

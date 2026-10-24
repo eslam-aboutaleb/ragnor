@@ -81,7 +81,9 @@ def test_db_factory_optional_dependencies_remain_lazy() -> None:
 
 
 def test_sync_facade_depends_on_a_builder_port_without_a_builder_import() -> None:
-    assert "ragnor.builder" not in _imports("sync_client.py")
+    path = "client/sync_client.py"
+    assert "ragnor.builder" not in _imports(path)
+    assert "ragnor.client.builder" not in _imports(path)
 
 
 def test_public_facades_import_in_either_order() -> None:

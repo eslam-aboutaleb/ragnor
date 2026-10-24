@@ -6,7 +6,7 @@ of full-text search, and the shared Reciprocal Rank Fusion merge
 (:mod:`ragnor.stores._scoring`).
 
 The vector stage ranks by the store's distance metric
-(:mod:`ragnor.metrics`): ``l2`` by default, ``cosine`` when the
+(:mod:`ragnor.stores.metrics`): ``l2`` by default, ``cosine`` when the
 store is constructed with ``metric="cosine"``.
 
 The store subclasses :class:`ragnor.stores.base.HybridVectorStore`:
@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from ragnor.metrics import cosine_distance
+from ragnor.stores.metrics import cosine_distance
 from ragnor.stores._scoring import (
     build_upsert_record,
     filter_record_map,
@@ -37,7 +37,7 @@ from ragnor.stores._scoring import (
 )
 from ragnor.stores.base import EmbeddingFunction, HybridVectorStore
 from ragnor.stores.registry import vector_store_registry
-from ragnor.validation import (
+from ragnor.core.validation import (
     validate_delete_selectors,
     validate_embedding,
     validate_identifier,

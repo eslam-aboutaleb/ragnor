@@ -15,8 +15,8 @@ from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 from ragnor.evidence.references import source_reference
-from ragnor.exceptions import IndexConsistencyError, ScopeDeniedError
-from ragnor.types import RetrievalError, SearchResult
+from ragnor.core.exceptions import IndexConsistencyError, ScopeDeniedError
+from ragnor.core.types import RetrievalError, SearchResult
 
 logger = logging.getLogger(__name__)
 
