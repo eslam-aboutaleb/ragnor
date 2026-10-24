@@ -18,6 +18,10 @@ for a host-controlled deployment with explicit adapter capabilities.
   has an explicit dimension, they must match before SDK construction.
 - Injected stores and sessions remain host-owned unless ownership is
   deliberately transferred with `with_owned_resource`.
+- The embedding provider must be callable. If it declares `embed_query` or
+  `embed_documents`, those methods must also be callable. Existing async
+  batch-only callables remain accepted; no vendor class or provider name is
+  required.
 
 The checks do **not** certify PostgreSQL/other backend durability, filter
 semantics, lease correctness, or secrets handling inside host implementations.
@@ -101,3 +105,49 @@ restricted non-bypass role, and verify both unfiltered reads and spoofed writes.
 For external vector services, verify their collection/filter authorization
 separately. A successful readiness probe is point-in-time connectivity evidence;
 it does not replace authorization or ongoing failure handling.
+
+## Integrating any provider
+
+The SDK depends on the vendor-neutral `EmbeddingFunction` port in
+`ragnor.embeddings.base`. Inject your own implementation through `embedder=`
+or `with_embedder`; no LiteLLM, OpenAI, cloud account or global registration
+is required. A complete adapter exposes async batch `__call__`, `embed_query`
+and `embed_documents`, preserving input order and the configured vector
+dimension. Local models and proprietary services use the same contract.
+
+Startup checks are arbitrary host async callables. They can probe any
+embedding/vector provider, SQL stack or authenticated tenant policy without
+SDK changes. Structural validation rejects non-executable ports before I/O;
+the supplied check verifies runtime readiness. Implementations must propagate
+cancellation and explicitly document any blocking work that cannot be
+interrupted. Provider qualification tests are examples of the contract;
+they do not restrict which providers can be integrated.
+
+## Optional LiteLLM client cancellation and ownership
+
+The LiteLLM adapter awaits `litellm.aembedding`. Native async provider paths
+can cancel the HTTP request when a readiness deadline expires. Providers that
+implement blocking fallbacks need separate cancellation qualification.
+
+For OpenAI/Azure, inject a configured native async client to control its
+transport, timeouts and retries:
+
+```python
+from openai import AsyncOpenAI
+from ragnor.embeddings import LitellmEmbeddingFunction
+
+async with AsyncOpenAI(api_key=host_api_key, max_retries=0, timeout=10.0) as api:
+    embedder = LitellmEmbeddingFunction(
+        api_key=host_api_key,
+        model_name=model_name,
+        client=api,
+    )
+    # Use this embedder for the builder and its readiness check. Keep the
+    # facade's full lifetime inside the native client's context.
+```
+
+Injected provider clients remain borrowed after successful or failed SDK
+startup. The host closes them. To transfer ownership of an underlying HTTPX
+async transport instead, explicitly register that transport using
+`with_owned_resource(http_client)`; it implements the required `aclose()` port.
+Cancelled and failed requests do not populate the embedding cache.
