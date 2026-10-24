@@ -1,6 +1,6 @@
 """LiteLLM embedding function.
 
-Wraps ``litellm.embedding`` so any LiteLLM-supported
+Wraps ``litellm.aembedding`` so any LiteLLM-supported
 provider can serve embeddings. Hosts can opt into a content-addressed
 LRU cache and deterministic batch splitting; both default to the
 historical single-call, no-cache behavior.
@@ -8,11 +8,14 @@ historical single-call, no-cache behavior.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 from collections import OrderedDict
+from typing import TYPE_CHECKING, Any
 
 import litellm
+
+if TYPE_CHECKING:
+    from openai import AsyncAzureOpenAI, AsyncOpenAI
 
 
 def _cache_key(model_name: str, text: str) -> str:
@@ -24,8 +27,9 @@ def _cache_key(model_name: str, text: str) -> str:
 class LitellmEmbeddingFunction:
     """Callable embedding function backed by LiteLLM.
 
-    Wraps ``litellm.embedding`` so any LiteLLM-supported
-    provider can serve embeddings.
+    Uses the provider's asynchronous embedding path. For native async
+    transports, cancellation reaches the in-flight request instead of
+    abandoning a blocking request in an SDK executor thread.
     """
 
     def __init__(  # noqa: PLR0913
@@ -36,6 +40,7 @@ class LitellmEmbeddingFunction:
         *,
         cache_max_entries: int = 0,
         max_batch_size: int | None = None,
+        client: AsyncOpenAI | AsyncAzureOpenAI | None = None,
     ) -> None:
         """Initialize the embedding function.
 
@@ -46,8 +51,11 @@ class LitellmEmbeddingFunction:
             cache_max_entries: Number of vectors kept in the bounded
                 LRU cache. ``0`` disables caching (the default).
             max_batch_size: Maximum number of inputs sent in a single
-                ``litellm.embedding`` call. ``None`` (the default)
+                ``litellm.aembedding`` call. ``None`` (the default)
                 sends every input in one call.
+            client: Optional borrowed OpenAI/Azure async client. Configure
+                transport, deadlines and retries on the client. The host
+                retains ownership and is responsible for closing it.
 
         Raises:
             ValueError: If ``cache_max_entries`` is negative, or
@@ -62,6 +70,7 @@ class LitellmEmbeddingFunction:
         self.api_base = api_base
         self.cache_max_entries = cache_max_entries
         self.max_batch_size = max_batch_size
+        self._client = client
         self._cache: OrderedDict[str, list[float]] = OrderedDict()
 
     def _cache_key(self, text: str) -> str:
@@ -74,12 +83,14 @@ class LitellmEmbeddingFunction:
         while len(self._cache) > self.cache_max_entries:
             self._cache.popitem(last=False)
 
-    def _embed_sync(self, input: list[str]) -> list[list[float]]:
-        """Synchronous embedding call (runs in threadpool)."""
-        kwargs = {"api_key": self.api_key}
+    async def _embed(self, input: list[str]) -> list[list[float]]:
+        """Await the provider's async request, preserving cancellation."""
+        kwargs: dict[str, Any] = {"api_key": self.api_key}
         if self.api_base:
             kwargs["api_base"] = self.api_base
-        response = litellm.embedding(
+        if self._client is not None:
+            kwargs["client"] = self._client
+        response = await litellm.aembedding(
             model=self.model_name,
             input=input,
             **kwargs,
@@ -89,11 +100,11 @@ class LitellmEmbeddingFunction:
     async def _embed_batched(self, texts: list[str]) -> list[list[float]]:
         """Embed texts, splitting into ``max_batch_size`` chunks when set."""
         if self.max_batch_size is None:
-            return await asyncio.to_thread(self._embed_sync, texts)
+            return await self._embed(texts)
         vectors: list[list[float]] = []
         for start in range(0, len(texts), self.max_batch_size):
             chunk = texts[start : start + self.max_batch_size]
-            chunk_vectors = await asyncio.to_thread(self._embed_sync, chunk)
+            chunk_vectors = await self._embed(chunk)
             vectors.extend(chunk_vectors)
         return vectors
 
@@ -103,7 +114,7 @@ class LitellmEmbeddingFunction:
         With caching enabled, only cache misses are embedded and the
         results are returned in the original input order. With caching
         disabled, the whole input is embedded in a single
-        ``litellm.embedding`` call (or one call per
+        ``litellm.aembedding`` call (or one call per
         ``max_batch_size`` chunk when batch splitting is enabled).
 
         Args:

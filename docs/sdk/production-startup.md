@@ -101,3 +101,32 @@ restricted non-bypass role, and verify both unfiltered reads and spoofed writes.
 For external vector services, verify their collection/filter authorization
 separately. A successful readiness probe is point-in-time connectivity evidence;
 it does not replace authorization or ongoing failure handling.
+
+## Embedding client cancellation and ownership
+
+The LiteLLM adapter awaits `litellm.aembedding`. Native async provider paths
+can cancel the HTTP request when a readiness deadline expires. Providers that
+implement blocking fallbacks need separate cancellation qualification.
+
+For OpenAI/Azure, inject a configured native async client to control its
+transport, timeouts and retries:
+
+```python
+from openai import AsyncOpenAI
+from ragnor.embeddings import LitellmEmbeddingFunction
+
+async with AsyncOpenAI(api_key=host_api_key, max_retries=0, timeout=10.0) as api:
+    embedder = LitellmEmbeddingFunction(
+        api_key=host_api_key,
+        model_name=model_name,
+        client=api,
+    )
+    # Use this embedder for the builder and its readiness check. Keep the
+    # facade's full lifetime inside the native client's context.
+```
+
+Injected provider clients remain borrowed after successful or failed SDK
+startup. The host closes them. To transfer ownership of an underlying HTTPX
+async transport instead, explicitly register that transport using
+`with_owned_resource(http_client)`; it implements the required `aclose()` port.
+Cancelled and failed requests do not populate the embedding cache.

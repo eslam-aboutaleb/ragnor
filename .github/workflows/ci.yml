@@ -255,7 +255,7 @@ jobs:
       matrix:
         include:
           - extra: litellm
-            tests: tests/test_embeddings_litellm.py tests/test_embeddings.py
+            tests: tests/test_embeddings_litellm.py tests/test_embeddings.py tests/integration/test_litellm_transport.py
           - extra: rerank
             tests: tests/test_reranker_integration.py
           - extra: pdf

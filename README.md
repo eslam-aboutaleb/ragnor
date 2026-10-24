@@ -309,7 +309,10 @@ class EmbeddingFunction(Protocol):
 
 ### LiteLLM provider (built-in)
 
-The default provider wraps `litellm.embedding`, so any LiteLLM-supported backend can serve embeddings. The synchronous litellm call runs in a thread so it never blocks the event loop.
+The default provider awaits `litellm.aembedding`. Cancellation reaches native
+async provider requests instead of leaving a synchronous request running in
+an SDK worker thread. Qualify cancellation separately for providers that use
+blocking fallbacks internally.
 
 ```python
 from ragnor.embeddings import LitellmEmbeddingFunction
@@ -322,6 +325,10 @@ vectors = await embedder(["hello", "world"])
 ```
 
 Two optional keyword arguments remove the wrappers hosts used to write around this class, both defaulting to today's behavior: `cache_max_entries` (default `0`, off) turns on a bounded in-process LRU cache keyed by the model name and the text, so unchanged texts are never re-embedded; `max_batch_size` (default `None`) splits large batches into per-call chunks for provider-side input limits. When the cache is on, only the misses are embedded and the results are reassembled in the original input order.
+
+For OpenAI/Azure paths, pass a configured native async client with `client=`
+to control connection settings, retries and timeouts. The client is borrowed:
+keep it open while the embedder is used and close it in the host lifecycle.
 
 ```python
 embedder = LitellmEmbeddingFunction(
