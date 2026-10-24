@@ -12,6 +12,8 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
 
+from ragnor.exceptions import ScopeDeniedError
+
 
 class GenerationDocumentStore(Protocol):
     """Narrow read/write port supported by multiple concrete vector stores."""
@@ -142,6 +144,6 @@ class ImmutableGenerationVectorAdapter:
         for row in rows:
             meta = row.get("metadata") or {}
             if meta.get("scope") != self.scope or meta.get("generation_key") != generation_key:
-                raise PermissionError("storage adapter returned an unscoped generation")
+                raise ScopeDeniedError("storage adapter returned an unscoped generation")
         ordered = sorted(rows, key=lambda x: str(x.get("metadata", {}).get("original_id", "")))
         return tuple(str(row["document"]) for row in ordered)

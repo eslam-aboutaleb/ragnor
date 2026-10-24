@@ -75,7 +75,15 @@ def _inner_sources() -> list[Path]:
         and not any(rel.startswith(prefix) for prefix in EXTERNAL_PREFIXES)
         and (
             rel.startswith(INNER_DIRS)
-            or rel in {"config.py", "lifecycle.py", "types.py", "validation.py"}
+            or rel
+            in {
+                "config.py",
+                "exceptions.py",
+                "lifecycle.py",
+                "sync_client.py",
+                "types.py",
+                "validation.py",
+            }
         )
     ]
 

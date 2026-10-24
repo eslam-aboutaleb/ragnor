@@ -269,11 +269,13 @@ def handle_count_error(
     logger: Any,
 ) -> int:
     """Log count failure and raise RetrievalError if strict, else return 0."""
-    from ragnor.types import RetrievalError  # noqa: PLC0415
+    from ragnor.exceptions import BackendUnavailableError, OperationTimeoutError  # noqa: PLC0415
 
     logger.error("Count failed on %s: %s", table_name, exc)
     if strict:
-        raise RetrievalError(f"Count failed on {table_name}: {exc}") from exc
+        if isinstance(exc, TimeoutError):
+            raise OperationTimeoutError(f"Count timed out on {table_name}: {exc}") from exc
+        raise BackendUnavailableError(f"Count failed on {table_name}: {exc}") from exc
     return 0
 
 

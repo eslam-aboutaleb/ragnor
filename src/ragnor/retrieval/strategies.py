@@ -33,6 +33,13 @@ from __future__ import annotations
 import logging
 from typing import Any, Protocol, runtime_checkable
 
+from ragnor.exceptions import (
+    BackendUnavailableError,
+    ConfigurationError,
+    OperationTimeoutError,
+    ScopeDeniedError,
+    UnsupportedCapabilityError,
+)
 from ragnor.retrieval.capabilities import (
     CapabilityUnsupportedError,
     get_backend_capabilities,
@@ -218,11 +225,24 @@ class _BaseRetrievalStrategy:
 
 
 def _handle_retrieval_exception(exc: Exception, stage: str, strict: bool) -> list[dict[str, Any]]:
-    if isinstance(exc, (CapabilityUnsupportedError, ScopeViolationError)):
+    if isinstance(
+        exc,
+        (
+            CapabilityUnsupportedError,
+            UnsupportedCapabilityError,
+            ScopeViolationError,
+            ScopeDeniedError,
+            ConfigurationError,
+        ),
+    ):
         raise exc
     logger.error("%s retrieval failed: %s", stage, exc)
     if strict:
-        raise RetrievalError(f"{stage} retrieval failed: {exc}") from exc
+        if isinstance(exc, RetrievalError):
+            raise exc
+        if isinstance(exc, TimeoutError):
+            raise OperationTimeoutError(f"{stage} retrieval timed out: {exc}") from exc
+        raise BackendUnavailableError(f"{stage} retrieval failed: {exc}") from exc
     return []
 
 
@@ -425,12 +445,5 @@ class HybridRetrieval(_BaseRetrievalStrategy):
             # Return sliced to final_k
             return validated[: req.final_k]
 
-        except CapabilityUnsupportedError:
-            raise
-        except ScopeViolationError:
-            raise
         except Exception as exc:
-            logger.error("Hybrid retrieval failed: %s", exc)
-            if req.strict:
-                raise RetrievalError(f"Hybrid retrieval failed: {exc}") from exc
-            return []
+            return _handle_retrieval_exception(exc, "Hybrid", req.strict)

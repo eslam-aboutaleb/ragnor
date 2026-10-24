@@ -11,9 +11,13 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
+from ragnor.exceptions import ConfigurationError
 
-class PromptBudgetError(ValueError):
+
+class PromptBudgetError(ConfigurationError):
     """The proposed full prompt cannot safely fit the target model context."""
+
+    default_code = "ERR_PROMPT_BUDGET_EXCEEDED"
 
 
 @runtime_checkable

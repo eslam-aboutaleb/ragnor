@@ -29,9 +29,14 @@ import logging
 from time import perf_counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
-from ragnor.exceptions import IndexConsistencyError
+from ragnor.exceptions import (
+    IndexConsistencyError,
+    RagnorError,
+    is_retryable_exception,
+    sanitize_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +205,19 @@ class DefaultRetryPolicy:
     """Historical 1/5/30-minute retry schedule, keeping local behavior stable."""
 
     def delay(self, error: Exception, attempt: int, max_attempts: int) -> timedelta | None:
+        if isinstance(error, RagnorError) and not error.retryable:
+            return None
+        if attempt >= max_attempts:
+            return None
+        return RETRY_SCHEDULE[min(attempt - 1, len(RETRY_SCHEDULE) - 1)]
+
+
+class TaxonomyRetryPolicy:
+    """Retry policy using SDK-03 transient/permanent error classification."""
+
+    def delay(self, error: Exception, attempt: int, max_attempts: int) -> timedelta | None:
+        if not is_retryable_exception(error):
+            return None
         if attempt >= max_attempts:
             return None
         return RETRY_SCHEDULE[min(attempt - 1, len(RETRY_SCHEDULE) - 1)]
@@ -346,14 +364,19 @@ async def process_pending_jobs(  # noqa: PLR0913 -- compatibility options are op
             if heartbeat_interval_seconds is None:
                 await processor.process(job)
             else:
-                await _process_with_heartbeat(store, processor, job, heartbeat_interval_seconds)
+                await _process_with_heartbeat(
+                    cast(LeaseRenewalJobStore, store),
+                    processor,
+                    job,
+                    heartbeat_interval_seconds,
+                )
 
             job.status = "completed"
             job.completed_at = datetime.now(UTC)
             if getattr(store, "require_publication", False):
                 # Publishing performs the generation switch and the job ack in
                 # the same durable transaction; mark_completed is not safe.
-                await store.activate_generation(job)
+                await cast(GenerationPublishingJobStore, store).activate_generation(job)
             else:
                 await store.mark_completed(job)
             processed += 1
@@ -503,7 +526,9 @@ class InMemoryEmbeddingJobStore:
 
     async def mark_failed(self, job: JobPayload, error: Exception) -> None:
         """Persist the transition already computed by process_pending_jobs."""
-        job.status_detail = job.status_detail or str(error)
+        job.status_detail = sanitize_message(
+            job.status_detail or f"Failed ({type(error).__name__})"
+        )
 
     async def reclaim_stale(self, stale_after_seconds: float | None = None) -> int:
         """Reclaim stale jobs."""

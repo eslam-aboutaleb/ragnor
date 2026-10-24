@@ -25,6 +25,8 @@ INNER_MODULES = (
     "sync/state.py",
     "types.py",
     "config.py",
+    "exceptions.py",
+    "sync_client.py",
     "registry.py",
     "db/ports.py",
     "retrieval/capabilities.py",

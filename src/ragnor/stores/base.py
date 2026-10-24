@@ -32,9 +32,9 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Protocol, runtime_checkable
 
+from ragnor.exceptions import BackendUnavailableError, OperationTimeoutError
 from ragnor.metrics import DistanceMetric, resolve_distance_metric
 from ragnor.stores._scoring import fuse_hybrid
-from ragnor.types import RetrievalError
 from ragnor.validation import (
     validate_embedding,
     validate_identifier,
@@ -493,7 +493,13 @@ class HybridVectorStore(VectorStore):
         except Exception as exc:
             logger.error("Hybrid search failed on %s: %s", self.table_name, exc)
             if strict:
-                raise RetrievalError(f"Hybrid search failed on {self.table_name}: {exc}") from exc
+                if isinstance(exc, TimeoutError):
+                    raise OperationTimeoutError(
+                        f"Hybrid search timed out on {self.table_name}: {exc}"
+                    ) from exc
+                raise BackendUnavailableError(
+                    f"Hybrid search failed on {self.table_name}: {exc}"
+                ) from exc
             return []
 
 

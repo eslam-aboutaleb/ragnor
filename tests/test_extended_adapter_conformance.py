@@ -345,3 +345,66 @@ async def test_host_authorizer_denies_before_querying_retriever() -> None:
     with pytest.raises(ScopeAuthorizationError):
         await bridge.search_knowledge(query="refund", client_id="client-b", scope="tenant-a")
     assert retriever.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_builder_wires_full_pluggability_matrix_ports() -> None:
+    from ragnor.evidence.types import ContextBudget, EvidenceItem
+    from tests.test_external_adapter_conformance import HostTokenizer
+
+    class HostQueryTransformer:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def transform(self, query: str) -> list[str]:
+            self.calls += 1
+            return [query, f"{query} policy"]
+
+    class HostEvidenceCompressor:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def compress(self, item: EvidenceItem, target_tokens: int) -> EvidenceItem:
+            self.calls += 1
+            item.text = item.text[:10]
+            return item
+
+    reranker = HostReranker()
+    q_transformer = HostQueryTransformer()
+    tokenizer = HostTokenizer()
+    compressor = HostEvidenceCompressor()
+    manifest = HostManifestAdapter()
+    sync_state = HostSyncStateAdapter()
+    job_store = HostJobStoreAdapter()
+    authorizer = ScopeAuthorizer(default_allow=False)
+
+    rag = await (
+        RagnorBuilder.local(HostEmbedder(), embedding_dim=2)
+        .with_chunker(HostChunker())
+        .with_reranker(reranker)
+        .with_query_transformer(q_transformer)
+        .with_tokenizer(tokenizer)
+        .with_evidence_compressor(compressor)
+        .with_manifest_store(manifest)
+        .with_sync_state_store(sync_state)
+        .with_job_store(job_store)
+        .with_authorizer(authorizer)
+        .build()
+    )
+
+    from ragnor.types import Document
+
+    await rag.ingest([Document(id="doc1", text="refund|shipping")])
+    hits = await rag.search("refund")
+    assert hits
+    assert reranker.calls >= 1
+    assert q_transformer.calls == 1
+    assert rag.tokenizer is tokenizer
+    assert rag.evidence_compressor is compressor
+    assert rag.manifest_store is manifest
+    assert rag.sync_state_store is sync_state
+    assert rag.job_store is job_store
+    assert rag.authorizer is authorizer
+
+    bundle = rag.assemble_evidence(hits, ContextBudget(total_budget=100))
+    assert bundle.items

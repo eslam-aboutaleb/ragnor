@@ -45,7 +45,7 @@ from ragnor.metrics import DistanceMetric, resolve_distance_metric
 from ragnor.stores._scoring import format_search_hit, project_metadata
 from ragnor.stores.base import EmbeddingFunction, VectorStore
 from ragnor.stores.registry import vector_store_registry
-from ragnor.types import RetrievalError
+from ragnor.exceptions import BackendUnavailableError, OperationTimeoutError
 from ragnor.validation import (
     validate_delete_selectors,
     validate_embedding,
@@ -473,7 +473,13 @@ class PgVectorStore(VectorStore):
         except Exception as exc:
             logger.error("Hybrid search failed on %s: %s", self.table_name, exc)
             if strict:
-                raise RetrievalError(f"Hybrid search failed on {self.table_name}: {exc}") from exc
+                if isinstance(exc, TimeoutError):
+                    raise OperationTimeoutError(
+                        f"Hybrid search timed out on {self.table_name}: {exc}"
+                    ) from exc
+                raise BackendUnavailableError(
+                    f"Hybrid search failed on {self.table_name}: {exc}"
+                ) from exc
             return []
 
     async def vector_search(  # noqa: PLR0913, PLR0917
@@ -869,7 +875,11 @@ class PgVectorStore(VectorStore):
         except Exception as exc:
             logger.error("Count failed on %s: %s", self.table_name, exc)
             if strict:
-                raise RetrievalError(f"Count failed on {self.table_name}: {exc}") from exc
+                if isinstance(exc, TimeoutError):
+                    raise OperationTimeoutError(
+                        f"Count timed out on {self.table_name}: {exc}"
+                    ) from exc
+                raise BackendUnavailableError(f"Count failed on {self.table_name}: {exc}") from exc
             return 0
 
     @staticmethod

@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from typing import Protocol, TypeVar
 
-T = TypeVar("T")
+from ragnor.exceptions import ScopeDeniedError
+
+T_co = TypeVar("T_co", covariant=True)
 
 
 class GenerationManifest(Protocol):
@@ -21,10 +23,10 @@ class GenerationManifest(Protocol):
         raise NotImplementedError
 
 
-class GenerationVectorReader(Protocol[T]):
+class GenerationVectorReader(Protocol[T_co]):
     """Provider adapter that only reads one immutable generation key."""
 
-    async def read_generation(self, generation_key: str) -> T:
+    async def read_generation(self, generation_key: str) -> T_co:
         """Return content from exactly the specified immutable generation."""
         raise NotImplementedError
 
@@ -46,7 +48,7 @@ class ActiveGenerationReader:
 
     async def read(self, scope: str, document_id: str) -> tuple[str, ...]:
         if scope != self._manifest.scope:
-            raise PermissionError("scope does not match the manifest's authenticated tenant")
+            raise ScopeDeniedError("scope does not match the manifest's authenticated tenant")
         key = await self._manifest.get_active_generation(document_id)
         if key is None:
             return ()

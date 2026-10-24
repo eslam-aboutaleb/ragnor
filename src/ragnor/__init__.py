@@ -12,6 +12,10 @@ __all__ = ["Ragnor", "RagnorBuilder", "Document", "Chunk", "SearchResult", "Retr
 
 if TYPE_CHECKING:
     from ragnor.builder import Ragnor, RagnorBuilder
+    from ragnor.config import DeploymentMode as DeploymentMode
+    from ragnor.config import RagnorConfig as RagnorConfig
+    from ragnor.sync_client import AsyncRagnorOperations as AsyncRagnorOperations
+    from ragnor.sync_client import SyncRagnor as SyncRagnor
     from ragnor.types import Chunk, Document, RetrievalError, SearchResult
 
 
@@ -29,6 +33,14 @@ def __getattr__(name: str) -> Any:
             "SearchResult": SearchResult,
             "RetrievalError": RetrievalError,
         }[name]
+    if name in {"DeploymentMode", "RagnorConfig"}:
+        from ragnor.config import DeploymentMode, RagnorConfig  # noqa: PLC0415
+
+        return {"DeploymentMode": DeploymentMode, "RagnorConfig": RagnorConfig}[name]
+    if name in {"SyncRagnor", "AsyncRagnorOperations"}:
+        from ragnor.sync_client import AsyncRagnorOperations, SyncRagnor  # noqa: PLC0415
+
+        return {"SyncRagnor": SyncRagnor, "AsyncRagnorOperations": AsyncRagnorOperations}[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

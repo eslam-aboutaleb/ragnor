@@ -59,3 +59,63 @@ def test_root_import_is_idempotent() -> None:
     import ragnor
 
     assert importlib.reload(ragnor).RagnorBuilder is ragnor.RagnorBuilder
+
+
+@pytest.mark.asyncio
+async def test_public_facade_ordering_metadata_empty_and_capability_errors() -> None:
+    from ragnor import Document, RagnorBuilder, RetrievalError
+    from ragnor.exceptions import UnsupportedCapabilityError
+    from ragnor.retrieval.capabilities import FilterOperator, StoreCapabilities
+    from ragnor.stores.memory import InMemoryVectorStore
+
+    class _Embedder:
+        async def __call__(self, texts: list[str]) -> list[list[float]]:
+            out: list[list[float]] = []
+            for t in texts:
+                low = t.lower()
+                if "refund" in low:
+                    out.append([1.0, 0.0])
+                elif "shipping" in low:
+                    out.append([0.0, 1.0])
+                else:
+                    out.append([-1.0, -1.0])
+            return out
+
+    class _RestrictedStore(InMemoryVectorStore):
+        @property
+        def capabilities(self) -> StoreCapabilities:
+            return StoreCapabilities(filter_operators=frozenset({FilterOperator.EQ}))
+
+    embedder = _Embedder()
+    store = _RestrictedStore(embedding_dim=2, embedding_fn=embedder)
+
+    rag = await RagnorBuilder.local(embedder, embedding_dim=2, store=store).build()
+    count = await rag.ingest(
+        [
+            Document(
+                id="doc-refund",
+                text="Refund policy allows returns within 30 days.",
+                metadata={"category": "billing"},
+            ),
+            Document(
+                id="doc-shipping",
+                text="Shipping takes 3 to 5 business days.",
+                metadata={"category": "logistics"},
+            ),
+        ]
+    )
+    assert count == 2
+
+    hits = await rag.search("refund policy", n_results=5, category="billing")
+    assert len(hits) == 1
+    assert hits[0].metadata["source"] == "doc-refund"
+    assert hits[0].metadata["version_id"] == "v1"
+    assert [h.rrf_score for h in hits] == sorted([h.rrf_score for h in hits], reverse=True)
+
+    # Unmatched query with strict distance threshold returns []
+    empty_hits = await rag.search("completely unrelated topic", distance_threshold=0.01)
+    assert empty_hits == []
+
+    # Unsupported IN filter on an EQ-only store fails closed with typed error
+    with pytest.raises((UnsupportedCapabilityError, RetrievalError)):
+        await rag.search("refund", source=["doc-refund", "doc-shipping"])

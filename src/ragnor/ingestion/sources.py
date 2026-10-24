@@ -123,6 +123,7 @@ class ListDocumentSource:
                 source_name=document.id,
                 content=document.text,
                 external_id=document.id,
+                metadata=dict(document.metadata),
             )
             for document in self._documents
         ]
