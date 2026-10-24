@@ -23,7 +23,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from ragnor.config import RagSettings
+from ragnor.core.config import RagSettings
 
 logger = logging.getLogger(__name__)
 

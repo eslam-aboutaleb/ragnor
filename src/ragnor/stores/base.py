@@ -32,10 +32,10 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Protocol, runtime_checkable
 
-from ragnor.metrics import DistanceMetric, resolve_distance_metric
+from ragnor.core.exceptions import BackendUnavailableError, OperationTimeoutError
+from ragnor.stores.metrics import DistanceMetric, resolve_distance_metric
 from ragnor.stores._scoring import fuse_hybrid
-from ragnor.types import RetrievalError
-from ragnor.validation import (
+from ragnor.core.validation import (
     validate_embedding,
     validate_identifier,
     validate_search_identifiers,
@@ -242,7 +242,7 @@ class VectorStore(ABC):
             session: Optional external session. When supplied, the
                 caller owns the transaction (see the class docstring).
             strict: When ``True``, retrieval failures raise
-                :class:`ragnor.types.RetrievalError` instead of being
+                :class:`ragnor.core.types.RetrievalError` instead of being
                 swallowed into an empty result list.
             **filters: Additional filters (e.g., tenant_id).
 
@@ -265,7 +265,7 @@ class VectorStore(ABC):
             session: Optional external session. When supplied, the
                 caller owns the transaction (see the class docstring).
             strict: When ``True``, failures raise
-                :class:`ragnor.types.RetrievalError` instead of
+                :class:`ragnor.core.types.RetrievalError` instead of
                 being swallowed into ``0``.
             **filters: Optional filters (e.g., tenant_id).
 
@@ -322,7 +322,7 @@ class HybridVectorStore(VectorStore):
 
     ``metric`` selects the vector stage's distance metric
     (``"l2"`` by default, ``"cosine"`` opt-in); see
-    :mod:`ragnor.metrics`. Distance thresholds are distances
+    :mod:`ragnor.stores.metrics`. Distance thresholds are distances
     under that metric: a threshold is never comparable across
     two different metrics, so a host that switches metrics must
     re-tune it.
@@ -423,7 +423,7 @@ class HybridVectorStore(VectorStore):
         fused with Reciprocal Rank Fusion. A stage failure is
         logged and swallowed into an empty list unless
         ``strict=True``, which raises
-        :class:`ragnor.types.RetrievalError`.
+        :class:`ragnor.core.types.RetrievalError`.
 
         Args:
             query: Natural language search query.
@@ -437,7 +437,7 @@ class HybridVectorStore(VectorStore):
             session: Optional external session. When supplied, the
                 caller owns the transaction (see the class docstring).
             strict: When ``True``, a failed search raises
-                :class:`ragnor.types.RetrievalError`.
+                :class:`ragnor.core.types.RetrievalError`.
             **filters: Equality filters matched against document
                 fields (metadata and extra fields).
 
@@ -449,7 +449,7 @@ class HybridVectorStore(VectorStore):
             ValueError: If identifiers are unsafe, ``n_results`` is
                 not positive, or the embedding is empty and no
                 ``embedding_fn`` is configured.
-            ragnor.types.RetrievalError: If a search stage fails and
+            ragnor.core.types.RetrievalError: If a search stage fails and
                 ``strict=True``.
         """
         validate_search_identifiers(text_field, filters, metadata_fields)
@@ -491,9 +491,15 @@ class HybridVectorStore(VectorStore):
             )
             return fuse_hybrid(vector_results, keyword_results, n_results)
         except Exception as exc:
-            logger.error("Hybrid search failed on %s: %s", self.table_name, exc)
+            logger.error("Hybrid search failed on %s: %s", self.table_name, type(exc).__name__)
             if strict:
-                raise RetrievalError(f"Hybrid search failed on {self.table_name}: {exc}") from exc
+                if isinstance(exc, TimeoutError):
+                    raise OperationTimeoutError(
+                        f"Hybrid search timed out on {self.table_name} ({type(exc).__name__})"
+                    ) from exc
+                raise BackendUnavailableError(
+                    f"Hybrid search failed on {self.table_name} ({type(exc).__name__})"
+                ) from exc
             return []
 
 

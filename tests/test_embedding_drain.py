@@ -288,6 +288,7 @@ def test_main_returns_zero_after_clean_shutdown() -> None:
     with patch("ragnor.jobs.drainer.asyncio.run", return_value=None) as mock_run:
         assert main(store, processor, interval=1.0, batch_size=2, worker_id="w") == 0
     mock_run.assert_called_once()
+    mock_run.call_args.args[0].close()  # Patched asyncio.run never consumes the coroutine.
 
 
 def test_main_swallows_keyboard_interrupt() -> None:
@@ -297,5 +298,6 @@ def test_main_swallows_keyboard_interrupt() -> None:
     with patch(
         "ragnor.jobs.drainer.asyncio.run",
         side_effect=KeyboardInterrupt,
-    ):
+    ) as mock_run:
         assert main(store, processor, interval=1.0, batch_size=2, worker_id="w") == 0
+    mock_run.call_args.args[0].close()  # The interrupting mock never awaits it.

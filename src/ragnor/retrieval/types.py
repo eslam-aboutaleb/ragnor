@@ -16,11 +16,12 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from ragnor.core.exceptions import ScopeDeniedError
 from ragnor.retrieval.scores import RawScore, ScoreKind
-from ragnor.types import RetrievalError, SearchResult
+from ragnor.core.types import RetrievalError, SearchResult
 
 
-class ScopeViolationError(RetrievalError):
+class ScopeViolationError(ScopeDeniedError, RetrievalError):
     """Raised when a retrieved document fails isolation scope validation.
 
     Defense-in-depth: if a storage backend returns a document belonging
@@ -28,6 +29,8 @@ class ScopeViolationError(RetrievalError):
     retrieval fails closed (or drops the item) to prevent cross-tenant
     evidence leakage.
     """
+
+    default_code = "ERR_SCOPE_VIOLATION"
 
 
 @dataclass

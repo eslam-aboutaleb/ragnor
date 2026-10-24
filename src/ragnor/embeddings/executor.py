@@ -45,6 +45,7 @@ from typing import Any
 from ragnor.embeddings.base import EmbeddingFunction
 from ragnor.embeddings.metrics import EmbeddingMetrics
 from ragnor.embeddings.profile import EmbeddingProfile, TaskMode
+from ragnor.core.exceptions import EmbeddingProviderError
 from ragnor.telemetry.events import EventKind, NullEventSink, TelemetryEvent
 
 logger = logging.getLogger(__name__)
@@ -54,20 +55,26 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class EmbeddingError(Exception):
+class EmbeddingError(EmbeddingProviderError):
     """Base class for embedding executor errors."""
 
 
 class EmbeddingTransientError(EmbeddingError):
     """A transient failure that may succeed on retry (network, rate-limit, 5xx)."""
 
+    default_code = "ERR_EMBEDDING_TRANSIENT"
+    default_retryable = True
+
     def __init__(self, message: str, *, retry_after: float | None = None) -> None:
-        super().__init__(message)
+        super().__init__(message, retryable=True)
         self.retry_after = retry_after
 
 
 class EmbeddingPermanentError(EmbeddingError):
     """A permanent failure that must not be retried (auth, config, dimension)."""
+
+    default_code = "ERR_EMBEDDING_PERMANENT"
+    default_retryable = False
 
 
 class EmbeddingResponseError(EmbeddingPermanentError):
@@ -77,6 +84,8 @@ class EmbeddingResponseError(EmbeddingPermanentError):
     Declared permanent because retrying the same input will produce the same
     invalid response.
     """
+
+    default_code = "ERR_EMBEDDING_RESPONSE"
 
 
 # ---------------------------------------------------------------------------
@@ -401,11 +410,15 @@ class EmbeddingExecutor:
             except Exception as exc:  # noqa: BLE001
                 is_transient, retry_after = _classify_exception(exc)
                 if not is_transient:
-                    raise EmbeddingPermanentError(str(exc)) from exc
-                last_exc = EmbeddingTransientError(str(exc), retry_after=retry_after)
+                    raise EmbeddingPermanentError(
+                        f"Embedding provider failed ({type(exc).__name__})"
+                    ) from exc
+                last_exc = EmbeddingTransientError(
+                    f"Embedding provider failed ({type(exc).__name__})", retry_after=retry_after
+                )
                 if attempt == self._max_retries:
                     raise EmbeddingTransientError(
-                        f"Exhausted {self._max_retries} retries: {exc}",
+                        f"Exhausted {self._max_retries} retries ({type(exc).__name__})",
                         retry_after=retry_after,
                     ) from exc
 

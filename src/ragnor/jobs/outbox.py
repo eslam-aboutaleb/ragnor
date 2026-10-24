@@ -24,10 +24,19 @@ its own transaction and commits.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from time import perf_counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
+
+from ragnor.core.exceptions import (
+    IndexConsistencyError,
+    RagnorError,
+    is_retryable_exception,
+    sanitize_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +70,8 @@ class JobPayload:
     locked_by: str | None = None
     created_at: datetime | None = None
     completed_at: datetime | None = None
+    claim_generation: int = 0
+    claim_owner: str | None = None
 
 
 def claim_jobs(jobs: list[JobPayload], worker_id: str, now: datetime) -> list[JobPayload]:
@@ -91,7 +102,7 @@ class EmbeddingJobStore(Protocol):
         a due retry and attempts remaining), ordered by creation time,
         using ``FOR UPDATE SKIP LOCKED`` so concurrent workers never
         claim the same row."""
-        ...
+        raise NotImplementedError
 
     async def mark_processing(self, jobs: list[JobPayload], worker_id: str) -> list[JobPayload]:
         """Transition jobs to ``processing`` and stamp the lock.
@@ -100,19 +111,19 @@ class EmbeddingJobStore(Protocol):
         worker claimed in the meantime is dropped so it is never
         processed twice.
         """
-        ...
+        raise NotImplementedError
 
     async def mark_completed(self, job: JobPayload) -> None:
         """Persist a successfully processed job as ``completed``."""
-        ...
+        raise NotImplementedError
 
     async def mark_failed(self, job: JobPayload, error: Exception) -> None:
         """Persist a failed job's retry/dead-letter transition."""
-        ...
+        raise NotImplementedError
 
     async def reclaim_stale(self, stale_after_seconds: float | None = None) -> int:
         """Reset jobs abandoned in ``processing`` back to ``pending``."""
-        ...
+        raise NotImplementedError
 
     async def enqueue(self, payload: dict[str, Any], session: Any = None) -> None:
         """Write a new pending job row.
@@ -122,7 +133,149 @@ class EmbeddingJobStore(Protocol):
         land in one transaction. Without a session the store opens its
         own transaction and commits.
         """
-        ...
+        raise NotImplementedError
+
+
+class LostJobOwnershipError(IndexConsistencyError, RuntimeError):
+    """Stale owner/lease/generation cannot alter an outbox job."""
+
+    default_code = "ERR_LOST_JOB_OWNERSHIP"
+
+
+@runtime_checkable
+class AtomicClaimJobStore(Protocol):
+    """Optional stronger claim contract for durable multi-worker adapters."""
+
+    async def claim_and_mark_processing(self, limit: int, worker_id: str) -> list[JobPayload]:
+        """Claim and transition jobs in one durable transaction."""
+        raise NotImplementedError
+
+
+@runtime_checkable
+class LeaseRenewalJobStore(Protocol):
+    """Optional host-driven lease extension for long-running jobs."""
+
+    async def renew_lease(self, job: JobPayload, *, lease_seconds: float | None = None) -> None:
+        """Renew only the active owner and claim-generation lease."""
+        raise NotImplementedError
+
+
+async def _process_with_heartbeat(
+    store: LeaseRenewalJobStore,
+    processor: JobProcessor,
+    job: JobPayload,
+    interval: float,
+) -> None:
+    """Stop processing if renewal fails, without making a stale ack."""
+    work = asyncio.create_task(processor.process(job))
+    try:
+        while True:
+            completed, _ = await asyncio.wait({work}, timeout=interval)
+            if completed:
+                # The task is finished; retrieve its result to propagate processor errors.
+                work.result()
+                return
+            await store.renew_lease(job)
+    finally:
+        if not work.done():
+            work.cancel()
+            await asyncio.gather(work, return_exceptions=True)
+
+
+@runtime_checkable
+class GenerationPublishingJobStore(Protocol):
+    """Optional manifest publication port for production embedding workers."""
+
+    require_publication: bool
+
+    async def activate_generation(self, job: JobPayload) -> bool:
+        """Atomically publish the staged generation and complete the job."""
+        raise NotImplementedError
+
+
+@runtime_checkable
+class RetryPolicy(Protocol):
+    """Compute delay; None means permanent failure or exhausted attempts."""
+
+    def delay(self, error: Exception, attempt: int, max_attempts: int) -> timedelta | None:
+        """Return a positive next-retry delay or terminal decision."""
+        raise NotImplementedError
+
+
+class DefaultRetryPolicy:
+    """Historical 1/5/30-minute retry schedule, keeping local behavior stable."""
+
+    def delay(self, error: Exception, attempt: int, max_attempts: int) -> timedelta | None:
+        if isinstance(error, RagnorError) and not error.retryable:
+            return None
+        if attempt >= max_attempts:
+            return None
+        return RETRY_SCHEDULE[min(attempt - 1, len(RETRY_SCHEDULE) - 1)]
+
+
+class TaxonomyRetryPolicy:
+    """Retry policy using SDK-03 transient/permanent error classification."""
+
+    def delay(self, error: Exception, attempt: int, max_attempts: int) -> timedelta | None:
+        if not is_retryable_exception(error):
+            return None
+        if attempt >= max_attempts:
+            return None
+        return RETRY_SCHEDULE[min(attempt - 1, len(RETRY_SCHEDULE) - 1)]
+
+
+def _schedule_job_failure(job: JobPayload, error: Exception, policy: RetryPolicy) -> None:
+    """Apply a host-selected retry/dead-letter outcome without raw error details."""
+    job.retry_count += 1
+    delay = policy.delay(error, job.retry_count, job.max_attempts)
+    if delay is not None and (not isinstance(delay, timedelta) or delay.total_seconds() <= 0):
+        raise ValueError("retry policy must return a positive timedelta or None") from error
+    if delay is None:
+        job.status = "dead_letter"
+        reason = (
+            f"Exhausted {job.max_attempts} attempts"
+            if job.retry_count >= job.max_attempts
+            else "Permanent failure"
+        )
+        job.status_detail = f"{reason} ({type(error).__name__})"
+        job.next_retry_at = None
+    else:
+        job.next_retry_at = datetime.now(UTC) + delay
+        job.status = "failed"
+        job.status_detail = f"Retry scheduled ({type(error).__name__})"
+    job.locked_at = None
+    job.locked_by = None
+
+
+@dataclass(frozen=True)
+class JobEvent:
+    """Safe structured telemetry with no payload body, exception text or credentials."""
+
+    kind: str
+    job_id: str
+    worker_id: str
+    attempt: int
+    elapsed_seconds: float
+    error_type: str | None = None
+
+
+@runtime_checkable
+class JobEventSink(Protocol):
+    """Optional observer that can forward metrics to an injected telemetry system."""
+
+    async def emit(self, event: JobEvent) -> None:
+        """Publish a sanitized job-state event."""
+        raise NotImplementedError
+
+
+async def _emit_job_event(sink: JobEventSink | None, event: JobEvent) -> None:
+    if sink is None:
+        return
+    try:
+        await sink.emit(event)
+    except Exception as exc:
+        # Telemetry must never change a committed transaction's outcome.
+        logger.warning("Job event sink failed (%s)", type(exc).__name__)
 
 
 @runtime_checkable
@@ -131,14 +284,18 @@ class JobProcessor(Protocol):
 
     async def process(self, job: JobPayload) -> None:
         """Process one claimed job. Raises on failure."""
-        ...
+        raise NotImplementedError
 
 
-async def process_pending_jobs(
+async def process_pending_jobs(  # noqa: PLR0913, PLR0917 -- compatibility options are opt-in
     store: EmbeddingJobStore,
     processor: JobProcessor,
     limit: int = 10,
     worker_id: str | None = None,
+    heartbeat_interval_seconds: float | None = None,
+    require_atomic_claims: bool = False,
+    retry_policy: RetryPolicy | None = None,
+    event_sink: JobEventSink | None = None,
 ) -> int:
     """Process pending jobs.
 
@@ -157,44 +314,115 @@ async def process_pending_jobs(
         processor: The per-job processor.
         limit: Maximum number of jobs to process in one batch.
         worker_id: Identity stamped into ``locked_by``.
+        heartbeat_interval_seconds: Optional positive renewal cadence. When
+            supplied, the adapter MUST implement ``renew_lease`` and the
+            processor is cancelled if the claim is lost.
+        require_atomic_claims: Reject legacy two-step stores in multi-host
+            operation. Leave False only for local, single-host use.
+        retry_policy: Optional injected backoff and permanent-error classifier.
+        event_sink: Optional injected observer of sanitized job lifecycle events.
 
     Returns:
         int: Number of jobs successfully processed.
     """
-    jobs = await store.claim_pending(limit, worker_id or "")
-    jobs = await store.mark_processing(jobs, worker_id or "")
+    if heartbeat_interval_seconds is not None:
+        if heartbeat_interval_seconds <= 0:
+            raise ValueError("heartbeat_interval_seconds must be positive")
+        if not isinstance(store, LeaseRenewalJobStore):
+            raise ValueError("requested heartbeat requires a renew_lease job-store adapter")
+        lease = getattr(store, "lease_seconds", None)
+        if isinstance(lease, (int, float)) and heartbeat_interval_seconds >= lease:
+            raise ValueError("heartbeat_interval_seconds must be shorter than lease_seconds")
 
+    if require_atomic_claims and not isinstance(store, AtomicClaimJobStore):
+        raise ValueError(
+            "multi-host processing requires an atomic claim-and-mark adapter; "
+            "legacy two-step stores are local-only"
+        )
+
+    if getattr(store, "require_publication", False) and not isinstance(
+        store, GenerationPublishingJobStore
+    ):
+        raise ValueError("publication-required store must implement activate_generation")
+
+    if isinstance(store, AtomicClaimJobStore):
+        jobs = await store.claim_and_mark_processing(limit, worker_id or "")
+    else:
+        # Backward compatibility with local/legacy single-host stores. Two
+        # separate calls do not promise distributed atomicity.
+        jobs = await store.claim_pending(limit, worker_id or "")
+        jobs = await store.mark_processing(jobs, worker_id or "")
+
+    policy = retry_policy or DefaultRetryPolicy()
     processed = 0
     for job in jobs:
+        started = perf_counter()
+        await _emit_job_event(
+            event_sink,
+            JobEvent("claimed", job.job_id, worker_id or "", job.retry_count, 0.0),
+        )
         try:
-            await processor.process(job)
+            if heartbeat_interval_seconds is None:
+                await processor.process(job)
+            else:
+                await _process_with_heartbeat(
+                    cast(LeaseRenewalJobStore, store),
+                    processor,
+                    job,
+                    heartbeat_interval_seconds,
+                )
 
             job.status = "completed"
             job.completed_at = datetime.now(UTC)
-            await store.mark_completed(job)
-            processed += 1
-            logger.info("Processed job '%s'.", job.job_id)
-        except Exception as exc:
-            job.retry_count += 1
-            if job.retry_count >= job.max_attempts:
-                job.status = "dead_letter"
-                job.status_detail = f"Exhausted {job.max_attempts} attempts: {exc}"
-                job.next_retry_at = None
-                job.locked_at = None
-                job.locked_by = None
+            if getattr(store, "require_publication", False):
+                # Publishing performs the generation switch and the job ack in
+                # the same durable transaction; mark_completed is not safe.
+                await cast(GenerationPublishingJobStore, store).activate_generation(job)
             else:
-                backoff = RETRY_SCHEDULE[min(job.retry_count - 1, len(RETRY_SCHEDULE) - 1)]
-                job.next_retry_at = datetime.now(UTC) + backoff
-                job.status = "failed"
-                job.status_detail = str(exc)
-                job.locked_at = None
-                job.locked_by = None
+                await store.mark_completed(job)
+            processed += 1
+            await _emit_job_event(
+                event_sink,
+                JobEvent(
+                    "completed",
+                    job.job_id,
+                    worker_id or "",
+                    job.retry_count,
+                    perf_counter() - started,
+                ),
+            )
+            logger.info("Processed job '%s'.", job.job_id)
+        except LostJobOwnershipError:
+            await _emit_job_event(
+                event_sink,
+                JobEvent(
+                    "ownership_lost",
+                    job.job_id,
+                    worker_id or "",
+                    job.retry_count,
+                    perf_counter() - started,
+                ),
+            )
+            raise
+        except Exception as exc:
+            _schedule_job_failure(job, exc, policy)
             await store.mark_failed(job, exc)
+            await _emit_job_event(
+                event_sink,
+                JobEvent(
+                    job.status,
+                    job.job_id,
+                    worker_id or "",
+                    job.retry_count,
+                    perf_counter() - started,
+                    error_type=type(exc).__name__,
+                ),
+            )
             logger.error(
                 "Job '%s' failed (retry %d): %s",
                 job.job_id,
                 job.retry_count,
-                exc,
+                type(exc).__name__,
             )
 
     return processed
@@ -299,7 +527,9 @@ class InMemoryEmbeddingJobStore:
 
     async def mark_failed(self, job: JobPayload, error: Exception) -> None:
         """Persist the transition already computed by process_pending_jobs."""
-        job.status_detail = job.status_detail or str(error)
+        job.status_detail = sanitize_message(
+            job.status_detail or f"Failed ({type(error).__name__})"
+        )
 
     async def reclaim_stale(self, stale_after_seconds: float | None = None) -> int:
         """Reclaim stale jobs."""

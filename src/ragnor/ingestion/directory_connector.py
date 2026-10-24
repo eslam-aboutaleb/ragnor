@@ -282,6 +282,8 @@ class DirectoryConnector:
                             finally:
                                 os.close(link_fd)
                         except (OSError, ValueError, RuntimeError):
+                            # Inaccessible or broken symlink; fall back to
+                            # non-dereferenced stat info for ordering.
                             pass
                     return name + ("/" if stat.S_ISDIR(info.st_mode) else "")
 

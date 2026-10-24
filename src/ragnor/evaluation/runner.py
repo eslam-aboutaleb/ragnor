@@ -45,7 +45,7 @@ from ragnor.evaluation.answer import (
 )
 from ragnor.evaluation.dataset import Difficulty, EvalSample
 from ragnor.evaluation.retrieval import RetrievalMetrics
-from ragnor.config import RagSettings
+from ragnor.core.config import RagSettings
 
 logger = logging.getLogger(__name__)
 

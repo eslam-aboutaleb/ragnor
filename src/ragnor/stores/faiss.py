@@ -29,7 +29,7 @@ in-process record map holding each document's text and
 metadata.
 
 Distance metric: the vector stage ranks by the store's
-metric (:mod:`ragnor.metrics`). The ``l2`` default keeps
+metric (:mod:`ragnor.stores.metrics`). The ``l2`` default keeps
 ``IndexFlatL2`` on the raw vectors. For ``cosine``, every
 embedding (documents at upsert time, the query at search
 time) is normalized to unit length first and the same
@@ -59,7 +59,7 @@ from typing import Any
 
 import numpy as np
 
-from ragnor.metrics import normalize
+from ragnor.stores.metrics import normalize
 from ragnor.stores._scoring import (
     build_upsert_record,
     filter_record_map,
@@ -70,7 +70,7 @@ from ragnor.stores._scoring import (
 )
 from ragnor.stores.base import EmbeddingFunction, HybridVectorStore
 from ragnor.stores.registry import vector_store_registry
-from ragnor.validation import (
+from ragnor.core.validation import (
     validate_delete_selectors,
     validate_embedding,
     validate_identifier,

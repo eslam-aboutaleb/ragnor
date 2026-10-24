@@ -8,11 +8,8 @@ Ragnor is source-available under **Elastic License 2.0 (ELv2)**
 OSI-approved open-source license. The package metadata and built artifacts
 must identify the same license and include both files.
 
-The maintainer requested this source change on 24 October 2026. It applies
-to this revision and future distributions; previously published 0.4.1 and
-earlier artifacts and tags retain their original licensing. The next release
-carrying this revision must use a new version. No release is published by
-this change.
+Earlier published releases retain the license terms under which they were
+distributed. Third-party components retain their own licenses and notices.
 
 ## Commercial use and managed services
 
@@ -42,22 +39,7 @@ obtain advice appropriate to your deployment.
 ## Requests for separate rights
 
 For a restricted managed-service offering, request a separately negotiated
-license or clarification from the [repository maintainer](https://github.com/eslam-aboutaleb)
-through the [repository issue tracker](https://github.com/eslam-aboutaleb/ragnor/issues).
-Do not include confidential information in a public issue. This provides a
-request route, not a commercial entitlement, price, warranty or SLA.
-Additional rights require an explicit agreement with the rights holder.
-
-## Provenance and release record
-
-The source change is authorized by the maintainer's explicit task request.
-The main-branch author inventory contains the maintainer's two name variants
-with the same email. This inventory alone does not establish rights to any
-copied or third-party material, and no legal review is claimed. Upstream
-components retain their own licenses; this change does not relicense them.
-Issue [#19](https://github.com/eslam-aboutaleb/ragnor/issues/19) remains open
-for provenance/legal review, commercial-policy approval and release sign-off.
-
-Release checks verify source consistency, exact license/notice contents in
-wheel and sdist, license metadata, and clean installation. Do not rewrite
-historical releases or publish a replacement 0.4.1 artifact under these terms.
+license or clarification from the [repository maintainer](https://github.com/eslam-aboutaleb).
+Do not include confidential information in public messages. A request does not
+grant additional rights, a price, warranty or SLA. Additional rights require
+an explicit agreement with the rights holder.

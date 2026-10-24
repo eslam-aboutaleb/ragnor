@@ -12,105 +12,17 @@ inject their factory into the ingestion pipeline and stores.
 from __future__ import annotations
 
 import logging
-from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-if TYPE_CHECKING:
-    from ragnor.db.session import SessionProvider
+from ragnor.db.ports import SQLFactory, SessionProvider
 
 logger = logging.getLogger(__name__)
-
-
-class SQLFactory(ABC):
-    """Abstract factory for every SQL operation ragnor performs.
-
-    Subclass this to route ragnor's SQL through a different
-    stack, and inject the instance via ``sql_factory=...`` on
-    :class:`ragnor.ingestion.pipeline.IngestionPipeline` and
-    :class:`ragnor.stores.pgvector.PgVectorStore`.
-    """
-
-    @abstractmethod
-    def create_session_factory(self, database_url: str) -> SessionProvider:
-        """Build a session factory bound to ``database_url``.
-
-        Args:
-            database_url: Database URL understood by the
-                underlying driver stack.
-
-        Returns:
-            A callable yielding async session context managers.
-        """
-
-    @abstractmethod
-    async def fetch_all(
-        self,
-        session: Any,
-        statement: str,
-        params: dict[str, Any] | None = None,
-    ) -> list[dict[str, Any]]:
-        """Run a query and return every row as a dictionary.
-
-        Args:
-            session: Database session to run the statement on.
-            statement: SQL statement with ``:named`` bind params.
-            params: Bind parameter values.
-
-        Returns:
-            All result rows, keyed by column name.
-        """
-
-    @abstractmethod
-    async def fetch_scalar(
-        self,
-        session: Any,
-        statement: str,
-        params: dict[str, Any] | None = None,
-    ) -> Any:
-        """Run a query and return its single scalar result.
-
-        Args:
-            session: Database session to run the statement on.
-            statement: SQL statement with ``:named`` bind params.
-            params: Bind parameter values.
-
-        Returns:
-            The first column of the first row.
-        """
-
-    @abstractmethod
-    async def execute(
-        self,
-        session: Any,
-        statement: str,
-        params: dict[str, Any] | None = None,
-    ) -> None:
-        """Run a mutation statement (INSERT/UPDATE/DELETE).
-
-        Args:
-            session: Database session to run the statement on.
-            statement: SQL statement with ``:named`` bind params.
-            params: Bind parameter values.
-        """
-
-    @abstractmethod
-    def advisory_lock(self, session: Any, key: str) -> AsyncIterator[None]:
-        """Hold a database-level lock that serializes ``key``.
-
-        Args:
-            session: Database session the lock is taken on.
-            key: Lock key (the source path).
-
-        Yields:
-            Nothing. The lock is held for the duration of the
-            ``async with`` block.
-        """
 
 
 class SQLAlchemyFactory(SQLFactory):

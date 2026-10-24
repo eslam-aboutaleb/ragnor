@@ -49,7 +49,7 @@ import asyncio
 import logging
 from typing import Any
 
-from ragnor.config import RagSettings
+from ragnor.core.config import RagSettings
 from ragnor.stores._scoring import (
     format_search_hit,
     handle_count_error,
@@ -60,7 +60,7 @@ from ragnor.stores._scoring import (
 )
 from ragnor.stores.base import EmbeddingFunction, HybridVectorStore
 from ragnor.stores.registry import vector_store_registry
-from ragnor.validation import (
+from ragnor.core.validation import (
     validate_delete_selectors,
     validate_embedding,
     validate_identifier,
@@ -348,7 +348,7 @@ class ChromaStore(HybridVectorStore):
             session: Accepted for interface compatibility;
                 ignored.
             strict: When ``True``, a failed count raises
-                :class:`ragnor.types.RetrievalError`.
+                :class:`ragnor.core.types.RetrievalError`.
             **filters: Equality filters (e.g.,
                 ``tenant_id="..."``).
 
@@ -357,7 +357,7 @@ class ChromaStore(HybridVectorStore):
 
         Raises:
             ValueError: If a filter key is unsafe.
-            ragnor.types.RetrievalError: If the count fails
+            ragnor.core.types.RetrievalError: If the count fails
                 and ``strict=True``.
         """
         for key in filters:
@@ -565,5 +565,5 @@ class ChromaStore(HybridVectorStore):
             )
             logger.info("Upserted %d documents to %s.", len(documents), self.table_name)
         except Exception as exc:
-            logger.error("Upsert failed on %s: %s", self.table_name, exc)
+            logger.error("Upsert failed on %s: %s", self.table_name, type(exc).__name__)
             raise

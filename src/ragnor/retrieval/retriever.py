@@ -9,7 +9,7 @@ The retriever embeds the query, delegates the
 two-stage search (vector similarity + keyword
 search, merged with Reciprocal Rank Fusion) to the
 injected vector store, and returns
-:class:`ragnor.types.SearchResult` dataclasses.
+:class:`ragnor.core.types.SearchResult` dataclasses.
 :func:`as_dicts` converts them back to the dict
 shape the stores return, so existing dict consumers
 keep working during the transition.
@@ -29,7 +29,7 @@ import time
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
-from ragnor.config import RagSettings
+from ragnor.core.config import RagSettings
 from ragnor.embeddings import get_embedding_dimension, get_embedding_function
 from ragnor.retrieval.types import RetrievalRequest, RetrievalResponse
 from ragnor.retrieval.capabilities import get_backend_capabilities
@@ -40,8 +40,8 @@ from ragnor.retrieval.strategies import (
 )
 from ragnor.stores import get_vector_store
 from ragnor.telemetry.events import EventKind, NullEventSink, TelemetryEvent
-from ragnor.types import SearchResult
-from ragnor.validation import validate_identifier
+from ragnor.core.types import SearchResult
+from ragnor.core.validation import validate_identifier
 
 if TYPE_CHECKING:
     from ragnor.db.session import SessionProvider
@@ -208,7 +208,7 @@ class HybridRetriever:
                 search part. When ``None``, falls back to
                 ``settings.rag_distance_threshold``.
             strict: When ``True``, store failures raise
-                :class:`ragnor.types.RetrievalError`.
+                :class:`ragnor.core.types.RetrievalError`.
             candidate_k: Optional candidate count for initial stages.
             **filters: Additional equality filters.
 

@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from ragnor.chunking.base import Chunker
-from ragnor.config import RagSettings
+from ragnor.core.config import RagSettings
 from ragnor.embeddings.base import EmbeddingFunction
 from ragnor.ingestion.sources import DocumentSource, RawDocument
 from ragnor.ingestion.connector_core import LoadResult
@@ -44,8 +44,8 @@ from ragnor.ingestion.versioning import (
     snapshot_matches,
 )
 from ragnor.stores.base import VectorStore
-from ragnor.types import Chunk
-from ragnor.validation import validate_embedding
+from ragnor.core.types import Chunk
+from ragnor.core.validation import validate_embedding
 
 if TYPE_CHECKING:
     from ragnor.db.session import SessionProvider
@@ -209,12 +209,13 @@ class IngestionPipeline:
 
         sql_factory = None
         if lock_key is not None:
-            # Imported lazily so importing the pipeline does
-            # not require a database driver; the default is
-            # the SQLAlchemy factory.
-            from ragnor.db.sql_factory import SQLAlchemyFactory  # noqa: PLC0415
+            sql_factory = self._sql_factory
+            if sql_factory is None:
+                # Import the default only when no host adapter was supplied:
+                # SQLAlchemy is an optional dependency.
+                from ragnor.db.sql_factory import SQLAlchemyFactory  # noqa: PLC0415
 
-            sql_factory = self._sql_factory or SQLAlchemyFactory()
+                sql_factory = SQLAlchemyFactory()
 
         if not documents:
             if not purge_on_empty:

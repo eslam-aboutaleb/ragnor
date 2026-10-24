@@ -1,35 +1,38 @@
-"""Configuration protocols for ragnor.
-
-ragnor reads its configuration through the :class:`RagSettings`
-protocol. Any settings object (typically a pydantic ``Settings``
-class in the host application) that exposes these attributes works
-structurally, so ragnor never depends on the host's config module.
-"""
+"""Compatibility import for :mod:`ragnor.core.config`."""
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+import sys
+from typing import TYPE_CHECKING
 
+from ragnor.core import config as _implementation
 
-@runtime_checkable
-class RagSettings(Protocol):
-    """Settings that ragnor reads at runtime."""
+if TYPE_CHECKING:
+    from ragnor.core.config import (
+        ConfigurationError,
+        DeploymentMode,
+        Protocol,
+        RagSettings,
+        RagnorConfig,
+        SettingsProvider,
+        StrEnum,
+        dataclass,
+        runtime_checkable,
+        sanitize_message,
+    )
 
-    embedding_model: str
-    rag_distance_threshold: float
-    vector_store_provider: str
-    openai_api_key: str
-    openai_api_base: str
-    embedding_drain_interval_seconds: float
-    embedding_drain_batch_size: int
-    job_stale_after_seconds: float
-    worker_id: str
-    ingest_on_startup: bool
-    database_url: str
+__all__ = [
+    "ConfigurationError",
+    "DeploymentMode",
+    "Protocol",
+    "RagSettings",
+    "RagnorConfig",
+    "SettingsProvider",
+    "StrEnum",
+    "dataclass",
+    "runtime_checkable",
+    "sanitize_message",
+]
 
-
-@runtime_checkable
-class SettingsProvider(Protocol):
-    """Accessor protocol for settings (a ``get_settings()``-style factory)."""
-
-    def get_settings(self) -> RagSettings: ...
+# Keep module identity, private helpers and patch targets compatible too.
+sys.modules[__name__] = _implementation

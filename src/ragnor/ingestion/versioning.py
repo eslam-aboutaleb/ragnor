@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ragnor.chunking.base import Chunker
-from ragnor.config import RagSettings
+from ragnor.core.config import RagSettings
 from ragnor.embeddings import get_embedding_dimension
 from ragnor.embeddings._safe_config import safe_config
 from ragnor.ingestion.records import RawDocument
@@ -69,6 +69,7 @@ class IngestionSnapshot:
     extractor_version: str = "0"
     extractor_options: dict[str, Any] = field(default_factory=dict)
     embedding_profile_hash: str = ""
+    chunker_config_hash: str = ""
 
 
 def snapshot_matches(
@@ -201,4 +202,11 @@ def build_snapshot(  # noqa: PLR0913, PLR0917
         extractor_version=extractor_version or "0",
         extractor_options=safe_config(extractor_options or {}),
         embedding_profile_hash=profile_hash,
+        chunker_config_hash=hashlib.sha256(
+            json.dumps(
+                {"version": chunker.version, "config": safe_config(config)},
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest(),
     )

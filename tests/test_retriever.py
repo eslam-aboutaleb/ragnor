@@ -781,20 +781,32 @@ async def test_strategy_failures_are_swallowed_by_default() -> None:
 @pytest.mark.asyncio
 async def test_strategy_failures_raise_under_strict() -> None:
     dense = DenseRetrieval(_FailingVectorIndex(), _HashingEmbedder())
-    with pytest.raises(RetrievalError, match="index down"):
+    with pytest.raises(RetrievalError) as caught:
         await dense.retrieve("query", n_results=5, threshold=1.3, strict=True)
 
+    assert caught.value.code == "ERR_BACKEND_UNAVAILABLE"
+    assert str(caught.value.__cause__) == "index down"
+    assert "index down" not in str(caught.value)
+
     keyword = KeywordRetrieval(_FailingLexicalIndex())
-    with pytest.raises(RetrievalError, match="index down"):
+    with pytest.raises(RetrievalError) as caught:
         await keyword.retrieve("query", n_results=5, strict=True)
+
+    assert caught.value.code == "ERR_BACKEND_UNAVAILABLE"
+    assert str(caught.value.__cause__) == "index down"
+    assert "index down" not in str(caught.value)
 
     hybrid = HybridRetrieval(
         _FakeVectorIndex(),
         _FailingLexicalIndex(),
         _HashingEmbedder(),
     )
-    with pytest.raises(RetrievalError, match="index down"):
+    with pytest.raises(RetrievalError) as caught:
         await hybrid.retrieve("query", n_results=5, threshold=1.3, strict=True)
+
+    assert caught.value.code == "ERR_BACKEND_UNAVAILABLE"
+    assert str(caught.value.__cause__) == "index down"
+    assert "index down" not in str(caught.value)
 
 
 @pytest.mark.asyncio

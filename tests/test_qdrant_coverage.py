@@ -78,7 +78,11 @@ class TestQdrantStore:
     async def test_count_error_path(self) -> None:
         store = QdrantStore(table_name="docs", embedding_dim=DIM, client=_FailingCountClient())
 
-        with pytest.raises(RetrievalError, match="qdrant down"):
+        with pytest.raises(RetrievalError) as caught:
             await store.count(strict=True)
+
+        assert caught.value.code == "ERR_BACKEND_UNAVAILABLE"
+        assert str(caught.value.__cause__) == "qdrant down"
+        assert "qdrant down" not in str(caught.value)
 
         assert await store.count() == 0
