@@ -125,12 +125,9 @@ def test_sync_timeout_cancels_real_postgres_query_and_closes_loop_thread_and_poo
         state["engine"] = create_async_engine(DB_URL)
         return SQLClient()
 
-    client = SyncRagnor.from_async_factory(construct)
-    try:
+    with SyncRagnor.from_async_factory(construct, timeout=5) as client:
         with pytest.raises(OperationTimeoutError):
             client.count(timeout=0.5)
-    finally:
-        client.close(timeout=5)
     assert reached_database.is_set()
     assert cancelled.is_set()
     assert state["disposed"]
