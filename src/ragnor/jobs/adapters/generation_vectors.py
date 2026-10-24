@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
 
 from ragnor.core.exceptions import ScopeDeniedError
+from ragnor.jobs.persistence import GenerationReservations
 
 
 class GenerationDocumentStore(Protocol):
@@ -33,21 +34,6 @@ class GenerationDocumentStore(Protocol):
         self, documents: list[dict[str, Any]], session: Any = None, **kwargs: Any
     ) -> None:
         """Persist immutable generation-qualified document ids."""
-        raise NotImplementedError
-
-
-class GenerationReservations(Protocol):
-    """Atomically bind a tenant's generation to one complete content digest.
-
-    Reservations must commit durably before returning, survive failed vector
-    writes and reject a different digest forever while the generation can be
-    read or replayed. Identical retries may proceed concurrently.
-    """
-
-    scope: str
-
-    async def reserve_generation(self, generation_key: str, content_digest: str) -> None:
-        """Reserve once, allow identical retries, reject conflicting content."""
         raise NotImplementedError
 
 

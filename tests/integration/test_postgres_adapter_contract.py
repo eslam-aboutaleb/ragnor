@@ -14,6 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ragnor.db.sql_factory import SQLAlchemyFactory
+from ragnor.db.schema import ingestion_locks
 
 DATABASE_URL = os.getenv("RAGNOR_TEST_DATABASE_URL")
 pytestmark = [
@@ -60,6 +61,8 @@ async def test_postgres_advisory_lock_serializes_two_independent_sessions() -> N
     engine = create_async_engine(DATABASE_URL)
     factory = SQLAlchemyFactory()
     sessions = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(ingestion_locks.create, checkfirst=True)
     contender_started = asyncio.Event()
     contender_entered = asyncio.Event()
 
@@ -95,6 +98,8 @@ async def test_failed_statement_does_not_poison_injected_session_or_leak_lock() 
     engine = create_async_engine(DATABASE_URL)
     factory = SQLAlchemyFactory()
     sessions = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(ingestion_locks.create, checkfirst=True)
     try:
         async with sessions() as session:
             with pytest.raises(Exception):  # noqa: B017

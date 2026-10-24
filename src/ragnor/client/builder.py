@@ -71,6 +71,7 @@ if TYPE_CHECKING:
     from ragnor.evidence.tokenizer import Tokenizer
     from ragnor.evidence.types import ContextBudget, EvidenceBundle, SearchHit
     from ragnor.jobs.outbox import EmbeddingJobStore
+    from ragnor.jobs.persistence import JobPersistenceFactory
     from ragnor.retrieval.query_transform import QueryTransformer
     from ragnor.sync.manifest import ManifestStore
     from ragnor.sync.state import SyncStateStore
@@ -460,6 +461,27 @@ class RagnorBuilder:
     def with_job_store(self, job_store: EmbeddingJobStore) -> RagnorBuilder:
         """Inject a custom durable job outbox store."""
         self._job_store = job_store
+        return self
+
+    def with_job_persistence(
+        self,
+        factory: JobPersistenceFactory,
+        *,
+        scope: str,
+        lease_seconds: float = 300.0,
+        require_publication: bool = False,
+    ) -> RagnorBuilder:
+        """Bind sessions and the outbox to one host-configured database factory."""
+        if self._session_factory is not None and self._session_factory is not factory:
+            raise ConfigurationError(
+                "job persistence factory must be the same host database binding as session_factory"
+            )
+        self._session_factory = factory
+        self._job_store = factory.job_store(
+            scope=scope,
+            lease_seconds=lease_seconds,
+            require_publication=require_publication,
+        )
         return self
 
     def with_authorizer(self, authorizer: ScopeAuthorizer) -> RagnorBuilder:

@@ -1,7 +1,7 @@
 # Durable vector publication, visibility and crash consistency
 
-Ragnor's PostgreSQL outbox offers an **opt-in**
-`PostgresEmbeddingJobStore.activate_generation(job)` and
+Ragnor's host-bound relational outbox offers an **opt-in**
+`RelationalEmbeddingJobStore.activate_generation(job)` and
 `get_active_generation(document_id)`, and a pluggable
 `ActiveGenerationReader`. These do **not** replace the regular job store
 contract or add mandatory SQLAlchemy dependencies.
@@ -16,8 +16,8 @@ contract or add mandatory SQLAlchemy dependencies.
    under that immutable generation key; **never overwrite a currently active
    generation or reuse a key for different content**.
 3. After a confirmed stage operation, call `activate_generation(job)`.
-   PostgreSQL holds the job row lock, validates scope/claim/lease/persisted
-   payload, serializes active publication per document, and commits the
+   The SQL database validates scope, claim, lease and persisted
+   payload; conditional updates serialize active publication per document and commit the
    active manifest and job completion **within the same transaction**.
 4. Route searches through the injected generation-scoped reader, which
    fetches the authoritative active key from the manifest and directs the
@@ -35,11 +35,12 @@ provider writes transactional or globally exactly once. Providers must
 honor immutable keys and generation filters; deployment must test those
 properties with each real Qdrant/pgvector/etc adapter.
 
-The `DDL` sequence defines the
-`ragnor_active_generations(scope, document_id, revision, generation_key)`
-table. Apply through a versioned migration before deployment; the
-SDK does not run migrations on import or startup. Use a tenant-isolated
-database role or RLS in addition to SDK scoped predicates. Long-running
+The SQLAlchemy `metadata` in `ragnor.jobs.adapters.relational` defines the
+job, reservation, active-generation and ingestion-lock tables. Apply the
+equivalent schema through host-owned versioned migrations before deployment;
+the SDK does not run migrations on import or startup. PostgreSQL deployments
+can continue using the packaged SQL migrations. Use database authorization
+in addition to SDK scoped predicates. Long-running
 processing still requires heartbeat and graceful cancellation.
 
 ## Deployment responsibilities
@@ -47,11 +48,12 @@ processing still requires heartbeat and graceful cancellation.
 Use a tenant-isolated database role or row-level security and enforce
 authorization in the application. Configure provider timeouts, retry policy,
 heartbeat scheduling and retention for orphaned generations. A separate
-vector service does not participate in the PostgreSQL transaction.
+vector service does not participate in the SQL transaction.
 
 ## Enforcing the contract in production
 
-Instantiate `PostgresEmbeddingJobStore(..., require_publication=True)` when
+Bind `RelationalJobStoreFactory(host_sessions)` and create its scoped job store
+with `require_publication=True` when
 job payloads stage external vectors. This explicitly **disables**
 `mark_completed` as a bypass around the durable active-generation manifest.
 The host must stage immutable vectors, then call `activate_generation(job)`.

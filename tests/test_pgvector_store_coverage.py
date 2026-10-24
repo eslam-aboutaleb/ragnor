@@ -159,10 +159,10 @@ class TestPgVectorStore:
 
     def test_resolve_session_factory_raises_without_factory_or_settings(self):
         store = PgVectorStore(table_name="policy_chunks", id_field="id", embedding_dim=1536)
-        with pytest.raises(RuntimeError, match="session_factory or settings"):
+        with pytest.raises(RuntimeError, match="host-provided session_factory"):
             store._resolve_session_factory()
 
-    def test_resolve_session_factory_creates_from_settings_database_url(self):
+    def test_settings_database_url_never_creates_an_internal_engine(self):
         settings = SimpleNamespace(database_url="sqlite+aiosqlite:///:memory:")
         store = PgVectorStore(
             table_name="policy_chunks",
@@ -170,9 +170,8 @@ class TestPgVectorStore:
             embedding_dim=1536,
             settings=settings,
         )
-        factory = store._resolve_session_factory()
-        assert factory is not None
-        assert store._resolved_session_factory is factory
+        with pytest.raises(RuntimeError, match="host-provided session_factory"):
+            store._resolve_session_factory()
 
     @pytest.mark.asyncio
     async def test_hybrid_search_empty_embedding_without_embedding_fn_raises(self):
