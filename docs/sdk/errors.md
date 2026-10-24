@@ -1,4 +1,4 @@
-# SDK Error Taxonomy, Retryability & Fail-Closed Semantics (`SDK-03`)
+# SDK Error Taxonomy, Retryability & Fail-Closed Semantics
 
 Ragnor provides a unified, vendor-neutral exception hierarchy in `ragnor.exceptions`. All SDK domain errors inherit from `RagnorError` and expose:
 

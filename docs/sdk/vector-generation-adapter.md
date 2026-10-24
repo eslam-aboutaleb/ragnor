@@ -1,4 +1,4 @@
-# Pluggable immutable-vector staging and real Qdrant conformance
+# Immutable vector-generation staging
 
 `ImmutableGenerationVectorAdapter` lives in
 `ragnor.jobs.adapters.generation_vectors` and depends on a **port**, not
@@ -24,12 +24,8 @@ texts = await reader.read(tenant_scope, "policy")
 
 The adapter stamps tenant/generation metadata, computes stable per-generation
 document IDs, detects replay of altered content, and makes each read use both
-scope AND generation filters. The optional Qdrant local-engine tests verify staged-visibility, replays, revision switching and two tenants
-with identical logical IDs. The PostgreSQL CI job also provisions Qdrant HTTP, races independent
-reservation sessions, tests partial writes and retries, and exercises a real
-TCP disconnect/reconnect. These tests qualify those service versions and
-paths; production credential, authorization and load configuration remain
-host responsibilities.
+scope AND generation filters. Configure authentication, authorization and
+connection settings for your selected vector provider.
 
 The required `GenerationReservations` port atomically binds a generation
 key to a SHA-256 digest of the complete batch before any vector access.
@@ -42,10 +38,8 @@ Never remove it while the generation is readable or can be replayed. Existing
 unreserved generations must be migrated or rebuilt before using this contract.
 
 There is no implicit in-memory fallback. A host-supplied reservation adapter
-must provide the same durable atomic CAS semantics and run real concurrency
-tests. A hand-written reference adapter is only unit-test evidence. Do not treat
+must provide the same durable atomic compare-and-swap semantics. Do not treat
 direct `QdrantStore.get`, `vector_search` or `hybrid_search` as safe
 production reads unless scoped to the active-generation manifest. The
-manifest gate must be mandatory in host query paths. Stage retention,
-cleanup, timeout/replay and remote-provider load tests still need
-deployment-specific evidence.
+manifest gate must be mandatory in host query paths. Configure stage retention,
+cleanup, provider timeouts and retries for your deployment.

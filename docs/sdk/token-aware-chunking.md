@@ -13,7 +13,7 @@ chunker = TokenAwareChunker(counter, max_tokens=512, overlap_tokens=64)
 rag = await RagnorBuilder.local(my_embedder).with_chunker(chunker).build()
 ```
 
-The new strategy does not import a vendor SDK or change existing word-based
+The strategy does not import a vendor SDK or change existing word-based
 outputs. It constructs original-source character spans and checks the injected
 tokenizer at each candidate step. This is deliberately exact but slower than
 provider-native segmentation for large documents; hosts may inject optimized
@@ -32,10 +32,9 @@ overlap, and token-limit changes trigger re-ingestion. Older persisted
 snapshots without this field invalidate safely rather than skipping a needed
 reindex. Avoid placing secrets in custom chunker `config`.
 
-The implementation preserves original Unicode text spans and offset metadata;
-it does not yet offer sentence/heading-aware segmentation, a tiktoken optional
-provider, streaming performance optimizations, or evidence-budget accounting
-for complete rendered prompts. Those remain acceptance work under #27.
+The implementation preserves original Unicode text spans and offset metadata.
+It sizes character spans rather than sentence or heading boundaries. For the
+complete model request, use [full prompt budgeting](full-prompt-budget.md).
 
 
 ## Optional tiktoken integration and strict evidence mode

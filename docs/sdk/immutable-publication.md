@@ -1,6 +1,6 @@
 # Durable vector publication, visibility and crash consistency
 
-Issue #26 (P0): Ragnor's PostgreSQL outbox now offers an **opt-in**
+Ragnor's PostgreSQL outbox offers an **opt-in**
 `PostgresEmbeddingJobStore.activate_generation(job)` and
 `get_active_generation(document_id)`, and a pluggable
 `ActiveGenerationReader`. These do **not** replace the regular job store
@@ -35,25 +35,19 @@ provider writes transactional or globally exactly once. Providers must
 honor immutable keys and generation filters; deployment must test those
 properties with each real Qdrant/pgvector/etc adapter.
 
-The `DDL` sequence defines the new
+The `DDL` sequence defines the
 `ragnor_active_generations(scope, document_id, revision, generation_key)`
-table. Apply through a versioned, reviewed migration before deployment; the
+table. Apply through a versioned migration before deployment; the
 SDK does not run migrations on import or startup. Use a tenant-isolated
 database role or RLS in addition to SDK scoped predicates. Long-running
 processing still requires heartbeat and graceful cancellation.
 
-### Verified scenarios (when CI is green)
+## Deployment responsibilities
 
-- Real PostgreSQL: staged-but-inactive vectors invisible to a gated reader
-- Worker crash after stage / before ack, lease expiration and safe replay
-- Delayed older revision cannot replace a newer visible revision
-- Foreign-scope activation rejected
-- Lost generation/lease cannot activate or acknowledge
-
-Remaining independent gates: real production vector backend API-level
-fencing; query authorization/RLS; DB disconnect midway through transaction;
-fault injection across all provider write boundaries; performance/retention
-baselines and human concurrency/security review.
+Use a tenant-isolated database role or row-level security and enforce
+authorization in the application. Configure provider timeouts, retry policy,
+heartbeat scheduling and retention for orphaned generations. A separate
+vector service does not participate in the PostgreSQL transaction.
 
 ## Enforcing the contract in production
 

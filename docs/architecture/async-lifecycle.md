@@ -29,6 +29,6 @@ async with rag:
 - Externally owned session/SQL factories do not automatically become owned
   when passed through `with_session_factory` or `with_sql_factory`.
 
-This is a scoped enhancement for #24 and #21, not validation of all production
-pool cancellation, async event-loop affinity, resource failure during startup,
-or externally managed transaction semantics. Those need real backend tests.
+Keep clients and sessions on their owning event loop. Finish direct calls
+through low-level stores, pipelines and retrievers before closing their
+resources; the facade tracks only operations performed through its own API.

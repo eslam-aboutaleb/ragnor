@@ -1,7 +1,5 @@
 # Synchronous Python Facade — `SyncRagnor`
 
-**Status:** Defined under [SDK-05 #25](https://github.com/eslam-aboutaleb/ragnor/issues/25).
-
 `SyncRagnor` provides a safe, optional synchronous API for blocking Python scripts, batch workers, and CLI utilities, wrapping Ragnor's canonical asynchronous core.
 
 ## Quickstart
@@ -28,7 +26,7 @@ with SyncRagnor.from_builder(make_builder) as client:
 2. **Loop Safety and Fast Failure:**
    Attempting to instantiate `SyncRagnor` from inside a thread with an active running `asyncio` event loop (such as inside an `async def` function or Jupyter notebook) fails fast with `ConfigurationError(code='ERR_LOOP_CONFLICT')`. In asynchronous environments, use `await ragnor.search(...)` directly.
 
-3. **Pluggable Dependency Injection (SDK-ARCH #24):**
+3. **Pluggable Dependency Injection:**
    `SyncRagnor.from_builder` accepts any configured `RagnorBuilder`. Custom embedders, chunkers, vector stores, session factories, and telemetry event sinks are injected into the underlying async instance without modifying core code.
 
 4. **Resource Lifecycle and Timeouts:**
@@ -36,9 +34,5 @@ with SyncRagnor.from_builder(make_builder) as client:
    - `close()` is idempotent; multiple calls are safe no-ops.
    - Operations support an explicit `timeout` parameter and raise `OperationTimeoutError` upon expiration.
 
-
-The PostgreSQL integration suite exercises cancellation of an actual
-`pg_sleep` query through the synchronous timeout boundary, then verifies
-connection checkout, pool disposal and managed thread/loop shutdown. This
-qualifies the tested SQL driver path; other owned resources must honor
-cancellation and their own close contracts.
+Owned resources must honor cancellation and their close contracts so that
+timeouts and shutdown can release connections and other resources promptly.

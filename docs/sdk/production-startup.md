@@ -17,11 +17,11 @@ for a host-controlled deployment with explicit adapter capabilities.
 - Where a host store advertises an `embedding_dim` attribute and the builder
   has an explicit dimension, they must match before SDK construction.
 - Injected stores and sessions remain host-owned unless ownership is
-  deliberately transferred with `with_owned_resource` (#24/#33).
+  deliberately transferred with `with_owned_resource`.
 
 The checks do **not** certify PostgreSQL/other backend durability, filter
 semantics, lease correctness, or secrets handling inside host implementations.
-Those require real adapter conformance tests and operational approval.
+Validate those properties against the adapters and infrastructure used by your application.
 
 No credentials or raw connection URLs are interpolated into startup exceptions.
 Use a restrictive `ScopeAuthorizer` when `KnowledgeBridge(production_mode=True)`

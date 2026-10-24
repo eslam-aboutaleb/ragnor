@@ -23,7 +23,7 @@ rag = await RagnorBuilder.local(host_embedder).with_chunker(PipeChunker()).build
 await rag.ingest([Document(id="policy", text="refund|insurance terms")])
 ```
 
-The example uses ephemeral local defaults; supply a real store, version store and session factory for durable deployments (see [builder composition](builder-composition.md) after #21).
+The example uses ephemeral local defaults; supply a real store, version store and session factory for durable deployments (see [builder composition](builder-composition.md)).
 
 ## Conformance expectations
 
@@ -34,15 +34,9 @@ The example uses ephemeral local defaults; supply a real store, version store an
 | Embedding provider | `EmbeddingFunction` async methods, batch cardinality, vector dimensions, finite floats; missing provider rejected |
 | Document source | `load()` returns typed document records; identity/provenance preserved |
 | Vector store | Capability negotiation, filter and strict-mode semantics, CRUD atomicity where promised |
-| Job processor/store | `JobProcessor`, `EmbeddingJobStore`; durable jobs must prove locking with real DB processes (#26) |
+| Job processor/store | `JobProcessor`, `EmbeddingJobStore`; durable jobs must prove locking with real DB processes |
 | Event sink | `EventSink.emit(TelemetryEvent)`, privacy policy, non-blocking / failure isolation as required by host |
 | Authorization | Host scope authorizer; fail closed on unsupported mandatory scopes |
-
-## Test helpers
-
-`tests/conformance/contracts.py` contains reusable, dependency-light assertions. To use externally, copy the examples or vendor the **test-only** helper code into your own adapter's test suite. These helpers are not currently promised as a published `ragnor.testing` public API.
-
-`tests/test_external_adapter_conformance.py` supplies reference host implementations outside `src/ragnor`, exercises the SDK with their types and verifies isolated registries. This proves basic contract injection, not production database safety.
 
 ## Clean Architecture requirements
 

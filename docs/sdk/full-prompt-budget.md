@@ -1,7 +1,7 @@
 # Full provider prompt context budget
 
-Issue #27 requires **separate** caps for individual chunk inputs, rendered
-evidence, and the entire provider request. `EvidenceAssembler` controls the
+Use separate token caps for individual chunk inputs, rendered evidence,
+and the entire provider request. `EvidenceAssembler` controls the
 rendered citation/evidence portion only; it cannot know the chat wrapper,
 tool-message overhead, images, system messages or target model's reserved
 completion tokens.

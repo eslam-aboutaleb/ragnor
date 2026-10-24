@@ -1,4 +1,4 @@
-# SDK Error Taxonomy, Retryability & Fail-Closed Semantics (`SDK-03`)
+# SDK Error Taxonomy, Retryability & Fail-Closed Semantics
 
 See [`docs/sdk/errors.md`](./errors.md) for the complete error contract matrix, strict vs non-strict retrieval semantics, sanitization policy, and FastAPI/CLI integration examples.
 
