@@ -124,7 +124,7 @@ jobs:
           python -m pip install -e ".[pgvector]"
           python -m pip install "asyncpg>=0.29" "pytest>=8.3" "pytest-asyncio>=0.24" "qdrant-client>=1.9"
       - name: Verify transactional SQL and real advisory locking
-        run: python -m pytest -q tests/integration/test_postgres_adapter_contract.py tests/integration/test_postgres_job_outbox.py tests/integration/test_postgres_process_outbox.py tests/integration/test_postgres_publication.py tests/integration/test_postgres_sdk_host.py tests/integration/test_postgres_sql_migrations.py tests/integration/test_qdrant_postgres_publication.py tests/integration/test_postgres_job_policy.py tests/test_hybrid_search_session_injection.py tests/integration/test_postgres_security_lifecycle.py tests/test_pgvector_strict_mode.py tests/integration/test_qdrant_generation_vectors.py
+        run: python -m pytest -q tests/integration/test_postgres_adapter_contract.py tests/integration/test_postgres_job_outbox.py tests/integration/test_postgres_process_outbox.py tests/integration/test_postgres_publication.py tests/integration/test_postgres_sdk_host.py tests/integration/test_postgres_sql_migrations.py tests/integration/test_qdrant_postgres_publication.py tests/integration/test_postgres_job_policy.py tests/test_hybrid_search_session_injection.py tests/integration/test_postgres_security_lifecycle.py tests/integration/test_sdk_startup_clients.py tests/test_pgvector_strict_mode.py tests/integration/test_qdrant_generation_vectors.py
       - name: Record 1/2/4-worker PostgreSQL contention baseline
         run: python benchmarks/postgres_outbox_profile.py
 
