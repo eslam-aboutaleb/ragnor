@@ -249,3 +249,24 @@ class TestLitellmEmbeddingFunctionValidation:
 
         assert fn.cache_max_entries == 0
         assert fn.max_batch_size is None
+
+
+@pytest.mark.parametrize("cache_max_entries", [0, 8])
+async def test_wrong_batch_count_is_rejected_without_caching(cache_max_entries: int) -> None:
+    fn = LitellmEmbeddingFunction(
+        api_key="k", model_name="m", cache_max_entries=cache_max_entries, max_batch_size=2
+    )
+    with patch(
+        "ragnor.embeddings.litellm.litellm.aembedding",
+        return_value=_mock_response([[1.0]]),
+    ):
+        with pytest.raises(ValueError, match="embedding count"):
+            await fn(["first", "second", "third"])
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+    with patch(
+        "ragnor.embeddings.litellm.litellm.aembedding", side_effect=_recording_embedding(calls)
+    ):
+        assert await fn(["first", "second", "third"]) == [
+            _expected_vector(text) for text in ["first", "second", "third"]
+        ]
+    assert [batch for batch, _ in calls] == [["first", "second"], ["third"]]

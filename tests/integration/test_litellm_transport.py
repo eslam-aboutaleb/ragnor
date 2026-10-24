@@ -56,8 +56,12 @@ async def embedding_endpoint(*, reset=False):
                 {
                     "object": "list",
                     "data": [
-                        {"object": "embedding", "index": i, "embedding": [1.0, 0.0]}
-                        for i, _ in enumerate(request["input"])
+                        {
+                            "object": "embedding",
+                            "index": i,
+                            "embedding": [2.0 if text == "second" else 1.0, 0.0],
+                        }
+                        for i, text in enumerate(request["input"])
                     ],
                     "model": "text-embedding-3-small",
                     "usage": {"prompt_tokens": 1, "total_tokens": 1},
@@ -163,8 +167,8 @@ async def test_real_async_client_preserves_ordered_batches_and_cache_hits():
                 max_batch_size=1,
                 cache_max_entries=4,
             )
-            assert await embedder.embed_documents(["first", "second"]) == [[1.0, 0.0], [1.0, 0.0]]
-            assert await embedder.embed_documents(["second", "first"]) == [[1.0, 0.0], [1.0, 0.0]]
+            assert await embedder.embed_documents(["first", "second"]) == [[1.0, 0.0], [2.0, 0.0]]
+            assert await embedder.embed_documents(["second", "first"]) == [[2.0, 0.0], [1.0, 0.0]]
             assert len(inputs) == 2
             assert inputs == [["first"], ["second"]]
 
