@@ -608,6 +608,12 @@ class RagnorBuilder:
                 "production store embedding dimension does not match the configured embedding_dim"
             )
 
+        if not callable(self._embedder):
+            raise ConfigurationError("production embedder must be callable")
+        for method in ("embed_query", "embed_documents"):
+            if hasattr(self._embedder, method) and not callable(getattr(self._embedder, method)):
+                raise ConfigurationError(f"production embedder {method} must be callable")
+
         # Validate the executable ports, not just descriptive capability flags.
         for name, component, methods in (
             (
