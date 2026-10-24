@@ -5,7 +5,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    branches: [main, "codex/**"]
   merge_group:
   schedule:
     - cron: "0 6 * * 1"
