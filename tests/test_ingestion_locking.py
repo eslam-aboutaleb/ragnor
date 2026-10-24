@@ -18,9 +18,13 @@ async def test_helper_releases_a_failed_host_transaction(tmp_path) -> None:
         async with engine.begin() as connection:
             await connection.run_sync(ingestion_locks.create, checkfirst=True)
         async with sessions() as session:
-            with pytest.raises(RuntimeError, match="failed ingestion"):
+
+            async def abort_ingestion() -> None:
                 async with advisory_lock(session, "source-a"):
                     raise RuntimeError("failed ingestion")
+
+            with pytest.raises(RuntimeError, match="failed ingestion"):
+                await abort_ingestion()
             async with advisory_lock(session, "source-a"):
                 await session.commit()
     finally:
