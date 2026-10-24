@@ -95,6 +95,8 @@ class LitellmEmbeddingFunction:
             input=input,
             **kwargs,
         )
+        if len(response.data) != len(input):
+            raise ValueError("provider embedding count does not match input count")
         return [item["embedding"] for item in response.data]
 
     async def _embed_batched(self, texts: list[str]) -> list[list[float]]:
