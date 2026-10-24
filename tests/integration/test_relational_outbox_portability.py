@@ -100,10 +100,14 @@ async def test_host_owned_sqlite_database_runs_outbox_and_publication(tmp_path):
             "revision": 1,
             "generation_key": "doc/rev-1",
         }
-        with pytest.raises(RuntimeError, match="host rollback"):
+
+        async def abort_host_transaction() -> None:
             async with sessions() as session, session.begin():
                 await store.enqueue(payload, session=session)
                 raise RuntimeError("host rollback")
+
+        with pytest.raises(RuntimeError, match="host rollback"):
+            await abort_host_transaction()
         async with sessions() as session:
             assert (await session.execute(select(jobs.c.job_id))).all() == []
         await store.enqueue(payload)
