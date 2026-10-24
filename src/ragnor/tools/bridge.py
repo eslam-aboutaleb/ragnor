@@ -82,6 +82,7 @@ class KnowledgeBridge:
         health_checker: HealthChecker | None = None,
         authorizer: ScopeAuthorizer | None = None,
         allow_management: bool = False,
+        production_mode: bool = False,
         default_collection: str = "default",
         default_budget_tokens: int = 4000,
     ) -> None:
@@ -95,12 +96,19 @@ class KnowledgeBridge:
             health_checker: Injected HealthChecker for status probes.
             authorizer: Injected ScopeAuthorizer for tenant validation.
             allow_management: Opt-in flag to enable management operations (sync, delete).
+            production_mode: Reject implicit allow-all authorization if no
+                host ScopeAuthorizer is supplied. Backwards compatible default.
             default_collection: Name of the fallback default collection.
             default_budget_tokens: Default token budget for evidence assembly.
         """
         self.default_collection = default_collection
         self.default_budget_tokens = default_budget_tokens
         self.allow_management = allow_management
+        if production_mode and (authorizer is None or not authorizer.has_explicit_restrictions):
+            raise ValueError(
+                "production KnowledgeBridge requires a restrictive host authorizer; "
+                "the development default allows all scopes"
+            )
         self.authorizer = authorizer or ScopeAuthorizer(default_allow=True)
         self.assembler = assembler or EvidenceAssembler(tokenizer=ApproximateTokenizer())
         self.source_lookup = source_lookup or SourceLookup(MemorySnapshotStore())

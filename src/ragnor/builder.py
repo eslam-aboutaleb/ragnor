@@ -45,6 +45,7 @@ from ragnor.ingestion.pipeline import (
 from ragnor.ingestion.sources import ListDocumentSource
 from ragnor.ingestion.versioning import IngestionSnapshot
 from ragnor.lifecycle import AsyncCloseable
+from ragnor.retrieval.capabilities import BackendFeature, StoreCapabilities
 from ragnor.retrieval.retriever import HybridRetriever, RetrieverSpec
 from ragnor.retrieval.strategies import HybridRetrieval, RetrievalStrategy
 from ragnor.stores.base import DocumentStore, VectorStore
@@ -467,6 +468,18 @@ class RagnorBuilder:
             raise ValueError(
                 "production mode rejects InMemory stores; "
                 "inject and validate durable host implementations"
+            )
+        caps = getattr(self._store, "capabilities", None)
+        if not isinstance(caps, StoreCapabilities):
+            raise ValueError(
+                "production mode requires explicit StoreCapabilities from "
+                "the host storage adapter; class names and method presence "
+                "are not evidence of security or durability"
+            )
+        if not caps.supports_feature(BackendFeature.ISOLATION_SCOPE):
+            raise ValueError(
+                "production mode requires declared isolation_scope capability; "
+                "configure a backend with verified tenant filtering"
             )
 
     async def build(self) -> Ragnor:
