@@ -111,13 +111,9 @@ class PgVectorStore(VectorStore):
             embedding_dim: Dimensionality of the embedding vectors. Required;
                 pass the dimension configured for the active embedding model.
             session_factory: Session provider used when a method is called
-                without an explicit session. When omitted and ``settings``
-                carries a ``database_url``, one is created lazily through
-                the SQL factory.
-            settings: Host settings. Used only to resolve a default session
-                factory when ``session_factory`` is omitted, and to read the
-                optional ``rag_distance_metric`` field when ``metric`` is
-                omitted.
+                without an explicit session. The host must supply it.
+            settings: Host settings used to read the optional
+                ``rag_distance_metric`` field when ``metric`` is omitted.
             embedding_fn: Async callable that embeds a list of texts. Used
                 only when ``hybrid_search`` is called with an empty embedding.
             tsquery_config: PostgreSQL text-search configuration used for
@@ -153,34 +149,17 @@ class PgVectorStore(VectorStore):
                 f"tsquery_config must be a lowercase identifier; got {tsquery_config!r}"
             )
         self.tsquery_config = tsquery_config
-        self._settings = settings
         self._session_factory = session_factory
-        self._resolved_session_factory: SessionProvider | None = session_factory
         self._embedding_fn = embedding_fn
         self._sql = sql_factory or SQLAlchemyFactory()
         self.metric: DistanceMetric = resolve_distance_metric(metric, settings)
         self._distance_operator = _DISTANCE_OPERATORS[self.metric]
 
     def _resolve_session_factory(self) -> SessionProvider:
-        """Return the session factory, creating one from settings if needed.
-
-        The factory is resolved at most once per store instance so the
-        underlying engine is never duplicated.
-
-        Raises:
-            RuntimeError: If neither a session factory nor settings with a
-                ``database_url`` were provided.
-        """
-        if self._resolved_session_factory is None:
-            if self._settings is None:
-                raise RuntimeError(
-                    "PgVectorStore needs a session_factory or settings with "
-                    "a database_url to open its own sessions"
-                )
-            self._resolved_session_factory = self._sql.create_session_factory(
-                self._settings.database_url
-            )
-        return self._resolved_session_factory
+        """Return the host-owned session factory for standalone calls."""
+        if self._session_factory is None:
+            raise RuntimeError("PgVectorStore requires a host-provided session_factory")
+        return self._session_factory
 
     async def _execute_search_query(  # noqa: PLR0913
         self,

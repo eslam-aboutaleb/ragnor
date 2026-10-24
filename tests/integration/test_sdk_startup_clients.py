@@ -64,6 +64,12 @@ async def database():
                     snapshot jsonb NOT NULL, active boolean NOT NULL DEFAULT true
                 )""")
             )
+            await connection.execute(
+                text("""CREATE TABLE ragnor_ingestion_locks (
+                    lock_key text PRIMARY KEY,
+                    generation integer NOT NULL DEFAULT 0
+                )""")
+            )
             for table in ("chunks", "ragnor_sdk_host_versions"):
                 await connection.execute(text(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY"))  # noqa: S608
                 await connection.execute(text(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY"))  # noqa: S608
@@ -77,6 +83,9 @@ async def database():
                 await connection.execute(
                     text(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {table} TO {role}")
                 )  # noqa: S608
+            await connection.execute(  # noqa: S608 - generated non-login test role
+                text(f"GRANT SELECT, INSERT, UPDATE ON ragnor_ingestion_locks TO {role}")
+            )
             await connection.execute(text(f"GRANT USAGE ON SCHEMA {schema} TO {role}"))  # noqa: S608
         yield admin, schema, role
     finally:

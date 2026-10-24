@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ragnor.builder import RagnorBuilder
 from ragnor.db.sql_factory import SQLAlchemyFactory
+from ragnor.db.schema import ingestion_locks
 from ragnor.ingestion.pipeline import VersionRecord
 from ragnor.ingestion.versioning import IngestionSnapshot
 from ragnor.retrieval.capabilities import BackendFeature, FilterOperator, StoreCapabilities
@@ -155,6 +156,7 @@ async def _fixture():
     engine = create_async_engine(DB_URL)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     async with engine.begin() as session:
+        await session.run_sync(ingestion_locks.create, checkfirst=True)
         for schema in TABLE_DDL:
             await session.execute(text(schema))
     return engine, sessions
