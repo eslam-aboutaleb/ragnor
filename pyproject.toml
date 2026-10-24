@@ -8,7 +8,8 @@ version = "0.4.1"
 description = "Domain-agnostic RAG toolkit: embeddings, chunking, vector stores, retrieval, ingestion, evaluation, and jobs."
 readme = "README.md"
 requires-python = ">=3.11"
-license = "PolyForm-Noncommercial-1.0.0"
+license = "Elastic-2.0"
+license-files = ["LICENSE", "NOTICE"]
 dependencies = []
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -33,7 +34,7 @@ test = [
     "aiosqlite>=0.20",
     "sqlalchemy[asyncio]>=2.0.30",
     "pypdf>=5,<7",
-    "pathspec>=0.12,<1",
+    "pathspec>=0.12,<2",
     "httpx>=0.28,<1",
     "mcp>=1.0.0",
 ]
@@ -57,7 +58,7 @@ faiss = [
     "faiss-cpu>=1.8",
 ]
 pdf = ["pypdf>=5,<7"]
-directory = ["pathspec>=0.12,<1"]
+directory = ["pathspec>=0.12,<2"]
 watch = ["watchfiles>=0.24"]
 web = ["httpx>=0.28,<1"]
 object-storage = ["boto3>=1.34"]

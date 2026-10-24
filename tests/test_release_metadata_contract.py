@@ -14,10 +14,10 @@ def test_repository_and_distribution_license_claim_agree() -> None:
     license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     licensing_doc = (ROOT / "docs" / "licensing.md").read_text(encoding="utf-8")
-    assert license_id == "PolyForm-Noncommercial-1.0.0"
-    assert "PolyForm Noncommercial License 1.0.0" in license_text
-    assert "PolyForm Noncommercial" in readme.split("## License", maxsplit=1)[-1]
-    assert "PolyForm-Noncommercial-1.0.0" in licensing_doc
+    assert license_id == "Elastic-2.0"
+    assert "Elastic License 2.0" in license_text
+    assert "Elastic License 2.0" in readme.split("## License", maxsplit=1)[-1]
+    assert "Elastic-2.0" in licensing_doc
     assert "released under the MIT License" not in readme
 
 
