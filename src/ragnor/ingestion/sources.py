@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from ragnor.ingestion.records import RawDocument
-from ragnor.types import Document
+from ragnor.core.types import Document
 
 if TYPE_CHECKING:
     from ragnor.ingestion.connector_core import DiscoveryPage, LoadResult, SourceConnector
@@ -93,7 +93,7 @@ class FileDocumentSource:
 class ListDocumentSource:
     """Document source over a fixed list of documents.
 
-    Accepts :class:`ragnor.types.Document` objects (mapping
+    Accepts :class:`ragnor.core.types.Document` objects (mapping
     ``Document.id`` to the raw document's source name and external
     id) or pre-built :class:`RawDocument` objects, which pass
     through unchanged. Useful beyond the builder -- tests and

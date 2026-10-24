@@ -22,7 +22,7 @@ from ragnor.evidence.types import (
     EvidenceStatus,
     SearchHit,
 )
-from ragnor.types import SearchResult
+from ragnor.core.types import SearchResult
 
 logger = logging.getLogger(__name__)
 

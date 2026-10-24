@@ -16,9 +16,9 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from ragnor.exceptions import ScopeDeniedError
+from ragnor.core.exceptions import ScopeDeniedError
 from ragnor.retrieval.scores import RawScore, ScoreKind
-from ragnor.types import RetrievalError, SearchResult
+from ragnor.core.types import RetrievalError, SearchResult
 
 
 class ScopeViolationError(ScopeDeniedError, RetrievalError):

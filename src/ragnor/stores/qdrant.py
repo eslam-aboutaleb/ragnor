@@ -47,7 +47,7 @@ import logging
 import uuid
 from typing import Any
 
-from ragnor.config import RagSettings
+from ragnor.core.config import RagSettings
 from ragnor.stores._scoring import (
     format_search_hit,
     handle_count_error,
@@ -59,7 +59,7 @@ from ragnor.stores._scoring import (
 )
 from ragnor.stores.base import EmbeddingFunction, HybridVectorStore
 from ragnor.stores.registry import vector_store_registry
-from ragnor.validation import (
+from ragnor.core.validation import (
     validate_delete_selectors,
     validate_embedding,
     validate_identifier,
@@ -448,7 +448,7 @@ class QdrantStore(HybridVectorStore):
         Args:
             session: Accepted for interface compatibility; ignored.
             strict: When ``True``, a failed count raises
-                :class:`ragnor.types.RetrievalError`. The default
+                :class:`ragnor.core.types.RetrievalError`. The default
                 ``False`` preserves the behavior of logging the
                 error and returning ``0``.
             **filters: Equality filters (e.g., ``tenant_id="..."``).
@@ -458,7 +458,7 @@ class QdrantStore(HybridVectorStore):
 
         Raises:
             ValueError: If a filter key is unsafe.
-            ragnor.types.RetrievalError: If the count fails and
+            ragnor.core.types.RetrievalError: If the count fails and
                 ``strict=True``.
             Exception: Re-raises Qdrant errors when ``strict=True``.
         """

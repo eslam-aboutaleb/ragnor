@@ -28,18 +28,18 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from ragnor.chunking.base import Chunker
-from ragnor.config import RagSettings
+from ragnor.core.config import RagSettings
 from ragnor.embeddings.base import EmbeddingFunction
 from ragnor.embeddings.dimensions import get_embedding_dimension
 from ragnor.ingestion.connector_core import LoadResult, collect_pages, _error_record
 from ragnor.embeddings._safe_config import safe_config
-from ragnor.exceptions import IndexConsistencyError, RagnorError
+from ragnor.core.exceptions import IndexConsistencyError, RagnorError
 from ragnor.ingestion.sources import RawDocument
 from ragnor.stores.base import VectorStore
 from ragnor.sync.manifest import ManifestRecord, ManifestStatus, ManifestStore
 from ragnor.sync.state import SyncStateStore, FenceToken
 from ragnor.telemetry.events import EventKind, EventSink, NullEventSink, TelemetryEvent
-from ragnor.validation import validate_embedding
+from ragnor.core.validation import validate_embedding
 
 if TYPE_CHECKING:
     from ragnor.jobs.outbox import EmbeddingJobStore

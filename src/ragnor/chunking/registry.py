@@ -11,7 +11,7 @@ from __future__ import annotations
 from ragnor.chunking.base import Chunker
 from ragnor.chunking.markdown import MarkdownSectionChunker
 from ragnor.chunking.sliding_window import SlidingWindowChunker
-from ragnor.registry import Registry
+from ragnor.core.registry import Registry
 
 chunker_registry: Registry[Chunker] = Registry()
 

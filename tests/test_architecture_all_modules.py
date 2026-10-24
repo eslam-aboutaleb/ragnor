@@ -50,10 +50,13 @@ EXTERNAL_NAMES = {
     "ingestion/object_connector.py",
     "connectors.py",
     "builder.py",
+    "client/builder.py",
     "registry.py",
 }
 INNER_DIRS = (
     "chunking/",
+    "client/",
+    "core/",
     "embeddings/",
     "evaluation/",
     "evidence/",

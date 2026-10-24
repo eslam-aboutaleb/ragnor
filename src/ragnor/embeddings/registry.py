@@ -4,7 +4,7 @@ Providers plug in through :data:`embedding_registry` without
 editing core code. A provider is a factory class registered
 under a name that:
 
-1. Accepts a :class:`ragnor.config.RagSettings` object in its
+1. Accepts a :class:`ragnor.core.config.RagSettings` object in its
    constructor, and
 2. Exposes a ``create()`` method returning an
    :class:`ragnor.embeddings.base.EmbeddingFunction`.
@@ -28,9 +28,9 @@ seam is the deliverable.
 
 from __future__ import annotations
 
-from ragnor.config import RagSettings
+from ragnor.core.config import RagSettings
 from ragnor.embeddings.base import EmbeddingFunction
-from ragnor.registry import Registry
+from ragnor.core.registry import Registry
 
 embedding_registry: Registry[EmbeddingFunction] = Registry()
 

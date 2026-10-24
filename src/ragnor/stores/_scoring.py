@@ -240,7 +240,7 @@ def validate_upsert_documents(  # noqa: PLR0913, PLR0917
     metric: Any = None,
 ) -> str:
     """Validate identifiers and embeddings for an upsert operation."""
-    from ragnor.validation import (  # noqa: PLC0415
+    from ragnor.core.validation import (  # noqa: PLC0415
         validate_embedding,
         validate_identifier,
         validate_upsert_identifiers,
@@ -269,7 +269,7 @@ def handle_count_error(
     logger: Any,
 ) -> int:
     """Log count failure and raise RetrievalError if strict, else return 0."""
-    from ragnor.exceptions import BackendUnavailableError, OperationTimeoutError  # noqa: PLC0415
+    from ragnor.core.exceptions import BackendUnavailableError, OperationTimeoutError  # noqa: PLC0415
 
     logger.error("Count failed on %s: %s", table_name, type(exc).__name__)
     if strict:

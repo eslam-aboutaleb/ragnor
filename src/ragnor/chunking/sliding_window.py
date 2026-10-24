@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from ragnor.types import Chunk
+from ragnor.core.types import Chunk
 
 
 def sliding_window_chunk(

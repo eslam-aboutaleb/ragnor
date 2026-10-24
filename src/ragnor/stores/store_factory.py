@@ -18,11 +18,11 @@ import inspect
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
-from ragnor.registry import Registry
+from ragnor.core.registry import Registry
 from ragnor.stores.base import VectorStore
 
 if TYPE_CHECKING:
-    from ragnor.config import RagSettings
+    from ragnor.core.config import RagSettings
 
 
 class VectorStoreFactory(ABC):

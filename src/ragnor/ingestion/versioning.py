@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ragnor.chunking.base import Chunker
-from ragnor.config import RagSettings
+from ragnor.core.config import RagSettings
 from ragnor.embeddings import get_embedding_dimension
 from ragnor.embeddings._safe_config import safe_config
 from ragnor.ingestion.records import RawDocument

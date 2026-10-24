@@ -803,14 +803,15 @@ ragnor/
 │   ├── host_integration.py   # host integration template (any domain)
 │   └── sample_document.md    # bundled example document
 ├── src/ragnor/
-│   ├── types.py              # Chunk, Document, SearchResult, RetrievalError
-│   ├── config.py             # RagSettings, SettingsProvider protocols
-│   ├── registry.py           # generic case-insensitive Registry[T]
-│   ├── validation.py         # validate_identifier, validate_embedding
-│   ├── builder.py            # RagnorBuilder, Ragnor facade, BuilderSettings, InMemoryVersionStore
+│   ├── core/                # types, settings, exceptions, validation, registries
+│   ├── client/              # asynchronous builder/facade and synchronous client
+│   ├── types.py             # compatibility import for core.types
+│   ├── config.py            # compatibility import for core.config
+│   ├── builder.py           # compatibility import for client.builder
 │   ├── chunking/             # sliding-window + Markdown section chunkers
 │   ├── embeddings/           # LiteLLM function, dimension registry
 │   ├── stores/               # VectorStore ABC, five built-in backends
+│   │   ├── metrics.py        # vector distance metrics and normalization
 │   │   ├── memory.py         # in-memory store (dev/test)
 │   │   ├── pgvector.py       # PostgreSQL pgvector + tsvector store
 │   │   ├── qdrant.py         # Qdrant store

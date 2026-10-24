@@ -1,7 +1,14 @@
-"""Convenient public alias for :mod:`ragnor.ingestion.connectors`."""
+"""Compatibility import for :mod:`ragnor.ingestion.connectors`."""
 
-from ragnor.ingestion import connectors as _connectors
+from __future__ import annotations
 
-__all__ = _connectors.__all__
-for _name in __all__:
-    globals()[_name] = getattr(_connectors, _name)
+import sys
+from typing import TYPE_CHECKING
+
+from ragnor.ingestion import connectors as _implementation
+
+if TYPE_CHECKING:
+    from ragnor.ingestion.connectors import *  # noqa: F403 - preserve legacy type-checker exports
+
+# Keep module identity, private helpers and patch targets compatible too.
+sys.modules[__name__] = _implementation

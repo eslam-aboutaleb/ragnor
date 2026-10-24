@@ -1,55 +1,14 @@
-"""Shared value types for ragnor.
-
-Dataclasses are the canonical boundary across chunking, embedding,
-storage, and retrieval. They replace the raw ``dict[str, Any]``
-plumbing used by earlier iterations; the dict-based store API keeps
-working during the transition, and later plans adapt it to these
-types.
-"""
+"""Compatibility import for :mod:`ragnor.core.types`."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
+import sys
+from typing import TYPE_CHECKING
 
-from ragnor.exceptions import RagnorError, RetrievalError
+from ragnor.core import types as _implementation
 
-__all__ = ["Chunk", "Document", "RagnorError", "RetrievalError", "SearchResult"]
+if TYPE_CHECKING:
+    from ragnor.core.types import *  # noqa: F403 - preserve legacy type-checker exports
 
-
-@dataclass
-class Chunk:
-    """A text fragment produced by a chunker."""
-
-    id: str
-    text: str
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class Document:
-    """A document with an optional embedding vector."""
-
-    id: str
-    text: str
-    metadata: dict[str, Any] = field(default_factory=dict)
-    embedding: list[float] | None = None
-
-
-@dataclass
-class SearchResult:
-    """A single hit from a (hybrid) search.
-
-    Mirrors the dict keys the pgvector store's hybrid search returns
-    today: ``document``, ``metadata``, ``distance``,
-    ``keyword_score``, ``_rrf_score``, and ``id``. ``distance`` is
-    ``None`` for keyword-only hits and ``keyword_score`` is ``None``
-    for vector-only hits.
-    """
-
-    id: str | None
-    document: str
-    metadata: dict[str, Any] = field(default_factory=dict)
-    distance: float | None = None
-    keyword_score: float | None = None
-    rrf_score: float = 0.0
+# Keep module identity, private helpers and patch targets compatible too.
+sys.modules[__name__] = _implementation

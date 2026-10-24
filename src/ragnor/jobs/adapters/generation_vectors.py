@@ -12,7 +12,7 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
 
-from ragnor.exceptions import ScopeDeniedError
+from ragnor.core.exceptions import ScopeDeniedError
 
 
 class GenerationDocumentStore(Protocol):

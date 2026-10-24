@@ -2,7 +2,7 @@
 
 Providers register themselves under a name (``pgvector``,
 ``memory``) and are looked up case-insensitively through the
-generic :class:`ragnor.registry.Registry`. The factory
+generic :class:`ragnor.core.registry.Registry`. The factory
 :func:`get_vector_store` replaces the if/else chain the host
 application used before the extraction; it delegates to the
 registry-backed
@@ -13,12 +13,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from ragnor.registry import Registry
+from ragnor.core.registry import Registry
 from ragnor.stores.base import VectorStore
 from ragnor.stores.store_factory import RegistryVectorStoreFactory
 
 if TYPE_CHECKING:
-    from ragnor.config import RagSettings
+    from ragnor.core.config import RagSettings
     from ragnor.db.session import SessionProvider
     from ragnor.stores.base import EmbeddingFunction
 

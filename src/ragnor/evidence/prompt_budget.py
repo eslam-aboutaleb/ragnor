@@ -11,7 +11,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
-from ragnor.exceptions import ConfigurationError
+from ragnor.core.exceptions import ConfigurationError
 
 
 class PromptBudgetError(ConfigurationError):

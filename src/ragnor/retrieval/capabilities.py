@@ -14,8 +14,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from ragnor.exceptions import UnsupportedCapabilityError
-from ragnor.types import RetrievalError
+from ragnor.core.exceptions import UnsupportedCapabilityError
+from ragnor.core.types import RetrievalError
 
 
 class CapabilityUnsupportedError(UnsupportedCapabilityError, RetrievalError):

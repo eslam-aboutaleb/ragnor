@@ -10,7 +10,7 @@ import uuid
 from typing import Any
 
 from ragnor.evidence.tokenizer import Tokenizer
-from ragnor.types import Chunk
+from ragnor.core.types import Chunk
 
 
 class TokenAwareChunker:

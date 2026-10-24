@@ -45,7 +45,7 @@ from typing import Any
 from ragnor.embeddings.base import EmbeddingFunction
 from ragnor.embeddings.metrics import EmbeddingMetrics
 from ragnor.embeddings.profile import EmbeddingProfile, TaskMode
-from ragnor.exceptions import EmbeddingProviderError
+from ragnor.core.exceptions import EmbeddingProviderError
 from ragnor.telemetry.events import EventKind, NullEventSink, TelemetryEvent
 
 logger = logging.getLogger(__name__)
