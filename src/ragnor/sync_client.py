@@ -29,7 +29,7 @@ class AsyncRagnorOperations(Protocol):
         lock_key: str | None = None,
     ) -> int:
         """Ingest documents and return the stored chunk count."""
-        ...
+        raise NotImplementedError
 
     async def search(
         self,
@@ -38,15 +38,15 @@ class AsyncRagnorOperations(Protocol):
         **filters: Any,
     ) -> list[SearchResult]:
         """Search for documents matching ``query``."""
-        ...
+        raise NotImplementedError
 
     async def count(self, **filters: Any) -> int:
         """Count documents in the store."""
-        ...
+        raise NotImplementedError
 
     async def aclose(self) -> None:
         """Close owned async resources."""
-        ...
+        raise NotImplementedError
 
 
 def _reject_running_event_loop() -> None:

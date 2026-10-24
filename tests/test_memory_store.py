@@ -264,7 +264,8 @@ async def test_delete_by_ids():
     deleted = await store.delete(ids=["1"])
     assert deleted == 1
     assert await store.count() == 1
-    assert await store.delete(ids=["missing"]) == 0
+    missing_deleted = await store.delete(ids=["missing"])
+    assert missing_deleted == 0
 
 
 @pytest.mark.asyncio

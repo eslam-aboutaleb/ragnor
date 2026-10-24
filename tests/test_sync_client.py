@@ -39,8 +39,7 @@ class TestSyncRagnorFacade:
     """Test blocking SDK workflow, loop management, and resource lifecycle."""
 
     def test_sync_workflow_ingest_search_count(self) -> None:
-        client = SyncRagnor.from_builder(_make_builder)
-        try:
+        with SyncRagnor.from_builder(_make_builder) as client:
             docs = [
                 Document(id="doc1", text="Refund policy allows 30 days return."),
                 Document(id="doc2", text="Shipping guidelines and transit times."),
@@ -56,8 +55,6 @@ class TestSyncRagnorFacade:
 
             total = client.count()
             assert total >= 2
-        finally:
-            client.close()
 
     def test_context_manager_lifecycle(self) -> None:
         with SyncRagnor.from_builder(_make_builder) as client:
@@ -116,12 +113,9 @@ class TestSyncRagnorFacade:
                 return [[0.1] * 8 for _ in texts]
 
         builder = RagnorBuilder.local(embedder=SlowEmbedder(), embedding_dim=8)
-        client = SyncRagnor.from_builder(builder, timeout=0.05)
-        try:
+        with SyncRagnor.from_builder(builder, timeout=0.05) as client:
             with pytest.raises(OperationTimeoutError):
                 client.ingest([Document(id="slow", text="slow text")], timeout=0.05)
-        finally:
-            client.close()
 
     def test_pluggable_components_injection(self) -> None:
         records: list[str] = []
@@ -220,7 +214,7 @@ class TestSyncRagnorFacade:
             )
             barrier = threading.Barrier(2)
             results_by_thread: list[int] = []
-            errors: list[BaseException] = []
+            errors: list[Exception] = []
 
             def worker(query: str) -> None:
                 try:
@@ -228,7 +222,7 @@ class TestSyncRagnorFacade:
                     hits = client.search(query, n_results=2)
                     total = client.count()
                     results_by_thread.append(len(hits) + total)
-                except BaseException as exc:
+                except Exception as exc:
                     errors.append(exc)
 
             t1 = threading.Thread(target=worker, args=("alpha",))

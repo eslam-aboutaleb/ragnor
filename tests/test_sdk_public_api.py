@@ -9,9 +9,10 @@ import sys
 
 import pytest
 
+import ragnor
+
 
 def test_public_symbols_are_discoverable_and_stable() -> None:
-    import ragnor
     from ragnor.builder import Ragnor as OldRagnor
     from ragnor.builder import RagnorBuilder as OldBuilder
     from ragnor.types import Chunk as OldChunk
@@ -56,14 +57,14 @@ def test_public_imports_do_not_import_optional_backends() -> None:
 
 
 def test_root_import_is_idempotent() -> None:
-    import ragnor
-
     assert importlib.reload(ragnor).RagnorBuilder is ragnor.RagnorBuilder
 
 
 @pytest.mark.asyncio
 async def test_public_facade_ordering_metadata_empty_and_capability_errors() -> None:
-    from ragnor import Document, RagnorBuilder, RetrievalError
+    Document = ragnor.Document
+    RagnorBuilder = ragnor.RagnorBuilder
+    RetrievalError = ragnor.RetrievalError
     from ragnor.exceptions import UnsupportedCapabilityError
     from ragnor.retrieval.capabilities import FilterOperator, StoreCapabilities
     from ragnor.stores.memory import InMemoryVectorStore
