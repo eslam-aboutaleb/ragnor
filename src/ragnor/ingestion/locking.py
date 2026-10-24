@@ -1,4 +1,4 @@
-"""PostgreSQL advisory lock helper for ingestion.
+"""SQLAlchemy-backed transaction lock helper for ingestion.
 
 Compatibility wrapper: the lock lives on the abstract
 SQL factory (:class:`ragnor.db.ports.SQLFactory`),
@@ -17,7 +17,7 @@ from typing import Any
 
 @asynccontextmanager
 async def advisory_lock(session: Any, key: str) -> AsyncIterator[None]:
-    """Hold a PostgreSQL advisory lock keyed by ``key``.
+    """Serialize ingestion using a row in the host's database transaction.
 
     Delegates to :meth:`SQLAlchemyFactory.advisory_lock`.
     """
@@ -28,8 +28,8 @@ async def advisory_lock(session: Any, key: str) -> AsyncIterator[None]:
         from ragnor.db.sql_factory import SQLAlchemyFactory  # noqa: PLC0415
     except ImportError as exc:
         raise RuntimeError(
-            "PostgreSQL advisory locking requires the optional SQLAlchemy adapter; "
-            "install ragnor[pgvector] or inject an independent SQLFactory"
+            "Database locking requires the optional SQLAlchemy adapter; "
+            "install ragnor[database] or inject an independent SQLFactory"
         ) from exc
 
     async with SQLAlchemyFactory().advisory_lock(session, key):

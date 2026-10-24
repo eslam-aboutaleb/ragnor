@@ -19,6 +19,7 @@ def test_migrations_match_the_actual_runtime_postgres_contract() -> None:
         "001_embedding_outbox.sql",
         "002_active_generation.sql",
         "003_generation_reservations.sql",
+        "004_ingestion_locks.sql",
     ):
         sql = migrations.joinpath(filename).read_text(encoding="utf-8")
         assert sql.strip()
@@ -33,5 +34,6 @@ def test_schema_assets_are_accessible_as_distribution_resources() -> None:
         "001_embedding_outbox.sql",
         "002_active_generation.sql",
         "003_generation_reservations.sql",
+        "004_ingestion_locks.sql",
     ):
         assert adapter.joinpath(name).is_file(), name

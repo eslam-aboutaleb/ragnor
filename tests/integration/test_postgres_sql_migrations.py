@@ -26,6 +26,7 @@ async def test_real_postgres_migrations_are_idempotent_and_have_required_columns
                     "001_embedding_outbox.sql",
                     "002_active_generation.sql",
                     "003_generation_reservations.sql",
+                    "004_ingestion_locks.sql",
                 ):
                     resource = files("ragnor.jobs.adapters").joinpath("migrations", filename)
                     for statement in resource.read_text(encoding="utf-8").split(";"):
@@ -35,7 +36,8 @@ async def test_real_postgres_migrations_are_idempotent_and_have_required_columns
             cols = await connection.execute(
                 text(
                     "SELECT table_name, column_name FROM information_schema.columns "
-                    "WHERE table_name IN ('ragnor_embedding_jobs','ragnor_active_generations')"
+                    "WHERE table_name IN ('ragnor_embedding_jobs','ragnor_active_generations',"
+                    "'ragnor_ingestion_locks')"
                 )
             )
             observed = {(row.table_name, row.column_name) for row in cols}
@@ -46,6 +48,8 @@ async def test_real_postgres_migrations_are_idempotent_and_have_required_columns
                 ("ragnor_active_generations", "scope"),
                 ("ragnor_active_generations", "revision"),
                 ("ragnor_active_generations", "generation_key"),
+                ("ragnor_ingestion_locks", "lock_key"),
+                ("ragnor_ingestion_locks", "generation"),
             ):
                 assert required in observed
     finally:

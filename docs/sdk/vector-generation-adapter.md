@@ -7,18 +7,20 @@ or host implementation of `GenerationDocumentStore.get/upsert`.
 
 ```python
 from ragnor.jobs.adapters.generation_vectors import ImmutableGenerationVectorAdapter
-from ragnor.jobs.adapters.generation_reservations import PostgresGenerationReservations
+from ragnor.jobs.adapters.relational import RelationalJobStoreFactory
 from ragnor.jobs.publication import ActiveGenerationReader
 
-# Apply migrations 001, 002 and 003 before starting workers.
-reservations = PostgresGenerationReservations(host_sessions, scope=tenant_scope)
+# Apply the equivalent host-owned SQL migrations before starting workers.
+database = RelationalJobStoreFactory(host_sessions)
+outbox = database.job_store(scope=tenant_scope, require_publication=True)
+reservations = database.reservations(scope=tenant_scope)
 vectors = ImmutableGenerationVectorAdapter(
     store=host_vector_store, scope=tenant_scope, reservations=reservations,
 )
 await vectors.stage(job.payload["generation_key"], embedded_chunks)
 # Only after ALL writes succeed:
-await durable_postgres_outbox.activate_generation(job)
-reader = ActiveGenerationReader(durable_postgres_outbox, vectors)
+await outbox.activate_generation(job)
+reader = ActiveGenerationReader(outbox, vectors)
 texts = await reader.read(tenant_scope, "policy")
 ```
 
@@ -29,7 +31,7 @@ connection settings for your selected vector provider.
 
 The required `GenerationReservations` port atomically binds a generation
 key to a SHA-256 digest of the complete batch before any vector access.
-The PostgreSQL adapter commits the binding independently of external writes.
+The relational adapter commits the binding independently of external writes.
 Two conflicting producers cannot both reserve a generation, including
 producers proposing different chunk sets. Identical retries use stable IDs
 and can safely complete a partial write; input order does not change identity.

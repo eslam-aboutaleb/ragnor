@@ -9,6 +9,7 @@ when used.
 | `litellm` | Hosted model embeddings through LiteLLM |
 | `rerank` | Model-based reranking |
 | `pgvector` | SQLAlchemy async storage and PostgreSQL integration |
+| `database` | Host-bound SQLAlchemy outbox, reservations, and SQL transaction locks |
 | `qdrant` | Qdrant vector storage |
 | `chroma` | Chroma vector storage |
 | `faiss` | Local FAISS indexing |
