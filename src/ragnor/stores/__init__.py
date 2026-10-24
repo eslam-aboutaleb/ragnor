@@ -20,7 +20,7 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
-from ragnor.metrics import (
+from ragnor.stores.metrics import (
     DEFAULT_DISTANCE_METRIC,
     SUPPORTED_DISTANCE_METRICS,
     DistanceMetric,

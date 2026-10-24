@@ -161,11 +161,11 @@ The core install has **zero third-party packages** — `import ragnor.*` never r
 | `qdrant`           | `qdrant-client>=1.9`                          | Qdrant vector store                                                |
 | `chroma`           | `chromadb>=0.5`                               | Chroma vector store                                                |
 | `faiss`            | `faiss-cpu>=1.8`                              | FAISS vector store                                                 |
-| `local-embeddings` | *(reserved — currently empty)*                | Future local-model embedding backend (e.g. sentence-transformers) |
+| `local-embeddings` | *(reserved — currently empty)*                | Does not install a local-model provider |
 | `test`             | `pytest`, `pytest-asyncio`, `aiosqlite`, `sqlalchemy[asyncio]`, `numpy`, `litellm` | Full test suite, including the LiteLLM integration check |
 | `all`              | `ragnor[litellm,pgvector,qdrant,chroma,faiss]` | Every shipped capability at once                           |
 
-The extra names `pdf` and `web` are reserved for future loader/serving integrations.
+The `pdf` and `web` extras enable PDF text extraction and HTTP document loading.
 
 ---
 
@@ -803,14 +803,15 @@ ragnor/
 │   ├── host_integration.py   # host integration template (any domain)
 │   └── sample_document.md    # bundled example document
 ├── src/ragnor/
-│   ├── types.py              # Chunk, Document, SearchResult, RetrievalError
-│   ├── config.py             # RagSettings, SettingsProvider protocols
-│   ├── registry.py           # generic case-insensitive Registry[T]
-│   ├── validation.py         # validate_identifier, validate_embedding
-│   ├── builder.py            # RagnorBuilder, Ragnor facade, BuilderSettings, InMemoryVersionStore
+│   ├── core/                # types, settings, exceptions, validation, registries
+│   ├── client/              # asynchronous builder/facade and synchronous client
+│   ├── types.py             # compatibility import for core.types
+│   ├── config.py            # compatibility import for core.config
+│   ├── builder.py           # compatibility import for client.builder
 │   ├── chunking/             # sliding-window + Markdown section chunkers
 │   ├── embeddings/           # LiteLLM function, dimension registry
 │   ├── stores/               # VectorStore ABC, five built-in backends
+│   │   ├── metrics.py        # vector distance metrics and normalization
 │   │   ├── memory.py         # in-memory store (dev/test)
 │   │   ├── pgvector.py       # PostgreSQL pgvector + tsvector store
 │   │   ├── qdrant.py         # Qdrant store
@@ -826,7 +827,7 @@ ragnor/
 │   ├── evaluation/           # metrics, judges, runner
 │   └── db/                   # SessionProvider protocol, session factory
 │       └── sql_factory.py    # SQLFactory ABC + SQLAlchemyFactory
-└── tests/                    # 512 tests, no host dependencies
+└── tests/                    # test suite, no host dependencies
 ```
 
 ---

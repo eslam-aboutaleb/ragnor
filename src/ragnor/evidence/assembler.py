@@ -22,7 +22,7 @@ from ragnor.evidence.types import (
     EvidenceStatus,
     SearchHit,
 )
-from ragnor.types import SearchResult
+from ragnor.core.types import SearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ class EvidenceAssembler:
       and stale index conditions.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         tokenizer: Tokenizer | None = None,
         compressor: EvidenceCompressor | None = None,
@@ -62,6 +62,7 @@ class EvidenceAssembler:
         merge_overlapping_spans: bool = True,
         balance_sources: bool = False,
         max_per_source: int | None = None,
+        exact_required: bool = False,
     ) -> None:
         """Initialize the assembler.
 
@@ -75,6 +76,10 @@ class EvidenceAssembler:
             max_per_source: Optional maximum number of evidence items per source.
         """
         self.tokenizer: Tokenizer = tokenizer or ApproximateTokenizer()
+        if exact_required and not self.tokenizer.is_exact:
+            raise ValueError("exact tokenizer is required for hard evidence context limits")
+        self.exact_required = exact_required
+        self._warned_approximation = False
         self.compressor = compressor
         self.merge_overlapping_spans = merge_overlapping_spans
         self.balance_sources = balance_sources
@@ -272,6 +277,13 @@ class EvidenceAssembler:
             An :class:`~ragnor.evidence.types.EvidenceBundle` carrying selected
             evidence items and execution status.
         """
+        if not self.tokenizer.is_exact and not self._warned_approximation:
+            logger.warning(
+                "EvidenceAssembler uses an approximate tokenizer; "
+                "estimated budgets do not guarantee model context limits"
+            )
+            self._warned_approximation = True
+
         # Check backend failure
         if backend_failure or backend_status in (
             "failure",

@@ -14,8 +14,9 @@ from enum import StrEnum
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
-from ragnor.types import RetrievalError, SearchResult
 from ragnor.evidence.references import source_reference
+from ragnor.core.exceptions import IndexConsistencyError, ScopeDeniedError
+from ragnor.core.types import RetrievalError, SearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -31,16 +32,20 @@ class EvidenceStatus(StrEnum):
     REVISION_UNAVAILABLE = "revision_unavailable"
 
 
-class RevisionUnavailableError(RetrievalError):
+class RevisionUnavailableError(IndexConsistencyError, RetrievalError):
     """Raised when a cited document revision is not available in retained snapshots.
 
     Historical revision availability is explicit: ragnor never silently
     substitutes current content for an older citation.
     """
 
+    default_code = "ERR_REVISION_UNAVAILABLE"
 
-class ScopeAuthorizationError(RetrievalError):
+
+class ScopeAuthorizationError(ScopeDeniedError, RetrievalError):
     """Raised when source lookup fails isolation scope authorization."""
+
+    default_code = "ERR_SCOPE_UNAUTHORIZED"
 
 
 def sanitize_uri(uri: str | None) -> str | None:

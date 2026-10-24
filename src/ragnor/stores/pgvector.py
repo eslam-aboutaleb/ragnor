@@ -23,7 +23,7 @@ constructor arguments — ``session_factory`` (a
 when the caller passes an empty embedding.
 
 Distance metric: the vector stage ranks by the store's metric
-(:mod:`ragnor.metrics`). The operator comes from an internal map — ``l2``
+(:mod:`ragnor.stores.metrics`). The operator comes from an internal map — ``l2``
 maps to pgvector's ``<->`` (the default) and ``cosine`` to ``<=>`` — so it
 can never come from user input. pgvector's ``<=>`` is the exact cosine
 distance in ``[0, 2]`` and needs no pre-normalization. Thresholds are
@@ -39,14 +39,14 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any
 
-from ragnor.config import RagSettings
+from ragnor.core.config import RagSettings
 from ragnor.db.sql_factory import SQLAlchemyFactory
-from ragnor.metrics import DistanceMetric, resolve_distance_metric
+from ragnor.stores.metrics import DistanceMetric, resolve_distance_metric
 from ragnor.stores._scoring import format_search_hit, project_metadata
 from ragnor.stores.base import EmbeddingFunction, VectorStore
 from ragnor.stores.registry import vector_store_registry
-from ragnor.types import RetrievalError
-from ragnor.validation import (
+from ragnor.core.exceptions import BackendUnavailableError, OperationTimeoutError
+from ragnor.core.validation import (
     validate_delete_selectors,
     validate_embedding,
     validate_identifier,
@@ -265,7 +265,7 @@ class PgVectorStore(VectorStore):
                 external session is supplied, the caller is responsible for
                 committing or rolling back the transaction.
             strict: When ``True``, a failed search raises
-                :class:`ragnor.types.RetrievalError`. The default ``False``
+                :class:`ragnor.core.types.RetrievalError`. The default ``False``
                 preserves the historical behavior of logging the error and
                 returning an empty list.
             **filters: Additional equality filters applied to both search CTEs
@@ -286,7 +286,7 @@ class PgVectorStore(VectorStore):
                 - ``_rrf_score`` (float): Combined RRF relevance score.
 
         Raises:
-            ragnor.types.RetrievalError: If the search fails and
+            ragnor.core.types.RetrievalError: If the search fails and
                 ``strict=True``.
         """
         validate_identifier(text_field, "text_field")
@@ -464,16 +464,21 @@ class PgVectorStore(VectorStore):
                 )
 
             logger.debug(
-                "hybrid_search('%s') on %s: found %d results.",
-                query,
+                "hybrid_search on %s: found %d results.",
                 self.table_name,
                 len(retrieved),
             )
             return retrieved
         except Exception as exc:
-            logger.error("Hybrid search failed on %s: %s", self.table_name, exc)
+            logger.error("Hybrid search failed on %s: %s", self.table_name, type(exc).__name__)
             if strict:
-                raise RetrievalError(f"Hybrid search failed on {self.table_name}: {exc}") from exc
+                if isinstance(exc, TimeoutError):
+                    raise OperationTimeoutError(
+                        f"Hybrid search timed out on {self.table_name} ({type(exc).__name__})"
+                    ) from exc
+                raise BackendUnavailableError(
+                    f"Hybrid search failed on {self.table_name} ({type(exc).__name__})"
+                ) from exc
             return []
 
     async def vector_search(  # noqa: PLR0913, PLR0917
@@ -827,7 +832,7 @@ class PgVectorStore(VectorStore):
                 external session is supplied, the caller is responsible for
                 committing or rolling back the transaction.
             strict: When ``True``, a failed count raises
-                :class:`ragnor.types.RetrievalError`. The default ``False``
+                :class:`ragnor.core.types.RetrievalError`. The default ``False``
                 preserves the historical behavior of logging the error and
                 returning ``0``.
             **filters: Optional equality filters (e.g., ``tenant_id="..."``).
@@ -838,7 +843,7 @@ class PgVectorStore(VectorStore):
             int: Number of matching documents, or 0 on error.
 
         Raises:
-            ragnor.types.RetrievalError: If the count fails and
+            ragnor.core.types.RetrievalError: If the count fails and
                 ``strict=True``.
         """
         for key in filters:
@@ -867,9 +872,15 @@ class PgVectorStore(VectorStore):
                     count = await self._sql.fetch_scalar(owned_session, stmt, params)
             return int(count) if count else 0
         except Exception as exc:
-            logger.error("Count failed on %s: %s", self.table_name, exc)
+            logger.error("Count failed on %s: %s", self.table_name, type(exc).__name__)
             if strict:
-                raise RetrievalError(f"Count failed on {self.table_name}: {exc}") from exc
+                if isinstance(exc, TimeoutError):
+                    raise OperationTimeoutError(
+                        f"Count timed out on {self.table_name} ({type(exc).__name__})"
+                    ) from exc
+                raise BackendUnavailableError(
+                    f"Count failed on {self.table_name} ({type(exc).__name__})"
+                ) from exc
             return 0
 
     @staticmethod
@@ -1023,5 +1034,5 @@ class PgVectorStore(VectorStore):
                 await self._sql.execute(session, stmt, params)
             logger.info("Upserted %d documents to %s.", len(documents), self.table_name)
         except Exception as exc:
-            logger.error("Upsert failed on %s: %s", self.table_name, exc)
+            logger.error("Upsert failed on %s: %s", self.table_name, type(exc).__name__)
             raise

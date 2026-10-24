@@ -18,7 +18,7 @@ import re
 from typing import Any
 
 from ragnor.chunking.base import Chunker
-from ragnor.types import Chunk
+from ragnor.core.types import Chunk
 
 
 class MarkdownSectionChunker:

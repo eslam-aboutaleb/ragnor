@@ -4,8 +4,7 @@
 
 - Adopt Elastic License 2.0 (`Elastic-2.0`) for this source revision and future
   releases, preserving project notices. Earlier published artifacts retain
-  their original terms. The first ELv2 distribution must use a new version;
-  this change does not publish or replace release 0.4.1.
+  their original terms. Previously published release 0.4.1 artifacts are unchanged.
 
 
 All notable changes to ragnor (published on PyPI as `ragnor`) are
@@ -65,9 +64,8 @@ stability contract rather than a moving target.
   `max_batch_size` (default `None` = no splitting) constructor kwargs. Both
   default to today's behavior, and results are returned in the original input
   order even with mixed cache hits and misses.
-- **LiteLLM provider error classification is deliberately deferred** — the
-  cache and batching above shipped per plan, while classifying provider
-  errors as transient or permanent stays host-side.
+- **LiteLLM provider error classification** — hosts classify provider
+  errors as transient or permanent when using these cache and batching options.
 
 [0.4.0]: https://github.com/eslam-aboutaleb/ragnor/releases/tag/v0.4.0
 [Unreleased]: https://github.com/eslam-aboutaleb/ragnor/compare/v0.4.0...HEAD

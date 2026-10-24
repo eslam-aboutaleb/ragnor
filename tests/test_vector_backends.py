@@ -240,7 +240,26 @@ def qdrant_module(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
     module.FilterSelector = _FakeFilterSelector
     module.PointStruct = _FakePointStruct
     module.AsyncQdrantClient = _FakeAsyncQdrantClient
+    # Modern qdrant-client exposes payload/config types under .models.
+    # A package-shaped fake preserves core-only test isolation while the
+    # optional-backend matrix runs the same code against the real client.
+    module.__path__ = []
+    models = types.ModuleType("qdrant_client.models")
+    for name in (
+        "Distance",
+        "VectorParams",
+        "MatchValue",
+        "MatchAny",
+        "FieldCondition",
+        "Filter",
+        "PointIdsList",
+        "FilterSelector",
+        "PointStruct",
+    ):
+        setattr(models, name, getattr(module, name))
+    module.models = models
     monkeypatch.setitem(sys.modules, "qdrant_client", module)
+    monkeypatch.setitem(sys.modules, "qdrant_client.models", models)
     return module
 
 
@@ -576,7 +595,7 @@ class TestQdrantStore:
 
         store = _qdrant_store(_FailingClient())
 
-        with pytest.raises(RetrievalError, match="qdrant down"):
+        with pytest.raises(RetrievalError) as caught:
             await store.hybrid_search(
                 QUERY,
                 QUERY_EMBEDDING,
@@ -584,6 +603,10 @@ class TestQdrantStore:
                 threshold=THRESHOLD,
                 strict=True,
             )
+
+        assert caught.value.code == "ERR_BACKEND_UNAVAILABLE"
+        assert str(caught.value.__cause__) == "qdrant down"
+        assert "qdrant down" not in str(caught.value)
 
         assert (
             await store.hybrid_search(QUERY, QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD)
@@ -941,7 +964,7 @@ class TestChromaStore:
 
         store = _chroma_store(_FailingClient())
 
-        with pytest.raises(RetrievalError, match="chroma down"):
+        with pytest.raises(RetrievalError) as caught:
             await store.hybrid_search(
                 QUERY,
                 QUERY_EMBEDDING,
@@ -949,6 +972,10 @@ class TestChromaStore:
                 threshold=THRESHOLD,
                 strict=True,
             )
+
+        assert caught.value.code == "ERR_BACKEND_UNAVAILABLE"
+        assert str(caught.value.__cause__) == "chroma down"
+        assert "chroma down" not in str(caught.value)
 
         assert (
             await store.hybrid_search(QUERY, QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD)
@@ -1044,8 +1071,12 @@ class TestChromaStore:
 
         store = _chroma_store(_FailingClient())
 
-        with pytest.raises(RetrievalError, match="chroma down"):
+        with pytest.raises(RetrievalError) as caught:
             await store.count(strict=True)
+
+        assert caught.value.code == "ERR_BACKEND_UNAVAILABLE"
+        assert str(caught.value.__cause__) == "chroma down"
+        assert "chroma down" not in str(caught.value)
 
         assert await store.count() == 0
 
@@ -1384,7 +1415,7 @@ class TestFaissStore:
 
         store = _faiss_store(_FailingIndex())
 
-        with pytest.raises(RetrievalError, match="faiss down"):
+        with pytest.raises(RetrievalError) as caught:
             await store.hybrid_search(
                 QUERY,
                 QUERY_EMBEDDING,
@@ -1392,6 +1423,10 @@ class TestFaissStore:
                 threshold=THRESHOLD,
                 strict=True,
             )
+
+        assert caught.value.code == "ERR_BACKEND_UNAVAILABLE"
+        assert str(caught.value.__cause__) == "faiss down"
+        assert "faiss down" not in str(caught.value)
 
         assert (
             await store.hybrid_search(QUERY, QUERY_EMBEDDING, n_results=5, threshold=THRESHOLD)

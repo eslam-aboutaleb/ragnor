@@ -1,7 +1,100 @@
-"""Convenient public alias for :mod:`ragnor.ingestion.connectors`."""
+"""Compatibility import for :mod:`ragnor.ingestion.connectors`."""
 
-from ragnor.ingestion import connectors as _connectors
+from __future__ import annotations
 
-__all__ = _connectors.__all__
-for _name in __all__:
-    globals()[_name] = getattr(_connectors, _name)
+import sys
+from typing import TYPE_CHECKING
+
+from ragnor.ingestion import connectors as _implementation
+
+if TYPE_CHECKING:
+    from ragnor.ingestion.connectors import (
+        ApiConnector,
+        ChangeEvent,
+        ChangeEventSource,
+        ConnectorDocumentSource,
+        Credential,
+        DirectoryConnector,
+        DirectoryDocumentSource,
+        DirectorySource,
+        DirectorySourceConnector,
+        DiscoveryPage,
+        DocumentSourceConnector,
+        Extractor,
+        FileSystemConnector,
+        FilesystemSourceConnector,
+        FilesystemWatcher,
+        GenericHttpConnector,
+        HTMLExtractor,
+        HttpApiConnector,
+        HttpConnector,
+        IncompleteScanError,
+        IncrementalSourceConnector,
+        LoadResult,
+        LocalDirectoryConnector,
+        ObjectStorageClient,
+        ObjectStorageConnector,
+        ObjectStorageSource,
+        ObjectStoreConnector,
+        PDFExtractor,
+        PeriodicReconciler,
+        S3Connector,
+        SkipRecord,
+        SourceConnector,
+        SourceError,
+        SourceInaccessibleError,
+        SourceItem,
+        SourceNotFoundError,
+        SourceStatus,
+        TextExtractor,
+        TransientSourceError,
+        WebsiteConnector,
+        collect_pages,
+    )
+
+__all__ = [
+    "ApiConnector",
+    "ChangeEvent",
+    "ChangeEventSource",
+    "ConnectorDocumentSource",
+    "Credential",
+    "DirectoryConnector",
+    "DirectoryDocumentSource",
+    "DirectorySource",
+    "DirectorySourceConnector",
+    "DiscoveryPage",
+    "DocumentSourceConnector",
+    "Extractor",
+    "FileSystemConnector",
+    "FilesystemSourceConnector",
+    "FilesystemWatcher",
+    "GenericHttpConnector",
+    "HTMLExtractor",
+    "HttpApiConnector",
+    "HttpConnector",
+    "IncompleteScanError",
+    "IncrementalSourceConnector",
+    "LoadResult",
+    "LocalDirectoryConnector",
+    "ObjectStorageClient",
+    "ObjectStorageConnector",
+    "ObjectStorageSource",
+    "ObjectStoreConnector",
+    "PDFExtractor",
+    "PeriodicReconciler",
+    "S3Connector",
+    "SkipRecord",
+    "SourceConnector",
+    "SourceError",
+    "SourceInaccessibleError",
+    "SourceItem",
+    "SourceNotFoundError",
+    "SourceStatus",
+    "TextExtractor",
+    "TransientSourceError",
+    "WebsiteConnector",
+    "collect_pages",
+]
+
+# Keep module identity, private helpers and patch targets compatible too.
+sys.modules[__name__] = _implementation

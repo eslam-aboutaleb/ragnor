@@ -80,6 +80,7 @@ def _safe_url(url: str) -> str:
         if parts.port:
             authority += f":{parts.port}"
     except ValueError:
+        # Invalid or non-numeric port component; skip port in authority.
         pass
     query = urlencode([(key, "[redacted]") for key, _ in parse_qsl(parts.query)])
     return urlunsplit((parts.scheme, authority, parts.path, query, ""))

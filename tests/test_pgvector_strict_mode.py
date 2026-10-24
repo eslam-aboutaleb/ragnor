@@ -66,7 +66,7 @@ async def test_hybrid_search_strict_raises_retrieval_error():
         embedding_dim=1536,
         session_factory=_failing_factory(),
     )
-    with pytest.raises(RetrievalError, match="DB down"):
+    with pytest.raises(RetrievalError) as caught:
         await store.hybrid_search(
             query="test",
             embedding=[0.0] * 1536,
@@ -74,6 +74,10 @@ async def test_hybrid_search_strict_raises_retrieval_error():
             threshold=1.0,
             strict=True,
         )
+
+    assert caught.value.code == "ERR_BACKEND_UNAVAILABLE"
+    assert str(caught.value.__cause__) == "DB down"
+    assert "DB down" not in str(caught.value)
 
 
 @pytest.mark.asyncio
@@ -95,8 +99,12 @@ async def test_count_strict_raises_retrieval_error():
         embedding_dim=1536,
         session_factory=_failing_factory(),
     )
-    with pytest.raises(RetrievalError, match="DB down"):
+    with pytest.raises(RetrievalError) as caught:
         await store.count(strict=True)
+
+    assert caught.value.code == "ERR_BACKEND_UNAVAILABLE"
+    assert str(caught.value.__cause__) == "DB down"
+    assert "DB down" not in str(caught.value)
 
 
 @pytest.mark.asyncio

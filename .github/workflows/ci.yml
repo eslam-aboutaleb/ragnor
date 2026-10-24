@@ -31,6 +31,201 @@ jobs:
       coverage-min: 85
       build-distribution: true
 
+  architecture-contracts:
+    name: Architecture boundaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install zero-dependency core and test runner
+        run: |
+          python -m pip install -e .
+          python -m pip install "pytest>=8.3"
+      - name: Enforce inward dependency and plug-in protocol contracts
+        run: python -m pytest -q tests/test_architecture_contracts.py tests/test_architecture_all_modules.py
+
+  sdk-consumer:
+    name: Installed SDK consumer
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+        artifact: ["wheel", "sdist"]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Build distributions
+        run: |
+          python -m pip install build
+          python -m build --wheel --sdist
+      - name: Install and exercise SDK outside checkout
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/ragnor-sdk-venv"
+          if [ "${{ matrix.artifact }}" = "wheel" ]; then
+            "$RUNNER_TEMP/ragnor-sdk-venv/bin/python" -m pip install --no-deps dist/ragnor-*.whl
+          else
+            "$RUNNER_TEMP/ragnor-sdk-venv/bin/python" -m pip install --no-deps dist/ragnor-*.tar.gz
+          fi
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/ragnor-sdk-venv/bin/python" "$GITHUB_WORKSPACE/examples/sdk_consumer_smoke.py"
+
+  postgres-contracts:
+    name: PostgreSQL adapter contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: ragnor_contracts
+          POSTGRES_USER: ragnor
+          POSTGRES_PASSWORD: ragnor
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ragnor -d ragnor_contracts"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      qdrant:
+        image: qdrant/qdrant:v1.20.0
+        ports:
+          - 6333:6333
+    env:
+      RAGNOR_TEST_DATABASE_URL: postgresql+asyncpg://ragnor:ragnor@localhost:5432/ragnor_contracts
+      RAGNOR_TEST_QDRANT_URL: http://localhost:6333
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install optional SQL adapter and test dependencies
+        run: |
+          python -m pip install -e ".[pgvector]"
+          python -m pip install "asyncpg>=0.29" "pytest>=8.3" "pytest-asyncio>=0.24" "qdrant-client>=1.9"
+      - name: Verify transactional SQL and real advisory locking
+        run: python -m pytest -q tests/integration/test_postgres_adapter_contract.py tests/integration/test_postgres_job_outbox.py tests/integration/test_postgres_process_outbox.py tests/integration/test_postgres_publication.py tests/integration/test_postgres_sdk_host.py tests/integration/test_postgres_sql_migrations.py tests/integration/test_qdrant_postgres_publication.py tests/integration/test_postgres_job_policy.py tests/test_hybrid_search_session_injection.py tests/integration/test_postgres_security_lifecycle.py tests/test_pgvector_strict_mode.py tests/integration/test_qdrant_generation_vectors.py
+      - name: Record 1/2/4-worker PostgreSQL contention baseline
+        run: python benchmarks/postgres_outbox_profile.py
+
+  adapter-contracts:
+    name: External adapter conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install core and test runner
+        run: |
+          python -m pip install -e .
+          python -m pip install "pytest>=8.3" "pytest-asyncio>=0.24"
+      - name: Verify host adapters and fail-closed contracts
+        run: |
+          python -m pytest -q tests/test_external_adapter_conformance.py tests/test_extended_adapter_conformance.py
+
+  typing-contracts:
+    name: Installed SDK typing contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Build typed wheel and inspect distribution artifacts
+        run: |
+          python -m pip install build twine
+          python -m build --wheel --sdist
+          python -m twine check --strict dist/*
+          python - <<'PY'
+          from pathlib import Path
+          from tarfile import open as taropen
+          from zipfile import ZipFile
+
+          for wheel in Path("dist").glob("*.whl"):
+              with ZipFile(wheel) as archive:
+                  assert "ragnor/py.typed" in archive.namelist()
+          for source in Path("dist").glob("*.tar.gz"):
+              with taropen(source) as archive:
+                  assert any(name.endswith("/src/ragnor/py.typed") for name in archive.getnames())
+          PY
+      - name: Type-check installed SDK from outside checkout
+        run: |
+          python -m venv "$RUNNER_TEMP/ragnor-typing-venv"
+          "$RUNNER_TEMP/ragnor-typing-venv/bin/python" -m pip install --no-deps dist/ragnor-*.whl
+          "$RUNNER_TEMP/ragnor-typing-venv/bin/python" -m pip install "mypy==1.17.1"
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/ragnor-typing-venv/bin/python" -m mypy --no-incremental --strict --follow-imports=silent "$GITHUB_WORKSPACE/tests/typing/sdk_consumer.py" "$GITHUB_WORKSPACE/tests/typing/adapter_consumer.py" "$GITHUB_WORKSPACE/tests/typing/legacy_sdk_consumer.py"
+      - name: Prove type-checker rejects incompatible SDK API values
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          for consumer in invalid_sdk_consumer.py invalid_legacy_sdk_consumer.py; do
+            if "$RUNNER_TEMP/ragnor-typing-venv/bin/python" -m mypy --no-incremental --strict --follow-imports=silent "$GITHUB_WORKSPACE/tests/typing/$consumer" > invalid-types.txt 2>&1; then
+              echo "::error::mypy unexpectedly accepted wrong SDK argument types in $consumer"
+              cat invalid-types.txt
+              exit 1
+            fi
+            grep -q "incompatible type" invalid-types.txt
+            grep -q "Document" invalid-types.txt
+          done
+
+  tokenizer-contracts:
+    name: Optional exact tokenizer contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install optional tokenizer extra and test dependencies
+        run: |
+          python -m pip install -e ".[tokenizers-tiktoken]"
+          python -m pip install "pytest>=8.3"
+      - name: Validate actual encoding-specific token bounds
+        run: python -m pytest -q tests/integration/test_tiktoken_adapter.py
+      - name: Record multilingual approximation error and chunker performance
+        run: python benchmarks/tokenizer_profile.py
+
   security:
     name: Shared security analysis
     uses: eslam-aboutaleb/ci-workflows/.github/workflows/security.yml@57c21925ec0fd1aa1969922136fa7b2594ce6a4e
@@ -59,10 +254,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - extra: litellm
+            tests: tests/test_embeddings_litellm.py tests/test_embeddings.py
+          - extra: rerank
+            tests: tests/test_reranker_integration.py
+          - extra: pdf
+            tests: tests/test_connectors.py
+          - extra: directory
+            tests: tests/test_directory_connector.py
+          - extra: web
+            tests: tests/test_http_connectors.py
+          - extra: mcp
+            tests: tests/test_mcp_adapter.py tests/test_mcp_stdio.py
           - extra: pgvector
             tests: tests/test_pgvector_store.py tests/test_pgvector_store_coverage.py tests/test_pgvector_strict_mode.py
           - extra: qdrant
-            tests: tests/test_vector_backends.py tests/test_qdrant_coverage.py
+            tests: tests/test_vector_backends.py tests/test_qdrant_coverage.py tests/integration/test_qdrant_generation_vectors.py
           - extra: chroma
             tests: tests/test_vector_backends.py
           - extra: faiss
@@ -108,7 +315,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-    needs: [python, security, workflow-validation, optional-backends]
+    needs: [python, architecture-contracts, sdk-consumer, typing-contracts, adapter-contracts, tokenizer-contracts, postgres-contracts, security, workflow-validation, optional-backends]
     if: always()
     steps:
       - name: Require every qualification job to pass

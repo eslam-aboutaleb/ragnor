@@ -370,3 +370,16 @@ class CompositeEventSink:
                 sink.emit(event)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("EventSink %r failed to emit event: %s", sink, exc)
+
+
+__all__ = [
+    "CompositeEventSink",
+    "EventKind",
+    "EventSink",
+    "LoggingEventSink",
+    "MemoryEventSink",
+    "NullEventSink",
+    "RedactionConfig",
+    "TelemetryEvent",
+    "sanitize_error_category",
+]

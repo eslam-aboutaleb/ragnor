@@ -95,6 +95,11 @@ class ScopeAuthorizer:
         self._mapping = scope_mapping
         self._default_allow = default_allow
 
+    @property
+    def has_explicit_restrictions(self) -> bool:
+        """Whether authorization is mapped or defaults to denying access."""
+        return self._mapping is not None or not self._default_allow
+
     def is_authorized(
         self,
         client_id: str | None,

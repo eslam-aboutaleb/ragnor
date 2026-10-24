@@ -77,8 +77,8 @@ async def drain_forever(  # noqa: PLR0913, PLR0917
             )
         except asyncio.CancelledError:
             raise
-        except Exception:
-            logger.exception("Drain pass failed; retrying on the next tick.")
+        except Exception as exc:
+            logger.error("Drain pass failed (%s); retrying on the next tick.", type(exc).__name__)
             processed = 0
 
         if processed:
