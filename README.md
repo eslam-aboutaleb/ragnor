@@ -867,4 +867,10 @@ The hooks run `ruff check`, `ruff format`, and the standard whitespace/EOF/YAML 
 
 ## License
 
-ragnor is released under the MIT License. See the LICENSE file in the repository root.
+Ragnor is source-available under the **Elastic License 2.0 (ELv2)**
+(SPDX: `Elastic-2.0`), which is not an OSI-approved open-source license.
+Commercial integration is permitted subject to the license terms, including
+restrictions on offering substantial Ragnor functionality as a hosted or
+managed service. See [LICENSE](LICENSE), [NOTICE](NOTICE), and the
+[licensing guide](docs/licensing.md) for terms and illustrative examples.
+Previously distributed releases retain their original license terms.

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Adopt Elastic License 2.0 (`Elastic-2.0`) for this source revision and future
+  releases, preserving project notices. Earlier published artifacts retain
+  their original terms. The first ELv2 distribution must use a new version;
+  this change does not publish or replace release 0.4.1.
+
+
 All notable changes to ragnor (published on PyPI as `ragnor`) are
 documented in this file.
 
