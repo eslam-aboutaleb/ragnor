@@ -78,3 +78,24 @@ def test_db_factory_optional_dependencies_remain_lazy() -> None:
         text=True,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_sync_facade_depends_on_a_builder_port_without_a_builder_import() -> None:
+    assert "ragnor.builder" not in _imports("sync_client.py")
+
+
+def test_public_facades_import_in_either_order() -> None:
+    import subprocess
+    import sys
+
+    for modules in (
+        ("ragnor.builder", "ragnor.sync_client"),
+        ("ragnor.sync_client", "ragnor.builder"),
+    ):
+        script = "import importlib; " + "; ".join(
+            f"importlib.import_module({module!r})" for module in modules
+        )
+        result = subprocess.run(  # noqa: S603 - fixed interpreter and module names
+            [sys.executable, "-c", script], capture_output=True, text=True, check=False
+        )
+        assert result.returncode == 0, result.stderr

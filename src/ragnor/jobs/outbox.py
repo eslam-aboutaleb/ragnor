@@ -172,7 +172,8 @@ async def _process_with_heartbeat(
         while True:
             completed, _ = await asyncio.wait({work}, timeout=interval)
             if completed:
-                await work
+                # The task is finished; retrieve its result to propagate processor errors.
+                work.result()
                 return
             await store.renew_lease(job)
     finally:
@@ -286,7 +287,7 @@ class JobProcessor(Protocol):
         raise NotImplementedError
 
 
-async def process_pending_jobs(  # noqa: PLR0913 -- compatibility options are opt-in
+async def process_pending_jobs(  # noqa: PLR0913, PLR0917 -- compatibility options are opt-in
     store: EmbeddingJobStore,
     processor: JobProcessor,
     limit: int = 10,

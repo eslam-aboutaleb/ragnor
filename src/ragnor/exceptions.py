@@ -33,6 +33,40 @@ def sanitize_message(msg: str) -> str:
     return msg
 
 
+_SENSITIVE_DETAIL_KEYS = frozenset(
+    {
+        "apikey",
+        "accesskey",
+        "privatekey",
+        "token",
+        "secret",
+        "password",
+        "authorization",
+        "bearer",
+        "documenttext",
+        "rawtext",
+        "documentbody",
+        "promptcontent",
+        "customertext",
+    }
+)
+
+
+def _sanitize_detail(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            key: "***"
+            if re.sub(r"[^a-z]", "", str(key).lower()) in _SENSITIVE_DETAIL_KEYS
+            else _sanitize_detail(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_sanitize_detail(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_sanitize_detail(item) for item in value)
+    return sanitize_message(value) if isinstance(value, str) else value
+
+
 class RagnorError(Exception):
     """Base exception for all Ragnor SDK domain errors.
 
@@ -62,13 +96,7 @@ class RagnorError(Exception):
         self.code = code or self.default_code
         self.retryable = self.default_retryable if retryable is None else retryable
         self.trace_id = sanitize_message(trace_id) if trace_id is not None else None
-        clean_details: dict[str, Any] = {}
-        if details:
-            for k, v in details.items():
-                if isinstance(v, str):
-                    clean_details[k] = sanitize_message(v)
-                else:
-                    clean_details[k] = v
+        clean_details: dict[str, Any] = _sanitize_detail(details or {})
         if self.trace_id is not None and "trace_id" not in clean_details:
             clean_details["trace_id"] = self.trace_id
         self.details = clean_details

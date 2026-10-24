@@ -97,3 +97,20 @@ async def test_multi_host_claim_requirement_rejects_non_atomic_local_store() -> 
             worker_id="multiple-hosts",
             require_atomic_claims=True,
         )
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_propagates_processor_failure_instead_of_acknowledging() -> None:
+    class FailingProcessor:
+        async def process(self, job: JobPayload) -> None:
+            raise ValueError("permanent processor failure")
+
+    store = HostLeaseStore()
+    assert (
+        await process_pending_jobs(
+            store, FailingProcessor(), worker_id="host", heartbeat_interval_seconds=0.01
+        )
+        == 0
+    )
+    assert store.jobs[0].status != "completed"
+    assert store.jobs[0].retry_count == 1

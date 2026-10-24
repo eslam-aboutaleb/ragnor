@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any, Protocol, TypeVar, runtime_checkable
 from ragnor.exceptions import ConfigurationError, OperationTimeoutError, RagnorError
 
 if TYPE_CHECKING:
-    from ragnor.builder import RagnorBuilder
     from ragnor.types import Document, SearchResult
 
 T = TypeVar("T")
@@ -46,6 +45,14 @@ class AsyncRagnorOperations(Protocol):
 
     async def aclose(self) -> None:
         """Close owned async resources."""
+        raise NotImplementedError
+
+
+class AsyncRagnorBuilder(Protocol):
+    """Construction port for host builders without coupling to the SDK builder."""
+
+    async def build(self) -> AsyncRagnorOperations:
+        """Construct the asynchronous facade on the managed event loop."""
         raise NotImplementedError
 
 
@@ -139,7 +146,7 @@ class SyncRagnor:
     @classmethod
     def from_builder(
         cls,
-        builder: RagnorBuilder | Callable[[], RagnorBuilder],
+        builder: AsyncRagnorBuilder | Callable[[], AsyncRagnorBuilder],
         *,
         timeout: float | None = 60.0,
     ) -> SyncRagnor:

@@ -61,9 +61,10 @@ Instantiate `PostgresEmbeddingJobStore(..., require_publication=True)` when
 job payloads stage external vectors. This explicitly **disables**
 `mark_completed` as a bypass around the durable active-generation manifest.
 The host must stage immutable vectors, then call `activate_generation(job)`.
-The generic legacy `process_pending_jobs` worker still calls
-`mark_completed` and therefore is **not** a publication worker in strict
-mode; do not silently route strict jobs through that generic loop.
+The `process_pending_jobs` worker checks `require_publication` before
+claiming and routes successful stages through `activate_generation(job)`
+when required. It rejects a publication-required store without that port
+before processing. Legacy stores retain `mark_completed` behavior.
 
 For any multi-host worker using the generic processing API, pass
 `require_atomic_claims=True` to reject local two-step stores up front.

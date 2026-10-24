@@ -81,3 +81,22 @@ async def test_host_owned_secret_client_survives_facade_shutdown() -> None:
     ).build()
     await rag.aclose()
     assert store.close_calls == 0
+
+
+def test_error_details_redact_sensitive_keys_recursively_without_mutating_host_data() -> None:
+    from ragnor.exceptions import RagnorError
+
+    details = {
+        "api_key": SECRET,
+        "attempt": 2,
+        "provider": {"password": SECRET, "region": "local"},
+        "events": [{"prompt_content": SECRET, "status": 503}],
+        "authorization": "Bearer " + SECRET,
+    }
+    error = RagnorError("provider failed", details=details)
+    assert SECRET not in str(error.details)
+    assert error.details["attempt"] == 2
+    assert error.details["provider"]["region"] == "local"
+    assert error.details["events"][0]["status"] == 503
+    assert details["api_key"] == SECRET
+    assert details["provider"]["password"] == SECRET
