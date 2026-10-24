@@ -102,3 +102,12 @@ operation and exception type, not the provider exception text. Original
 causes remain available through `__cause__` for compatibility; application
 logging of a complete chained traceback must apply the host's redaction
 policy. SDK logs do not attach those tracebacks or raw query text.
+
+Builder readiness checks use the same error contract: invalid check/timeout
+configuration raises `ConfigurationError`, an expired deadline raises
+`OperationTimeoutError`, and other provider failures raise
+`BackendUnavailableError` with the original cause retained. A check that raises
+an SDK domain error keeps that error classification. Startup cleans up owned
+resources before returning failure; simultaneous startup and disposal failures
+are preserved in an exception group. Cancellation continues to propagate after
+cleanup.

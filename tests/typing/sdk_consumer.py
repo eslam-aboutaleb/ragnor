@@ -44,3 +44,11 @@ assert_type(cfg.deployment_mode, DeploymentMode)
 assert_type(classified, RagnorError)
 assert_type(retryable, bool)
 assert_type(AsyncRagnorOperations, type[AsyncRagnorOperations])
+
+
+async def check_dependencies() -> None:
+    return None
+
+
+def configure_startup(builder: RagnorBuilder) -> RagnorBuilder:
+    return builder.with_startup_check(check_dependencies, timeout_seconds=5.0)

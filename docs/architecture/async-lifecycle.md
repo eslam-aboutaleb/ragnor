@@ -22,6 +22,9 @@ async with rag:
 - Repeated `aclose()` is idempotent.
 - Owned resources close in reverse registration order, once by object identity.
 - If cleanup fails, later resources are still attempted and errors are surfaced.
+- Cancellation raised by one resource also leaves the remaining cleanup intact.
+- Repeated cancellation of a closing caller waits for shared cleanup to finish
+  before propagating cancellation.
 - Resource construction is still performed by the host. This facade is **not**
   a general-purpose dependency-injection framework.
 - An application can keep the async facade open without `async with` and
@@ -32,3 +35,9 @@ async with rag:
 Keep clients and sessions on their owning event loop. Finish direct calls
 through low-level stores, pipelines and retrievers before closing their
 resources; the facade tracks only operations performed through its own API.
+
+An optional `with_startup_check(async_check, timeout_seconds=...)` runs after
+structural validation and resource transfer, before `build()` returns. Failed,
+timed-out or cancelled readiness disposes explicitly owned resources. Borrowed
+clients remain usable. Checks must cooperate with async cancellation; see the
+[startup contract](../sdk/production-startup.md#readiness-before-returning-a-client).
