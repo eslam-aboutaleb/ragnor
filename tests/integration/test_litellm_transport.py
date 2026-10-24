@@ -110,7 +110,7 @@ async def test_cancelled_embedding_startup_closes_the_inflight_provider_socket()
             await asyncio.wait_for(entered.wait(), 10)
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
-                await task
+                await asyncio.wait_for(task, timeout=5)
             await asyncio.wait_for(disconnected.wait(), 2)
         finally:
             task.cancel()
