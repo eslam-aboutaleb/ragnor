@@ -41,5 +41,5 @@ provider or remove Python's runtime extension patterns.
 
 The base wheel does not depend on mypy; it is installed only in the CI
 typing environment. Existing users retain all legacy imports and dynamic
-integration options. License expression remains unchanged until #19 legal
-review; do not imply an ELv2 migration has already occurred.
+integration options. Current source distributions declare `Elastic-2.0` and
+include LICENSE and NOTICE. Previously published artifacts retain their original license terms.
