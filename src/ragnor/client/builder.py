@@ -27,7 +27,9 @@ no driver, and no API key.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Sequence
+import inspect
+import math
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
@@ -44,6 +46,7 @@ from ragnor.core.exceptions import (
     BackendUnavailableError,
     ConfigurationError,
     OperationTimeoutError,
+    RagnorError,
     sanitize_message,
 )
 from ragnor.ingestion.pipeline import (
@@ -319,6 +322,8 @@ class RagnorBuilder:
             getattr(settings, "deployment_mode", None) == DeploymentMode.PRODUCTION
         )
         self._owned_resources: list[AsyncCloseable] = []
+        self._startup_check: Callable[[], Awaitable[None]] | None = None
+        self._startup_timeout_seconds = 5.0
 
     def __repr__(self) -> str:
         return (
@@ -479,6 +484,55 @@ class RagnorBuilder:
         if all(existing is not resource for existing in self._owned_resources):
             self._owned_resources.append(resource)
         return self
+
+    def with_startup_check(
+        self,
+        check: Callable[[], Awaitable[None]],
+        *,
+        timeout_seconds: float = 5.0,
+    ) -> RagnorBuilder:
+        """Require a bounded host readiness check before returning the facade.
+
+        The check must raise on unavailable or unsuitable infrastructure and
+        must cooperate with cancellation. It should perform read-only probes
+        using the same clients and authenticated scope as normal operations.
+        Owned resources transfer before the check starts and are disposed on
+        failure, timeout or cancellation. Structural validation happens first;
+        if that fails, ownership remains with the host/builder.
+        """
+        if not callable(check):
+            raise ConfigurationError("startup check must be callable")
+        if (
+            not isinstance(timeout_seconds, (int, float))
+            or isinstance(timeout_seconds, bool)
+            or not math.isfinite(timeout_seconds)
+            or timeout_seconds <= 0
+        ):
+            raise ConfigurationError("startup timeout_seconds must be positive and finite")
+        self._startup_check = check
+        self._startup_timeout_seconds = timeout_seconds
+        return self
+
+    async def _check_startup(self) -> None:
+        if self._startup_check is None:
+            return
+        try:
+            deadline = asyncio.timeout(self._startup_timeout_seconds)
+            async with deadline:
+                result = self._startup_check()
+                if not inspect.isawaitable(result):
+                    raise ConfigurationError("startup check must return an awaitable")
+                await result
+            if deadline.expired():
+                raise OperationTimeoutError("Startup readiness check exceeded its timeout")
+        except RagnorError:
+            raise
+        except TimeoutError as exc:
+            raise OperationTimeoutError("Startup readiness check timed out") from exc
+        except Exception as exc:
+            raise BackendUnavailableError(
+                f"Startup readiness check failed ({type(exc).__name__})"
+            ) from exc
 
     def with_production_mode(self) -> RagnorBuilder:
         """Refuse known ephemeral defaults when building a persistent application."""
@@ -647,7 +701,7 @@ class RagnorBuilder:
         # accidentally register the same closeable in two SDK clients.
         owned_resources = tuple(self._owned_resources)
         self._owned_resources.clear()
-        return Ragnor(
+        rag = Ragnor(
             store=store,
             pipeline=pipeline,
             retriever=retriever,
@@ -662,6 +716,19 @@ class RagnorBuilder:
             job_store=self._job_store,
             authorizer=self._authorizer,
         )
+        try:
+            await self._check_startup()
+        except BaseException as startup_error:
+            try:
+                await rag.aclose()
+            except asyncio.CancelledError:
+                raise
+            except Exception as cleanup_error:
+                raise BaseExceptionGroup(
+                    "SDK startup and resource cleanup failed", [startup_error, cleanup_error]
+                ) from None
+            raise
+        return rag
 
     def build_sync(self, *, timeout: float | None = 60.0) -> SyncRagnor:
         """Build and return a synchronous :class:`~ragnor.client.sync_client.SyncRagnor` facade."""
@@ -742,14 +809,14 @@ class Ragnor:
         await self.aclose()
 
     async def _close_owned_resources(self) -> None:
-        errors: list[Exception] = []
+        errors: list[BaseException] = []
         for resource in reversed(self._owned_resources):
             try:
                 await resource.aclose()
-            except Exception as error:
+            except (Exception, asyncio.CancelledError) as error:
                 errors.append(error)
         if len(errors) > 1:
-            raise ExceptionGroup("Ragnor resource cleanup failed", errors)
+            raise BaseExceptionGroup("Ragnor resource cleanup failed", errors)
         if errors:
             raise errors[0]
 
@@ -768,11 +835,18 @@ class Ragnor:
         if self._close_task is None:
             self._closed = True
             self._close_task = asyncio.create_task(self._drain_and_close())
-        try:
-            await asyncio.shield(self._close_task)
-        except asyncio.CancelledError:
-            await asyncio.shield(self._close_task)
-            raise
+        cancelled = False
+        while True:
+            try:
+                await asyncio.shield(self._close_task)
+                break
+            except asyncio.CancelledError:
+                cancelled = True
+                if self._close_task.done():
+                    self._close_task.result()
+                    break
+        if cancelled:
+            raise asyncio.CancelledError
 
     async def ingest(
         self,
