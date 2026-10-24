@@ -205,7 +205,7 @@ class _FakeSession:
 
     async def execute(self, statement: Any, params: Any = None) -> MagicMock:
         self.executed.append(str(statement))
-        return MagicMock()
+        return MagicMock(rowcount=1)
 
     async def commit(self) -> None:
         self.committed = True
@@ -577,8 +577,7 @@ async def test_run_with_lock_key_commits_its_owned_session() -> None:
     session = session_factory.sessions[1]
     assert session.committed
     assert not session.rolled_back
-    assert any("pg_advisory_lock" in sql for sql in session.executed)
-    assert any("pg_advisory_unlock" in sql for sql in session.executed)
+    assert any("ragnor_ingestion_locks" in sql for sql in session.executed)
     assert store.upsert_sessions == [session]
 
 
@@ -607,7 +606,7 @@ async def test_run_with_lock_key_rolls_back_on_failure() -> None:
     session = session_factory.sessions[1]
     assert session.rolled_back
     assert not session.committed
-    assert any("pg_advisory_unlock" in sql for sql in session.executed)
+    assert any("ragnor_ingestion_locks" in sql for sql in session.executed)
 
 
 @pytest.mark.asyncio
@@ -641,8 +640,7 @@ async def test_run_with_caller_session_and_lock_key_locks_the_caller_session() -
     assert count == 1
     assert not caller_session.committed
     assert session_factory.sessions == []
-    assert any("pg_advisory_lock" in sql for sql in caller_session.executed)
-    assert any("pg_advisory_unlock" in sql for sql in caller_session.executed)
+    assert any("ragnor_ingestion_locks" in sql for sql in caller_session.executed)
 
 
 @pytest.mark.asyncio
@@ -854,8 +852,7 @@ async def test_purge_on_empty_with_lock_key_locks_and_commits() -> None:
     assert await store.count() == 0
     session = session_factory.sessions[2]
     assert session.committed
-    assert any("pg_advisory_lock" in sql for sql in session.executed)
-    assert any("pg_advisory_unlock" in sql for sql in session.executed)
+    assert any("ragnor_ingestion_locks" in sql for sql in session.executed)
 
 
 @pytest.mark.asyncio

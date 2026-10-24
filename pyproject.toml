@@ -52,6 +52,9 @@ local-embeddings = []
 pgvector = [
     "sqlalchemy[asyncio]>=2.0.30",
 ]
+database = [
+    "sqlalchemy[asyncio]>=2.0.30",
+]
 qdrant = [
     "qdrant-client>=1.9",
 ]
@@ -71,7 +74,7 @@ opentelemetry = ["opentelemetry-api>=1.20"]
 mcp = ["mcp>=1.0.0"]
 tokenizers-tiktoken = ["tiktoken>=0.7,<1"]
 all = [
-    "ragnor[litellm,pgvector,qdrant,chroma,faiss,pdf,directory,watch,web,object-storage,rerank,opentelemetry,mcp,tokenizers-tiktoken]",
+    "ragnor[litellm,pgvector,database,qdrant,chroma,faiss,pdf,directory,watch,web,object-storage,rerank,opentelemetry,mcp,tokenizers-tiktoken]",
 ]
 
 

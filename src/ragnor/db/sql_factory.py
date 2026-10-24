@@ -11,18 +11,16 @@ inject their factory into the ingestion pipeline and stores.
 
 from __future__ import annotations
 
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import insert, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from ragnor.db.ports import SQLFactory, SessionProvider
-
-logger = logging.getLogger(__name__)
+from ragnor.db.schema import ingestion_locks
 
 
 class SQLAlchemyFactory(SQLFactory):
@@ -64,48 +62,33 @@ class SQLAlchemyFactory(SQLFactory):
 
     @asynccontextmanager
     async def advisory_lock(self, session: Any, key: str) -> AsyncIterator[None]:
-        """Hold a PostgreSQL advisory lock keyed by ``key``.
+        """Serialize a source using a row lock in the caller's transaction.
 
-        The lock is session-level and taken with
-        ``pg_advisory_lock(hashtext(:key))``, so concurrent
-        ingestion of the same source -- across instances or
-        tasks -- is serialized on the database. Hosts on another
-        database subclass :class:`SQLFactory` and override this
-        method with their locking primitive.
-
-        Ordering contract:
-
-        * the lock is taken on the session the pipeline
-          transacts on;
-        * on failure the transaction is rolled back *before*
-          the lock is released -- a failed statement leaves the
-          session in an aborted transaction, and any further
-          command on it raises ``InFailedSQLTransactionError``,
-          which would replace the real ingestion failure with a
-          confusing error about the advisory lock;
-        * a lock-cleanup failure must never mask the outcome:
-          ending the transaction closes the connection, which
-          releases a session-level advisory lock anyway, so the
-          cleanup failure is only logged.
+        The host applies the ``ragnor_ingestion_locks`` schema. Updating its
+        row acquires the database's write lock until the transaction ends.
+        This works through the same SQLAlchemy statement on supported SQL
+        databases and never creates a connection or schema implicitly.
         """
-        await session.execute(
-            text("SELECT pg_advisory_lock(hashtext(:source))"),
-            {"source": key},
-        )
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError("lock key must be non-empty")
         try:
+            statement = (
+                update(ingestion_locks)
+                .where(ingestion_locks.c.lock_key == key)
+                .values(generation=ingestion_locks.c.generation + 1)
+            )
+            changed = await session.execute(statement)
+            if changed.rowcount == 0:
+                try:
+                    async with session.begin_nested():
+                        await session.execute(insert(ingestion_locks).values(lock_key=key))
+                except IntegrityError:
+                    changed = await session.execute(statement)
+                    if changed.rowcount != 1:
+                        raise RuntimeError("source lock could not be acquired") from None
+            elif changed.rowcount != 1:
+                raise RuntimeError("database must report source-lock update counts")
             yield
         except Exception:
             await session.rollback()
             raise
-        finally:
-            try:
-                await session.execute(
-                    text("SELECT pg_advisory_unlock(hashtext(:source))"),
-                    {"source": key},
-                )
-            except SQLAlchemyError:
-                logger.warning(
-                    "Could not explicitly release the advisory lock for '%s'; "
-                    "releasing it by closing the session instead.",
-                    key,
-                )

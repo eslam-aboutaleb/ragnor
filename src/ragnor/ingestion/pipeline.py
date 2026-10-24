@@ -328,6 +328,7 @@ class IngestionPipeline:
             # The advisory lock is still taken on the
             # caller's session when a lock key is supplied.
             if sql_factory is not None:
+                assert lock_key is not None
                 async with sql_factory.advisory_lock(session, lock_key):
                     yield session
             else:
@@ -335,6 +336,7 @@ class IngestionPipeline:
             return
 
         if sql_factory is not None:
+            assert lock_key is not None
             async with (
                 self._session_factory() as owned_session,
                 sql_factory.advisory_lock(owned_session, lock_key),

@@ -13,7 +13,6 @@ that keeps sqlalchemy optional.
 
 from __future__ import annotations
 
-import logging
 import os
 import subprocess
 import sys
@@ -26,7 +25,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
 
 from ragnor.db.sql_factory import SQLAlchemyFactory, SQLFactory
 from ragnor.embeddings.dimensions import register_dimension
@@ -47,32 +45,6 @@ register_dimension("ragnor-factories-test-model", 4)
 
 SQLITE_URL = "sqlite+aiosqlite:///:memory:"
 SRC_DIR = str(Path(__file__).resolve().parents[1] / "src")
-
-
-class _ScriptedSession:
-    """Session that records executed SQL and scripted failures."""
-
-    def __init__(self, unlock_error: Exception | None = None) -> None:
-        self.executed: list[str] = []
-        self.events: list[str] = []
-        self._unlock_error = unlock_error
-
-    async def execute(self, statement: Any, params: Any = None) -> MagicMock:
-        sql = str(statement)
-        self.executed.append(sql)
-        if "pg_advisory_lock" in sql:
-            self.events.append("lock")
-        if "pg_advisory_unlock" in sql:
-            self.events.append("unlock")
-            if self._unlock_error is not None:
-                raise self._unlock_error
-        return MagicMock()
-
-    async def rollback(self) -> None:
-        self.events.append("rollback")
-
-    async def commit(self) -> None:
-        self.events.append("commit")
 
 
 # ---------------------------------------------------------------------------
@@ -117,52 +89,6 @@ async def test_fetch_all_binds_named_params() -> None:
             session, "SELECT name FROM items WHERE name = :name", {"name": "alpha"}
         )
         assert rows == [{"name": "alpha"}]
-
-
-# ---------------------------------------------------------------------------
-# SQLAlchemyFactory.advisory_lock: scripted session
-# ---------------------------------------------------------------------------
-
-
-async def test_advisory_lock_locks_and_unlocks() -> None:
-    session = _ScriptedSession()
-    factory = SQLAlchemyFactory()
-
-    async with factory.advisory_lock(session, "source-path"):
-        assert session.events == ["lock"]
-
-    assert session.events == ["lock", "unlock"]
-    assert any("pg_advisory_lock" in sql for sql in session.executed)
-    assert any("pg_advisory_unlock" in sql for sql in session.executed)
-
-
-async def test_advisory_lock_rolls_back_before_unlock_on_error() -> None:
-    session = _ScriptedSession()
-    factory = SQLAlchemyFactory()
-
-    with pytest.raises(RuntimeError, match="boom"):
-        async with factory.advisory_lock(session, "source-path"):
-            raise RuntimeError("boom")
-
-    # The rollback must run before the unlock: a failed statement
-    # leaves the session in an aborted transaction, and the unlock
-    # would otherwise raise InFailedSQLTransactionError.
-    assert session.events == ["lock", "rollback", "unlock"]
-
-
-async def test_advisory_lock_cleanup_failure_logged_not_raised(caplog) -> None:
-    session = _ScriptedSession(unlock_error=SQLAlchemyError("cleanup failed"))
-    factory = SQLAlchemyFactory()
-
-    # The block's outcome must surface, not the lock-cleanup
-    # failure: ending the transaction closes the connection,
-    # which releases a session-level advisory lock anyway.
-    with caplog.at_level(logging.WARNING, logger="ragnor.db.sql_factory"):
-        async with factory.advisory_lock(session, "source-path"):
-            pass
-
-    assert session.events == ["lock", "unlock"]
-    assert any("advisory lock" in record.message for record in caplog.records)
 
 
 # ---------------------------------------------------------------------------

@@ -6,7 +6,7 @@ This module intentionally does not import SQLAlchemy or any other provider.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from contextlib import AbstractAsyncContextManager
 from typing import Any, Protocol, runtime_checkable
 
 
@@ -92,7 +92,7 @@ class SQLFactory(ABC):
         """
 
     @abstractmethod
-    def advisory_lock(self, session: Any, key: str) -> AsyncIterator[None]:
+    def advisory_lock(self, session: Any, key: str) -> AbstractAsyncContextManager[None]:
         """Hold a database-level lock that serializes ``key``.
 
         Args:

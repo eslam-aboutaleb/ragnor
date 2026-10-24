@@ -4,6 +4,14 @@
 `RagnorBuilder(..., store=..., version_store=..., session_factory=..., production_mode=True)`
 for a host-controlled deployment with explicit adapter capabilities.
 
+For durable jobs, configure the database once in the host and pass its existing
+async session maker to `RelationalJobStoreFactory`. Bind that factory with
+`builder.with_job_persistence(database, scope=authenticated_scope,
+require_publication=True)` so ingestion sessions and the outbox share the same
+database binding. The host owns the engine, credentials, schema migrations and
+transaction settings; the SDK creates none of them. SQLite hosts should use
+modern transaction control so savepoints remain inside the outer transaction.
+
 ## Fail-before-write checks
 
 - Host supplies persistent store, version store, session provider and an
@@ -49,6 +57,7 @@ tenant scope as normal operations:
 ```python
 from ragnor import RagnorBuilder
 from ragnor.exceptions import ConfigurationError
+from ragnor.jobs.adapters.relational import RelationalJobStoreFactory
 
 async def check_dependencies() -> None:
     # strict=True distinguishes an empty index from an unavailable backend.
@@ -57,14 +66,17 @@ async def check_dependencies() -> None:
     if len(vector) != configured_dimension:
         raise ConfigurationError("embedding provider returned an unexpected dimension")
 
+database = RelationalJobStoreFactory(tenant_sessions)
 builder = RagnorBuilder.production(
     embedder,
     embedding_model=model_name,
     embedding_dim=configured_dimension,
     store=vector_store,
     version_store=version_store,
-    session_factory=tenant_sessions,
+    session_factory=database,
     sql_factory=host_sql,
+).with_job_persistence(
+    database, scope=authenticated_scope, require_publication=True
 ).with_startup_check(check_dependencies, timeout_seconds=10.0)
 
 async with await builder.build() as rag:
