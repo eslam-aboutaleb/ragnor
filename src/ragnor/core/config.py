@@ -13,7 +13,12 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
-from ragnor.core.exceptions import ConfigurationError, sanitize_message  # noqa: F401
+from ragnor.core.exceptions import ConfigurationError, sanitize_message as _sanitize_message
+
+
+def sanitize_message(message: str) -> str:
+    """Keep the historical config-module redaction import available."""
+    return _sanitize_message(message)
 
 
 class DeploymentMode(StrEnum):
