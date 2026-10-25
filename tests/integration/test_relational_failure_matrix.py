@@ -49,10 +49,14 @@ async def test_same_host_owned_failure_matrix(dialect: str, tmp_path) -> None:  
             await connection.run_sync(metadata.create_all)
 
         payload = {"scope": scope, "idempotency_key": "rollback"}
-        with pytest.raises(RuntimeError, match="abort"):
+
+        async def abort_host_transaction() -> None:
             async with first_sessions() as session, session.begin():
                 await first.enqueue(payload, session=session)
                 raise RuntimeError("abort")
+
+        with pytest.raises(RuntimeError, match="abort"):
+            await abort_host_transaction()
         assert await first.get_status_counts() == {}
 
         for number in range(12):

@@ -47,7 +47,7 @@ from ragnor.core.exceptions import (
     ConfigurationError,
     OperationTimeoutError,
     RagnorError,
-    sanitize_message,  # noqa: F401 - re-exported by ragnor.builder
+    sanitize_message as _sanitize_message,
 )
 from ragnor.ingestion.pipeline import (
     IngestionPipeline,
@@ -82,6 +82,12 @@ if TYPE_CHECKING:
 
 DEFAULT_EMBEDDING_MODEL = "local"
 """Embedding model name the builder defaults to."""
+
+
+def sanitize_message(message: str) -> str:
+    """Keep the historical builder-module redaction import available."""
+    return _sanitize_message(message)
+
 
 DEFAULT_CHUNK_SIZE = 600
 """Default sliding-window chunk size (words per chunk)."""
