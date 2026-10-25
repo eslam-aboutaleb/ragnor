@@ -60,7 +60,7 @@ jobs:
     name: Publish qualified distribution
     if: github.event_name == 'release'
     needs: [verify-release, qualify]
-    uses: eslam-aboutaleb/ci-workflows/.github/workflows/publish-pypi.yml@4c4fe5ab336debb608fcee263a875d58bd14acc3
+    uses: eslam-aboutaleb/ci-workflows/.github/workflows/publish-pypi.yml@9dd9f26536a6644bca1f03a492d6bb5d9acfc0a6
     permissions:
       contents: read
     with:
