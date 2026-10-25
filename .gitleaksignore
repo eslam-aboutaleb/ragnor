@@ -1,0 +1,18 @@
+# Exact historical false positives from the shared full-history scan.
+# Keep exceptions scoped to commit, file, rule, and line so new findings still fail.
+
+# Synthetic database passwords used to verify configuration repr redaction.
+3078ac364bc7a45c11d85ebb1ea7bb8c27c15dec:tests/test_sdk_production_startup.py:database-connection-password:89
+3078ac364bc7a45c11d85ebb1ea7bb8c27c15dec:tests/test_sdk_production_startup.py:database-connection-password:98
+
+# Synthetic DSN and API tokens used to verify exception sanitization.
+487548eb74099a88348268b5358cfa56612b48a5:tests/test_sdk_error_taxonomy.py:database-connection-password:68
+487548eb74099a88348268b5358cfa56612b48a5:tests/test_sdk_error_taxonomy.py:generic-api-key:75
+487548eb74099a88348268b5358cfa56612b48a5:tests/test_sdk_error_taxonomy.py:generic-api-key:83
+
+# Disposable PostgreSQL service credentials for the CI contract database.
+6e29f4edce5e600ef5a5f67eb2462bec478bfef3:.github/workflows/ci.yml:database-connection-password:100
+
+# Synthetic provider tokens used to verify rejection of credential-shaped input.
+1da48e0e45e4b2f24b03901ee5244cf923d7cff2:tests/test_tools_validation.py:slack-bot-token:44
+1da48e0e45e4b2f24b03901ee5244cf923d7cff2:tests/test_tools_validation.py:gitlab-pat:43
