@@ -49,7 +49,7 @@ ragnor is a RAG _subsystem_, not an application. so **any** host application can
 | **Vector stores**    | Any vector database behind one `VectorStore` ABC — five built in (`memory`, `pgvector`, `qdrant`, `chroma`, `faiss`), all selectable via `settings.vector_store_provider` and loaded lazily so driver deps stay optional; bring your own (Milvus, Weaviate, …) |
 | **Hybrid retrieval** | Dense vector similarity + sparse keyword search, fused with Reciprocal Rank Fusion (RRF)                                                                                                                                                                       |
 | **Ingestion**        | Content-hash snapshot comparison (idempotent re-ingest), versioned chunks, optional advisory-lock serialization                                                                                                                                                |
-| **Jobs**             | Outbox pattern with `FOR UPDATE SKIP LOCKED` claiming, retry/backoff, dead-letter, stale-job reclaim                                                                                                                                                           |
+| **Jobs**             | Outbox pattern with atomic claiming, retry/backoff, dead-letter, stale-job reclaim                                                                                                                                                           |
 | **Evaluation**       | Recall@K / Precision@K / MRR retrieval metrics; heuristic and LLM-as-judge answer scoring                                                                                                                                                                      |
 | **Extensibility**    | Case-insensitive provider registries for embedders, chunkers, and vector stores                                                                                                                                                                                |
 | **Security**         | Strict SQL-identifier allowlist; all values bound as parameters                                                                                                                                                                                                |
@@ -243,7 +243,6 @@ ragnor reads its configuration through the **`RagSettings` protocol** — your e
 | `job_stale_after_seconds`          | `float` | Stale-job reclaim threshold                                                                                            |
 | `worker_id`                        | `str`   | Drainer identity stamped into `locked_by`                                                                              |
 | `ingest_on_startup`                | `bool`  | Host startup ingestion flag                                                                                            |
-| `database_url`                     | `str`   | Fallback session factory for the pgvector store; fallback URL for the Qdrant store                                     |
 
 Two fields are optional and read via `getattr`: `embedding_provider` (default `"litellm"`, selects the embedder provider) and `llm_model` (read by the LLM judge). A third optional field, `rag_distance_metric` (default `"l2"`, selects the vector-store distance metric — see [Distance metrics](docs/vector-stores.md#distance-metrics)), is also read via `getattr`, so a settings object keeps satisfying the protocol whether or not it declares it. The protocol is `@runtime_checkable`, so host applications validate their settings at start-up with a plain `isinstance(settings, RagSettings)`. A `SettingsProvider` protocol (any object with a `get_settings()` method) is also available for accessor-style hosts.
 
@@ -468,7 +467,7 @@ The pipeline builds an `IngestionSnapshot` from the source hash, the embedding m
 
 ### Advisory locking
 
-`advisory_lock(session, key)` holds a session-level PostgreSQL advisory lock via `pg_advisory_lock(hashtext(key))`, serializing concurrent ingestion of the same source across instances and tasks. This is the one PostgreSQL-specific piece of ingestion: on another database stack, call `pipeline.run(..., lock_key=None)` — the pipeline takes no lock when no key is given — and serialize ingestion in your own infrastructure. On failure the transaction is rolled back **before** the lock is released — a failed statement leaves the session in an aborted transaction, and any further command would raise `InFailedSQLTransactionError`, masking the real failure. A lock-cleanup failure is only logged: ending the transaction releases the lock anyway.
+`SQLAlchemyFactory.advisory_lock(session, key)` serializes ingestion of a source with a row in the host-owned `ragnor_ingestion_locks` table. The update holds a write lock for the caller's transaction. The host must apply the schema before ingestion. On failure the factory rolls back the transaction so the original error remains visible.
 
 ### Version storage (host-implemented)
 
@@ -482,7 +481,7 @@ Hosts whose search index cannot share the version-table transaction should use t
 
 ## Job outbox and drainer
 
-The outbox pattern decouples row insertion from background processing: a job row is written in the **same transaction** as the row it refers to, and a drainer worker claims pending jobs with `FOR UPDATE SKIP LOCKED`, processes them, and records the outcome.
+The outbox pattern decouples row insertion from background processing: a job row is written in the **same transaction** as the row it refers to, and a drainer worker atomically claims pending jobs, processes them, and records the outcome. The built-in relational adapter uses conditional SQLAlchemy Core updates with fenced leases; the host supplies the engine, session factory, and migrations.
 
 ### Enqueue
 
@@ -527,9 +526,13 @@ await drain_forever(
 main(store, processor, interval=5.0, batch_size=10, worker_id="worker-1")
 ```
 
-Multiple drainers run concurrently: `SKIP LOCKED` keeps two workers from processing the same job, so the drainer scales horizontally without coordination. A failing pass is logged and retried on the next tick — a transient outage does not terminate the worker.
+Multiple drainers run concurrently: atomic claims keep two workers from processing the same job. A failing pass is logged and retried on the next tick — a transient outage does not terminate the worker.
 
 The job table itself is host-owned: `EmbeddingJobStore` (claim, mark, enqueue, reclaim) and `JobProcessor` (the per-job work) are protocols the host implements.
+
+For the built-in SQLAlchemy Core adapter, see [host-owned SQL outbox](docs/sql-outbox.md)
+for one-time database binding, migrations, supported transaction settings,
+tenant scope, worker retries, and retention.
 
 ---
 
@@ -622,7 +625,7 @@ All lookups are case-insensitive; unknown names raise `KeyError` listing the reg
 
 ### Abstract factories
 
-Two abstract factories sit above the registries. `SQLFactory` is the seam for every SQL operation — sessions, queries, mutations, and advisory locking; inject a custom implementation via `sql_factory=` on `IngestionPipeline` and `PgVectorStore` to run ragnor on another stack:
+Two abstract factories sit above the registries. `SQLFactory` is the seam for queries, mutations, and source locking; inject a custom implementation via `sql_factory=` on `IngestionPipeline` and `PgVectorStore` to run ragnor on another stack. The host creates and injects its own session factory separately:
 
 ```python
 from contextlib import asynccontextmanager
@@ -631,7 +634,6 @@ from ragnor.db.sql_factory import SQLFactory
 
 
 class MySqlFactory(SQLFactory):
-    def create_session_factory(self, database_url): ...
     async def fetch_all(self, session, statement, params=None): ...
     async def fetch_scalar(self, session, statement, params=None): ...
     async def execute(self, session, statement, params=None): ...
@@ -682,9 +684,9 @@ The built-in pgvector store builds raw SQL (the hybrid query needs CTEs, window 
 
 **Warning: `No embedding dimension registered for model '...'`** — The model is not in the dimension registry, so ragnor assumed 1536. If that is wrong, call `register_dimension(model, dimension)` at start-up; otherwise the fallback is safe.
 
-**`RuntimeError: PgVectorStore needs a session_factory or settings with a database_url`** — The store has no way to open its own sessions. Pass `session_factory` or `settings` carrying a `database_url`.
+**`RuntimeError: PgVectorStore needs a session_factory`** — Pass the host-owned session factory.
 
-**`RuntimeError: QdrantStore needs a url, a client, or settings with a database_url pointing at the Qdrant server`** — The Qdrant store has no way to reach a server. Pass `url` (and `api_key` for authenticated servers), inject a `client`, or pass `settings` whose `database_url` points at the Qdrant server.
+**`RuntimeError: QdrantStore needs an explicit url or injected client`** — Pass `url` (and `api_key` for authenticated servers) or inject a host-owned `client`.
 
 **`ModuleNotFoundError: No module named 'sqlalchemy'`** (or `'qdrant_client'` / `'chromadb'` / `'faiss'`) — A vector backend was used without installing its extra. Run `pip install -e ".[pgvector]"` (or `.[qdrant]`, `.[chroma]`, `.[faiss]`; `pip install -e ".[test]"` includes the pgvector dependency).
 
@@ -703,9 +705,9 @@ The built-in pgvector store builds raw SQL (the hybrid query needs CTEs, window 
 - **Drainer** — the background worker that claims pending outbox jobs, processes them, and records the outcome.
 - **Snapshot** — an `IngestionSnapshot` capturing everything that determines whether a stored index is current (source hash, embedding model and dimension, chunker version and tunables); comparing snapshots makes ingestion idempotent.
 - **Strict mode** — opt-in `strict=True` behavior where store failures raise `RetrievalError` instead of being swallowed into empty results.
-- **SKIP LOCKED** — the `FOR UPDATE SKIP LOCKED` clause that lets concurrent drainers claim different pending jobs without blocking each other.
-- **Advisory lock** — a PostgreSQL application-level lock (`pg_advisory_lock`) used to serialize ingestion of the same source across instances and tasks.
-- **SQL factory** — the `SQLFactory` interface every SQL operation goes through (sessions, queries, mutations, advisory locking); `SQLAlchemyFactory` is the built-in implementation, and hosts subclass it to target another stack.
+- **Atomic claim** — a storage adapter's concurrency-safe transition from pending to processing; the relational adapter uses conditional updates and fenced leases.
+- **Source lock** — a host-database row lock used to serialize ingestion of the same source across instances and tasks.
+- **SQL factory** — the `SQLFactory` interface for queries, mutations, and source locking; `SQLAlchemyFactory` is the built-in implementation, while the host owns session creation.
 - **Vector store factory** — the `VectorStoreFactory` interface that creates vector stores; `RegistryVectorStoreFactory` is the default, selecting the backend from the provider registry.
 - **tsvector / pgvector** — PostgreSQL extensions for full-text search (tokenized text matched with `tsquery`) and vector similarity (L2 distance via the `<->` operator), respectively.
 - **retrieval_fn** — the injected async callable `(query: str) -> list[result dicts]` that evaluation runs against; the host supplies it, ragnor never imports it.

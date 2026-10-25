@@ -332,9 +332,6 @@ class _RecordingLockFactory(SQLFactory):
     def __init__(self, events: list[str]) -> None:
         self._events = events
 
-    def create_session_factory(self, database_url: str) -> Any:
-        raise NotImplementedError
-
     async def fetch_all(
         self,
         session: Any,

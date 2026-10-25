@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, cast
@@ -25,6 +26,7 @@ from sqlalchemy import (
     Table,
     UniqueConstraint,
     and_,
+    delete,
     func,
     inspect,
     insert,
@@ -156,12 +158,35 @@ class RelationalEmbeddingJobStore:
         self._schema_validated = False
 
     async def validate_schema(self) -> None:
-        """Fail before claiming when the host database lacks required tables or row counts."""
+        """Fail before claiming unless the host has a qualified SQL transaction setup."""
         if self._schema_validated:
             return
         required = (jobs, active_generations, generation_reservations, ingestion_locks)
 
         def check(connection: Any) -> None:
+            dialect = connection.dialect
+            if (dialect.name, dialect.driver) not in {
+                ("postgresql", "asyncpg"),
+                ("sqlite", "aiosqlite"),
+            }:
+                raise RuntimeError(
+                    "distributed outbox is qualified only for PostgreSQL/asyncpg and "
+                    "file-backed SQLite/aiosqlite; use a separately qualified host adapter "
+                    "for this database"
+                )
+            isolation = connection.get_isolation_level().upper()
+            if dialect.name == "postgresql" and isolation != "READ COMMITTED":
+                raise RuntimeError("PostgreSQL outbox requires READ COMMITTED isolation")
+            if dialect.name == "sqlite":
+                databases = connection.exec_driver_sql("PRAGMA database_list").all()
+                if not any(row[1] == "main" and row[2] for row in databases):
+                    raise RuntimeError("distributed SQLite outbox requires a file-backed database")
+                if isolation != "SERIALIZABLE":
+                    raise RuntimeError("SQLite outbox requires SERIALIZABLE isolation")
+                if connection.exec_driver_sql("PRAGMA read_uncommitted").scalar() != 0:
+                    raise RuntimeError("SQLite outbox requires read_uncommitted=OFF")
+                if connection.exec_driver_sql("PRAGMA busy_timeout").scalar() <= 0:
+                    raise RuntimeError("SQLite outbox requires a positive busy_timeout")
             if not connection.dialect.supports_sane_rowcount:
                 raise RuntimeError("database driver must report conditional UPDATE row counts")
             inspector = inspect(connection)
@@ -197,7 +222,34 @@ class RelationalEmbeddingJobStore:
         async with self._sessions() as session:
             connection = await session.connection()
             await connection.run_sync(check)
+            dialect_name = connection.dialect.name
+        if dialect_name == "sqlite":
+            await self._validate_savepoint_rollback()
         self._schema_validated = True
+
+    async def _validate_savepoint_rollback(self) -> None:
+        """Prove SQLite SAVEPOINT writes are rolled back by the outer transaction."""
+        probe_key = f"ragnor-rollback-probe-{uuid4()}"
+        async with self._sessions() as session, session.begin():
+            async with session.begin_nested():
+                await session.execute(insert(ingestion_locks).values(lock_key=probe_key))
+            await session.rollback()
+        async with self._sessions() as session:
+            persisted = (
+                await session.execute(
+                    select(ingestion_locks.c.lock_key).where(
+                        ingestion_locks.c.lock_key == probe_key
+                    )
+                )
+            ).scalar_one_or_none()
+        if persisted is not None:
+            async with self._sessions() as session, session.begin():
+                await session.execute(
+                    delete(ingestion_locks).where(ingestion_locks.c.lock_key == probe_key)
+                )
+            raise RuntimeError(
+                "SQLite host transaction control must keep savepoints inside outer rollback"
+            )
 
     @staticmethod
     def _from_row(row: Any) -> JobPayload:
@@ -274,7 +326,7 @@ class RelationalEmbeddingJobStore:
         if limit == 0:
             return []
         await self.validate_schema()
-        for attempt in range(4):
+        for attempt in range(20):
             try:
                 async with self._sessions() as session, session.begin():
                     now = await _database_now(session)
@@ -324,9 +376,10 @@ class RelationalEmbeddingJobStore:
                                 chosen.append(self._from_row(row))
                     return chosen
             except OperationalError:
-                if attempt == 3:
+                if attempt == 19:
                     raise
-                await asyncio.sleep(0.02 * (attempt + 1))
+                jitter = 0.5 + secrets.randbelow(1000) / 1000
+                await asyncio.sleep(min(0.025 * 2**attempt, 0.5) * jitter)
         return []
 
     async def claim_pending(self, limit: int, worker_id: str) -> list[JobPayload]:

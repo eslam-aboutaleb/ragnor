@@ -1,7 +1,7 @@
 """Abstract SQL factory -- the seam between ragnor and any SQL database.
 
-Every SQL operation ragnor performs -- session creation, queries,
-mutations, and advisory locking -- goes through the
+Every SQL operation ragnor performs -- queries, mutations,
+and source locking -- goes through the
 :class:`SQLFactory` interface. The built-in
 :class:`SQLAlchemyFactory` implements it with SQLAlchemy, which
 works with any SQLAlchemy dialect (PostgreSQL, SQLite, MySQL, ...).
@@ -17,19 +17,12 @@ from typing import Any
 
 from sqlalchemy import insert, text, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-from ragnor.db.ports import SQLFactory, SessionProvider
+from ragnor.db.ports import SQLFactory
 from ragnor.db.schema import ingestion_locks
 
 
 class SQLAlchemyFactory(SQLFactory):
     """SQL factory backed by SQLAlchemy -- works with any SQLAlchemy dialect."""
-
-    def create_session_factory(self, database_url: str) -> SessionProvider:
-        """Build a session factory bound to a new async engine."""
-        engine = create_async_engine(database_url)
-        return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     async def fetch_all(
         self,

@@ -28,7 +28,6 @@ class _MinimalSettings:
     job_stale_after_seconds: float = 300.0
     worker_id: str = "test-worker"
     ingest_on_startup: bool = False
-    database_url: str = "sqlite+aiosqlite:///:memory:"
 
 
 class _MinimalProvider:
@@ -76,7 +75,6 @@ def test_rag_settings_declares_every_required_field() -> None:
         "job_stale_after_seconds",
         "worker_id",
         "ingest_on_startup",
-        "database_url",
     }
     # ``__protocol_attrs__`` exists on Python 3.12+; on 3.11 the
     # protocol's declared annotations carry the same attribute set.
@@ -97,7 +95,6 @@ def test_a_pydantic_style_settings_class_satisfies_the_protocol() -> None:
     @runtime_checkable
     class _PydanticLike(Protocol):
         embedding_model: str
-        database_url: str
 
     class _HostSettings:
         embedding_model = "text-embedding-3-small"
@@ -110,7 +107,6 @@ def test_a_pydantic_style_settings_class_satisfies_the_protocol() -> None:
         job_stale_after_seconds = 300.0
         worker_id = "worker-1"
         ingest_on_startup = False
-        database_url = "postgresql+asyncpg://u:p@h/db"
 
     assert isinstance(_HostSettings(), _PydanticLike)
     assert isinstance(_HostSettings(), RagSettings)

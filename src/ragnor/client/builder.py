@@ -47,7 +47,7 @@ from ragnor.core.exceptions import (
     ConfigurationError,
     OperationTimeoutError,
     RagnorError,
-    sanitize_message,
+    sanitize_message,  # noqa: F401 - re-exported by ragnor.builder
 )
 from ragnor.ingestion.pipeline import (
     IngestionPipeline,
@@ -111,17 +111,14 @@ class BuilderSettings:
     job_stale_after_seconds: float = 300.0
     worker_id: str = "ragnor-builder"
     ingest_on_startup: bool = False
-    database_url: str = ""
 
     def __repr__(self) -> str:
         masked_key = "***" if self.openai_api_key else ""
-        masked_url = sanitize_message(self.database_url) if self.database_url else ""
         return (
             f"BuilderSettings(embedding_model={self.embedding_model!r}, "
             f"rag_distance_threshold={self.rag_distance_threshold!r}, "
             f"vector_store_provider={self.vector_store_provider!r}, "
-            f"openai_api_key={masked_key!r}, "
-            f"database_url={masked_url!r})"
+            f"openai_api_key={masked_key!r})"
         )
 
 
