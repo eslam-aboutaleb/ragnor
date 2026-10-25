@@ -19,9 +19,16 @@ permissions:
   contents: read
 
 jobs:
+  commit-messages:
+    name: Commit message format
+    uses: eslam-aboutaleb/ci-workflows/.github/workflows/commit-messages.yml@4c4fe5ab336debb608fcee263a875d58bd14acc3
+    permissions:
+      contents: read
+      pull-requests: read
+
   python:
     name: Shared Python quality
-    uses: eslam-aboutaleb/ci-workflows/.github/workflows/python.yml@6ee99d0643c40945d4d00a80462b6250897509c3
+    uses: eslam-aboutaleb/ci-workflows/.github/workflows/python.yml@4c4fe5ab336debb608fcee263a875d58bd14acc3
     with:
       project-dir: .
       manager: pip
@@ -228,7 +235,7 @@ jobs:
 
   security:
     name: Shared security analysis
-    uses: eslam-aboutaleb/ci-workflows/.github/workflows/security.yml@6ee99d0643c40945d4d00a80462b6250897509c3
+    uses: eslam-aboutaleb/ci-workflows/.github/workflows/security.yml@4c4fe5ab336debb608fcee263a875d58bd14acc3
     permissions:
       contents: read
       actions: read
@@ -240,7 +247,7 @@ jobs:
 
   workflow-validation:
     name: Shared workflow validation
-    uses: eslam-aboutaleb/ci-workflows/.github/workflows/workflow-lint.yml@6ee99d0643c40945d4d00a80462b6250897509c3
+    uses: eslam-aboutaleb/ci-workflows/.github/workflows/workflow-lint.yml@4c4fe5ab336debb608fcee263a875d58bd14acc3
 
   optional-backends:
     name: Optional Backend (${{ matrix.extra }})
@@ -315,7 +322,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-    needs: [python, architecture-contracts, sdk-consumer, typing-contracts, adapter-contracts, tokenizer-contracts, sql-contracts, security, workflow-validation, optional-backends]
+    needs: [commit-messages, python, architecture-contracts, sdk-consumer, typing-contracts, adapter-contracts, tokenizer-contracts, sql-contracts, security, workflow-validation, optional-backends]
     if: always()
     steps:
       - name: Require every qualification job to pass
