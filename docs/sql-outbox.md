@@ -56,6 +56,12 @@ separate migration role for DDL. Enforce tenant authorization at the host
 boundary and, where available, database row policies; SDK scope predicates
 are a safety boundary but do not authenticate the caller. Keep migration and
 application roles from bypassing those policies during request handling.
+For PostgreSQL, the worker's table grants are `SELECT, INSERT, UPDATE` on
+`ragnor_embedding_jobs`, `ragnor_active_generations`, and
+`ragnor_ingestion_locks`, and `SELECT, INSERT` on
+`ragnor_generation_reservations`. The retention/maintenance role owns any
+`DELETE` privilege. Apply equivalent least-privilege controls on other hosts;
+SQLite relies on filesystem access and process isolation rather than SQL roles.
 
 ## Qualified deployments
 
@@ -83,8 +89,11 @@ def begin_sqlite(connection):
 Use that pair only for a SQLite engine. SQLite serializes file writers; more
 workers may increase contention instead of throughput. Claims use conditional
 updates and fenced leases. Busy/operational claim failures retry with bounded
-backoff; after exhaustion they raise to the host. Set connection, statement,
-and process timeouts in the host, monitor retry failures, and rerun the real
+backoff: at most 20 claim attempts, exponential delay starting at 25 ms,
+capped at 500 ms with jitter. After exhaustion the error reaches the host.
+Set connection and statement timeouts in the host so one blocked attempt does
+not outlive the worker lease. Set the worker's processing deadline below the
+lease or renew it during long work. Monitor retry failures and rerun the real
 database contract tests for your driver versions. A backend other than the two
 qualified combinations needs a separately tested host adapter; it is not
 silently accepted as distributed-safe merely because SQLAlchemy can connect.
@@ -93,11 +102,24 @@ The host decides retention. Do not purge pending, processing, or retryable
 failed jobs. Purging completed jobs also removes their idempotency record, so
 retain them for at least the maximum replay window or maintain a separate
 deduplication record. Keep active generations and generation reservations for
-as long as their keys can be replayed. Back up these tables with the host's
-other authoritative state.
+as long as their keys can be replayed. A host using an external vector service
+also cleans up orphaned staged vectors only after the corresponding job or
+publication attempt can no longer win its lease/fence; validate readers against
+the committed active generation until cleanup completes. Back up these tables
+with the host's other authoritative state.
 
 CI runs the same failure matrix on real PostgreSQL and file-backed SQLite,
 including separate worker processes, killed-worker replay, fencing, duplicate
 enqueue, rollback, reservations, publication order, tenant isolation, and
 reconnection. `benchmarks/relational_outbox_profile.py` records 1/2/4-worker
 throughput for each database without treating one machine's result as an SLA.
+In a local 80-job run on 25 October 2026, observed jobs per second were:
+
+| Host database | 1 worker | 2 workers | 4 workers |
+| --- | ---: | ---: | ---: |
+| PostgreSQL/asyncpg | 177 | 436 | 489 |
+| SQLite/aiosqlite | 141 | 188 | 186 |
+
+The SQLite two-worker run assigned all 80 jobs to one worker, illustrating
+writer serialization and scheduling variability. Re-run the benchmark with
+your storage, pool, workload, and worker placement before sizing a deployment.
