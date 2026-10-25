@@ -68,9 +68,8 @@ class DomainSettings:
     subclasses its own settings base (e.g. pydantic
     ``BaseSettings``) and adds these fields. Override the
     domain fields (embedding model, provider names, distance
-    threshold, ``database_url``) to adapt the template.
-    ``database_url`` stays empty for the offline demo — point
-    it at PostgreSQL when using the pgvector backend. Validate
+    threshold) to adapt the template. For SQL storage the host creates
+    one engine and injects its sessions. Validate
     at start-up with ``isinstance(settings, RagSettings)``.
     """
 
@@ -85,7 +84,6 @@ class DomainSettings:
     job_stale_after_seconds: float = 300.0
     worker_id: str = "domain-worker"
     ingest_on_startup: bool = False
-    database_url: str = ""
 
 
 def _fake_embed(text: str) -> list[float]:

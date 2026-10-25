@@ -3,7 +3,7 @@
 The reclaim engine lives in ragnor; these tests drive it
 through the fake in-memory store. The host adapter's
 database behavior (real ``embedding_jobs`` rows,
-``FOR UPDATE SKIP LOCKED``) remains covered by the host
+atomic claim behavior remains covered by the host
 application's own integration suite.
 
 A drainer that dies mid-upsert leaves its rows locked in

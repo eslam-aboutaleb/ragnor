@@ -1,14 +1,4 @@
-"""Session provider protocol and standalone session factory.
-
-ragnor talks to databases through the :class:`SessionProvider`
-protocol: any callable that returns an async session context
-manager works structurally. The host application keeps its own
-engine and session factory (including its NullPool test
-behavior); :func:`create_session_factory` is the standalone
-helper for projects that use ragnor without the host
-application. It delegates to the default
-:class:`ragnor.db.sql_factory.SQLAlchemyFactory`.
-"""
+"""Host-owned session provider protocol and deprecated URL helper."""
 
 from __future__ import annotations
 
@@ -16,18 +6,13 @@ from ragnor.db.ports import SessionProvider
 
 
 def create_session_factory(database_url: str) -> SessionProvider:
-    """Build a session factory bound to a new async engine.
+    """Reject legacy URL binding; the host must inject its session factory.
 
-    Args:
-        database_url: SQLAlchemy async database URL (for example
-            ``postgresql+asyncpg://user:pass@host/db``).
-
-    Returns:
-        A session factory. Each call yields an independent
-        ``AsyncSession`` with ``expire_on_commit=False``. The caller
-        owns the engine's lifecycle; ragnor creates no module-level
-        singletons.
+    The import path remains for a migration window, but never opens an
+    engine. Construct the engine and sessions in the host, then pass the
+    sessions to the builder and relational store factory.
     """
-    from ragnor.db.sql_factory import SQLAlchemyFactory  # noqa: PLC0415
-
-    return SQLAlchemyFactory().create_session_factory(database_url)
+    raise RuntimeError(
+        "create_session_factory(database_url) is removed: the host must create "
+        "and own its engine and async session factory, then inject the sessions"
+    )

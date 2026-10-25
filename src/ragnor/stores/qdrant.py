@@ -29,7 +29,7 @@ under the store's ``id_field``.
 
 Configuration (no host imports): the store receives everything
 through constructor arguments. The Qdrant client is created
-lazily from ``url``/``api_key`` (or ``settings.database_url``)
+lazily from the explicit ``url``/``api_key``
 on first use, or injected directly via ``client`` for hosts
 and tests that manage their own client.
 
@@ -154,11 +154,8 @@ class QdrantStore(HybridVectorStore):
                 vectors. Required; pass the dimension configured
                 for the active embedding model.
             url: Qdrant server URL (e.g. ``http://localhost:6333``).
-                Falls back to ``settings.database_url``.
             api_key: API key for authenticated Qdrant servers.
-            settings: Host settings; ``database_url`` is used as
-                the Qdrant URL when ``url`` is omitted, and the
-                optional ``rag_distance_metric`` field selects the
+            settings: Host settings; the optional ``rag_distance_metric`` field selects the
                 metric when ``metric`` is omitted.
             embedding_fn: Async callable that embeds a list of
                 texts, used to auto-embed queries.
@@ -208,21 +205,14 @@ class QdrantStore(HybridVectorStore):
         """Return the Qdrant client, creating it on first use.
 
         Raises:
-            RuntimeError: If no client was injected and no URL
-                is available from ``url`` or ``settings``.
+            RuntimeError: If no client was injected and no explicit URL is available.
         """
         if self._client is None:
             from qdrant_client import AsyncQdrantClient  # noqa: PLC0415
 
-            url = self._url
-            if url is None and self._settings is not None:
-                url = self._settings.database_url
-            if not url:
-                raise RuntimeError(
-                    "QdrantStore needs a url, a client, or settings with "
-                    "a database_url pointing at the Qdrant server"
-                )
-            self._client = AsyncQdrantClient(url=url, api_key=self._api_key)
+            if not self._url:
+                raise RuntimeError("QdrantStore needs an explicit url or injected client")
+            self._client = AsyncQdrantClient(url=self._url, api_key=self._api_key)
         return self._client
 
     async def _ensure_collection(self) -> None:

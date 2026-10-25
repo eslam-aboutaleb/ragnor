@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ragnor.db.session import create_session_factory
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from ragnor.stores.pgvector import PgVectorStore
 from ragnor.types import RetrievalError
 
@@ -116,29 +116,33 @@ async def test_hybrid_search_strict_nonexistent_table_raises():
     database_url = _test_database_url()
     if database_url is None:
         pytest.skip("RAGNOR_TEST_DATABASE_URL is not set")
-    store = PgVectorStore(
-        table_name="ragnor_03_nonexistent_table",
-        id_field="id",
-        embedding_dim=1536,
-        session_factory=create_session_factory(database_url),
-    )
-    with pytest.raises(RetrievalError):
-        await store.hybrid_search(
-            query="water damage",
-            embedding=[0.0] * 1536,
-            n_results=5,
-            threshold=1.3,
-            strict=True,
+    engine = create_async_engine(database_url)
+    try:
+        store = PgVectorStore(
+            table_name="ragnor_03_nonexistent_table",
+            id_field="id",
+            embedding_dim=1536,
+            session_factory=async_sessionmaker(engine, expire_on_commit=False),
         )
-    assert (
-        await store.hybrid_search(
-            query="water damage",
-            embedding=[0.0] * 1536,
-            n_results=5,
-            threshold=1.3,
+        with pytest.raises(RetrievalError):
+            await store.hybrid_search(
+                query="water damage",
+                embedding=[0.0] * 1536,
+                n_results=5,
+                threshold=1.3,
+                strict=True,
+            )
+        assert (
+            await store.hybrid_search(
+                query="water damage",
+                embedding=[0.0] * 1536,
+                n_results=5,
+                threshold=1.3,
+            )
+            == []
         )
-        == []
-    )
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -147,12 +151,16 @@ async def test_count_strict_nonexistent_table_raises():
     database_url = _test_database_url()
     if database_url is None:
         pytest.skip("RAGNOR_TEST_DATABASE_URL is not set")
-    store = PgVectorStore(
-        table_name="ragnor_03_nonexistent_table",
-        id_field="id",
-        embedding_dim=1536,
-        session_factory=create_session_factory(database_url),
-    )
-    with pytest.raises(RetrievalError):
-        await store.count(strict=True)
-    assert await store.count() == 0
+    engine = create_async_engine(database_url)
+    try:
+        store = PgVectorStore(
+            table_name="ragnor_03_nonexistent_table",
+            id_field="id",
+            embedding_dim=1536,
+            session_factory=async_sessionmaker(engine, expire_on_commit=False),
+        )
+        with pytest.raises(RetrievalError):
+            await store.count(strict=True)
+        assert await store.count() == 0
+    finally:
+        await engine.dispose()
