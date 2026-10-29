@@ -10,6 +10,13 @@ from html.parser import HTMLParser
 from io import BytesIO
 from typing import Any
 
+from ragnor.ingestion.extraction_types import (
+    ExtractionRegion,
+    ExtractionTable,
+    ExtractionWord,
+    extraction_evidence_hash,
+)
+
 
 class PageExtractionStatus(StrEnum):
     EXTRACTED = "extracted"
@@ -32,6 +39,14 @@ class PageExtractionOutcome:
     has_drawing: bool = False
     provider: str = "pdf"
     version: str = "3"
+    words: tuple[ExtractionWord, ...] = field(default=(), repr=False)
+    tables: tuple[ExtractionTable, ...] = field(default=(), repr=False)
+    regions: tuple[ExtractionRegion, ...] = ()
+    diagnostics: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def evidence_sha256(self) -> str:
+        return extraction_evidence_hash(self)
 
     @property
     def complete(self) -> bool:
