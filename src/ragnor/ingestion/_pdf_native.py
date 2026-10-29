@@ -95,17 +95,27 @@ def extract_native(data, baseline, config, budget):
                 page = original.crop(original.mediabox)
                 objects = page.extract_words(**config["word_settings"])
                 budget.add("words", len(objects))
-                words = tuple(
-                    ExtractionWord(
-                        word["text"],
-                        _box((word["x0"], word["top"], word["x1"], word["bottom"]), page),
-                    )
-                    for word in objects
-                )
-                budget.add("text_chars", sum(len(word.text) for word in words))
-                tables = tuple(
-                    _table(t, page, budget) for t in page.find_tables(config["table_settings"])
-                )
+                words, unlocated_words = [], 0
+                for word in objects:
+                    try:
+                        words.append(
+                            ExtractionWord(
+                                word["text"],
+                                _box((word["x0"], word["top"], word["x1"], word["bottom"]), page),
+                            )
+                        )
+                    except ValueError:
+                        unlocated_words += 1
+                words = tuple(words)
+                budget.add("text_chars", sum(len(word["text"]) for word in objects))
+                tables, rejected_tables = [], 0
+                for detected in page.find_tables(config["table_settings"]):
+                    try:
+                        tables.append(_table(detected, page, budget))
+                    except (ValueError, KeyError):
+                        # Ambiguous vendor grids must not erase all page text.
+                        rejected_tables += 1
+                tables = tuple(tables)
                 layout = analysis.pages[evidence.page - 1].crop(original.mediabox)
                 regions = tuple(
                     ExtractionRegion(
@@ -113,9 +123,15 @@ def extract_native(data, baseline, config, budget):
                     )
                     for obj in layout.objects.get("textboxhorizontal", [])
                 )
-                text = _text(words, tables, config["include_tables"])
+                text = (
+                    " ".join(word["text"] for word in objects)
+                    if unlocated_words
+                    else _text(words, tables, config["include_tables"])
+                )
                 status = evidence.status
-                if text and status != PageExtractionStatus.EXTRACTED:
+                if text and (
+                    rejected_tables or unlocated_words or status != PageExtractionStatus.EXTRACTED
+                ):
                     status = PageExtractionStatus.PARTIAL
                 elif not text and status == PageExtractionStatus.EXTRACTED:
                     status = PageExtractionStatus.FAILED
@@ -125,7 +141,7 @@ def extract_native(data, baseline, config, budget):
                         status=status,
                         text=text,
                         provider="pdfplumber",
-                        version="1",
+                        version="2",
                         words=words,
                         tables=tables,
                         regions=regions,
@@ -136,6 +152,8 @@ def extract_native(data, baseline, config, budget):
                         else evidence.reason,
                         diagnostics={
                             "route": "native",
+                            "rejected_tables": rejected_tables,
+                            "unlocated_words": unlocated_words,
                             "verification": "pending"
                             if status == PageExtractionStatus.PARTIAL
                             else "not_required",
@@ -151,7 +169,7 @@ def extract_native(data, baseline, config, budget):
                         PageExtractionStatus.FAILED,
                         reason="native_page_failed",
                         provider="pdfplumber",
-                        version="1",
+                        version="2",
                     )
                 )
             finally:

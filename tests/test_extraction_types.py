@@ -100,3 +100,15 @@ def test_unknown_provider_error_text_cannot_become_a_public_failure_code():
     error = PDFExtractionError("PRIVATE_SOURCE_BODY")
     assert error.code == "provider_failed"
     assert "PRIVATE" not in str(error) + str(_error_record(error))
+
+
+def test_large_review_allowlist_has_bounded_identity_and_preserves_membership():
+    import json
+    from ragnor.ingestion import PdfPlumberExtractor
+
+    hashes = [f"{number:064x}" for number in range(2000)]
+    verifier = EvidenceAllowlistVerifier(hashes)
+    assert len(json.dumps(verifier.options)) < 300
+    assert verifier.options == EvidenceAllowlistVerifier(reversed(hashes)).options
+    assert verifier.options != EvidenceAllowlistVerifier(hashes[:-1]).options
+    PdfPlumberExtractor(verifier=verifier)

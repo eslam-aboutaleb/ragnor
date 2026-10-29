@@ -33,7 +33,7 @@ def _json_options(value: dict) -> dict:
 
 
 class _PDFAdapter(Extractor):
-    version = "1"
+    version = "2"
     _engine = ""
     limits: PDFExtractionLimits
 
@@ -250,5 +250,12 @@ class AutoPDFExtractor(_PDFAdapter):
         configs = [
             asdict(value) for value in (limits or PDFExtractionLimits(), native.limits, ocr.limits)
         ]
-        shared = PDFExtractionLimits(**{key: min(c[key] for c in configs) for key in configs[0]})
+        shared = PDFExtractionLimits(
+            **{
+                key: min(values)
+                if (values := [c[key] for c in configs if c[key] is not None])
+                else None
+                for key in configs[0]
+            }
+        )
         self._configure({"native": native._config, "ocr": ocr._config}, shared, verifier, policy)

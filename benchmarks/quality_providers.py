@@ -32,6 +32,7 @@ class QualityPage:
     verified_complete: bool | None = None
     raster_metrics: dict = field(default_factory=dict)
     cpu_seconds: float | None = None
+    evidence_sha256: str | None = None
 
 
 def rss(children=False) -> int:
@@ -258,7 +259,95 @@ def parse_tsv(raw: str, width: int, height: int) -> tuple[list[dict], list[dict]
     return words, [{"bbox": bounds} for bounds in blocks.values()]
 
 
+class SDKProvider:
+    """Measure installed SDK adapters, including their own worker deadline.
+
+    No duplicate extraction implementation and no outer timeout process that
+    could abandon the SDK worker's separate process group.
+    """
+
+    supports_layout = True
+    supports_tables = True
+
+    def __init__(self, *, engine="auto", language="eng", tessdata_dir=None):
+        from ragnor.ingestion.pdf_extractors import (  # noqa: PLC0415
+            AutoPDFExtractor,
+            PdfPlumberExtractor,
+            TesseractPDFExtractor,
+        )
+
+        self.runtime_attestations = {}
+        self.engine = engine
+        self.id = "sdk-" + engine
+        native = PdfPlumberExtractor()
+        ocr = TesseractPDFExtractor(language=language, tessdata_dir=tessdata_dir)
+        self.adapter = {"native": native, "ocr": ocr}.get(engine)
+        if engine == "auto":
+            self.adapter = AutoPDFExtractor(native=native, ocr=ocr)
+        if self.adapter is None:
+            raise ValueError("Unknown SDK engine")
+        self.supports_tables = engine != "ocr"
+
+    @property
+    def version(self):
+        return self.adapter.version
+
+    @property
+    def options(self):
+        return {**self.adapter.options, "runtime_attestations": self.runtime_attestations}
+
+    def extract_bounded(self, data, timeout):
+        from dataclasses import asdict, replace  # noqa: PLC0415
+
+        self.adapter.limits = replace(self.adapter.limits, timeout_seconds=timeout)
+        before = resource.getrusage(resource.RUSAGE_CHILDREN)
+        pages = self.adapter.extract_outcomes(data)
+        after = resource.getrusage(resource.RUSAGE_CHILDREN)
+        import json  # noqa: PLC0415
+
+        for page in pages:
+            runtime = page.diagnostics.get("runtime", {})
+            digest = hashlib.sha256(json.dumps(runtime, sort_keys=True).encode()).hexdigest()
+            self.runtime_attestations[digest] = runtime
+        result = [
+            QualityPage(
+                page=row.page,
+                text=row.text,
+                status=str(row.status),
+                words=[asdict(word) for word in row.words],
+                tables=[{"bbox": table.bbox, "html": table.to_html()} for table in row.tables]
+                if self.supports_tables
+                else None,
+                regions=[asdict(region) for region in row.regions],
+                verified_complete=row.complete,
+                evidence_sha256=row.evidence_sha256,
+            )
+            for row in pages
+        ]
+        if result:
+            result[0].cpu_seconds = (
+                after.ru_utime + after.ru_stime - before.ru_utime - before.ru_stime
+            )
+        return result
+
+    def extract_outcomes(self, data):
+        return self.extract_bounded(data, self.adapter.limits.timeout_seconds)
+
+
+class SDKNativeProvider(SDKProvider):
+    def __init__(self):
+        super().__init__(engine="native")
+
+
+class SDKOCRProvider(SDKProvider):
+    def __init__(self, **kwargs):
+        super().__init__(engine="ocr", **kwargs)
+
+
 PROVIDERS: dict[str, Any] = {
+    "sdk-native": SDKNativeProvider,
+    "sdk-ocr": SDKOCRProvider,
+    "sdk-auto": SDKProvider,
     "pypdf": PypdfProvider,
     "pdfplumber": PdfplumberProvider,
     "tesseract": TesseractProvider,

@@ -7,6 +7,8 @@ import json
 import os
 import signal
 import sys
+import threading
+import time
 from dataclasses import asdict, replace
 from importlib.metadata import PackageNotFoundError, version
 
@@ -61,7 +63,11 @@ def process(data, request):
     else:
         pages = baseline
     if engine in {"ocr", "auto"}:
-        selected = {page.page for page in pages if engine == "ocr" or not page.complete}
+        selected = {
+            page.page
+            for page in pages
+            if engine == "ocr" or (not page.complete and (not page.text.strip() or page.has_images))
+        }
         if selected:
             if os.name != "posix":
                 raise PDFExtractionError("provider_failed")
@@ -73,7 +79,16 @@ def process(data, request):
             merged = []
             for native in pages:
                 page = ocr.get(native.page, native)
-                if engine == "auto" and native.tables:
+                if engine == "auto" and native.text.strip() and not page.text.strip():
+                    # A failed OCR attempt must not erase recoverable native text.
+                    page = replace(
+                        native,
+                        diagnostics={
+                            **native.diagnostics,
+                            "ocr_fallback_status": str(page.status),
+                        },
+                    )
+                if engine == "auto" and native.tables and page.provider == "tesseract":
                     page = replace(
                         page,
                         tables=native.tables,
@@ -82,7 +97,17 @@ def process(data, request):
                     if page.text and config["native"]["include_tables"]:
                         page = replace(
                             page,
-                            text=page.text + "\n\n" + "\n".join(t.to_html() for t in native.tables),
+                            text=" ".join(
+                                word.text
+                                for word in page.words
+                                if not any(
+                                    t.bbox[0] <= (word.bbox[0] + word.bbox[2]) / 2 <= t.bbox[2]
+                                    and t.bbox[1] <= (word.bbox[1] + word.bbox[3]) / 2 <= t.bbox[3]
+                                    for t in native.tables
+                                )
+                            )
+                            + "\n\n"
+                            + "\n".join(t.to_html() for t in native.tables),
                         )
                 merged.append(page)
             pages = merged
@@ -94,6 +119,34 @@ def process(data, request):
         "page_count": len(baseline),
         "runtime": runtime,
     }
+
+
+def _watch_parent(parent_pid):
+    """Terminate the isolated worker group if its owning host disappears."""
+    while True:
+        time.sleep(0.25)
+        if os.getppid() != parent_pid:
+            os.killpg(os.getpgrp(), signal.SIGTERM)
+            time.sleep(1)
+            os.killpg(os.getpgrp(), signal.SIGKILL)
+
+
+def _set_resource_limits(limits):
+    if limits.max_memory_bytes is not None and not sys.platform.startswith("linux"):
+        raise PDFExtractionError("resource_limit")
+    if os.name != "posix":
+        return
+    import resource  # noqa: PLC0415
+
+    def ceiling(kind, requested):
+        # Preserve tighter deployment limits inherited from the host.
+        previous = resource.getrlimit(kind)
+        bounded = min([requested, *(value for value in previous if value >= 0)])
+        resource.setrlimit(kind, (bounded, bounded))
+
+    ceiling(resource.RLIMIT_FSIZE, limits.max_output_bytes)
+    if limits.max_memory_bytes is not None:
+        ceiling(resource.RLIMIT_AS, limits.max_memory_bytes)
 
 
 def main():
@@ -113,6 +166,11 @@ def main():
             try:
                 request = json.loads(sys.argv[1])
                 limits = PDFExtractionLimits(**request["limits"])
+                _set_resource_limits(limits)
+                if os.name == "posix":
+                    threading.Thread(
+                        target=_watch_parent, args=(request["parent_pid"],), daemon=True
+                    ).start()
                 data = sys.stdin.buffer.read(limits.max_bytes + 1)
                 result = process(data, request)
                 raw = json.dumps(result, ensure_ascii=True, allow_nan=False).encode()

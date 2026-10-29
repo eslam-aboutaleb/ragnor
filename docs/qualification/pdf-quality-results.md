@@ -199,3 +199,29 @@ The public transcriptions and controlled variants do not replace manual review.
 All PDFs, images, ground-truth text/HTML, manifests, predictions, raw JSON reports
 and review packets remain local and ignored. This document contains aggregate
 results only. See [metric definitions and commands](../extraction-benchmarks.md).
+
+## Actual SDK benchmark replay (2026-10-29)
+
+Adapter version 2 was measured directly through installed SDK APIs using only the existing local corpus, executable and traineddata. No documents or OCR models were downloaded. The native adapter covered 240 documents / 250 pages; the matched native, OCR and automatic comparison covered 89 documents / 99 pages. All four runs returned every expected page, with no document-level or page-level failures. A page needing OCR is an incomplete outcome, not successful extraction.
+
+The existing extended report labels its cohort `all`; the new runs label it `common`. Both select exactly the same 89 documents and 99 page identities from the same manifest hash. Page-set identity was checked explicitly. These labels are recorded unchanged; the strict comparison CLI rejects mismatched cohort labels.
+
+| Provider | Mean token recall | Mean region recall | Mean exact table-cell accuracy |
+| --- | ---: | ---: | ---: |
+| Standalone pdfplumber | 16.58% | 25.00% | 5.66% |
+| SDK native | 18.80% | 25.00% | 5.66% |
+| Standalone Tesseract | 73.12% | 78.52% | Unmeasured |
+| SDK OCR | 73.12% | 78.52% | Unmeasured |
+| SDK automatic | 65.56% | 66.63% | 5.66% |
+
+SDK OCR exactly matches every shared aggregate quality metric from the frozen standalone Tesseract report, including CER (39.83%), WER, word/number recovery, geometry/order and critical-field scores. Both use `ara+eng`, 200 DPI, PSM 3 and the same traineddata hashes. Ink coverage was not projected into this SDK benchmark report, so it is excluded from this equality assertion. Runtime package, executable and traineddata identities are recorded in the local reports.
+
+SDK automatic routing is **not accuracy-equivalent to OCR-only** on this selection. Native text/table retention changes recovery and representation. SDK text includes table HTML; its raw CER (77.25%, versus OCR 39.83%) also includes markup insertions and is not a pure visible-transcription comparison. The native full 250-page run achieved 71.97% token recall and 18.30% exact table-cell accuracy. These are observations on these selections, not production thresholds.
+
+On the matched cohort SDK native returned 30 partial pages and 69 needing OCR. SDK OCR and automatic each returned 98 partial pages and one needing OCR. No host verifier was supplied, so strict connector ingestion would withhold these documents. Raw-outcome quality measurements must not be confused with approved publication.
+
+The lexical retrieval contract remains weak: SDK OCR and automatic source/answer recall@5 is 4.76%; resolvable citations are 100%, and authorization/revision checks pass. This demonstrates citation safety, not satisfactory natural-question retrieval or answer quality.
+
+The local 50-page SDK review packet now includes source previews, reference text, actual SDK text/tables and exact evidence hashes. Reference approval and extraction approval are separate pending decisions. No reviewer or policy approval was generated. OCR-only matching does not close the independent-review, complex-table, handwriting, chart/formula, natural-QA or release-policy gaps.
+
+Worker RSS remains unmeasured; CPU accounting includes worker descendants. Runs shared the host with checks, so timings are not isolated production throughput measurements. Raw reports, predictions, previews and review decisions remain local and ignored.

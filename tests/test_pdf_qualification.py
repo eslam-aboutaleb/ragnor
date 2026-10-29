@@ -363,6 +363,28 @@ def test_packet_never_manufactures_review_or_policy_approval(tmp_path):
     policy = json.loads((tmp_path / "review/policy-template.json").read_text())
     assert policy["approved_by"] is None
     assert policy["allowed_reviewers"] == []
+    predictions = tmp_path / "predictions.json"
+    prediction = {
+        "document_id": "sample",
+        "page": 1,
+        "evidence_sha256": "a" * 64,
+        "status": "partial",
+        "text": "<script>untrusted</script>",
+        "tables": [],
+    }
+    predictions.write_text(json.dumps([prediction]))
+    reviewed = prepare_packet(
+        manifest, tmp_path / "sdk-review", count=1, predictions_path=predictions
+    )
+    assert reviewed["reviews"][0]["extraction_evidence_sha256"] == "a" * 64
+    assert reviewed["reviews"][0]["status"] == "pending"
+    assert reviewed["reviews"][0]["extraction_review_status"] == "pending"
+    assert reviewed["reviews"][0]["extraction_reviewer"] is None
+    markup = (tmp_path / "sdk-review/index.html").read_text()
+    assert "&lt;script&gt;" in markup and "<script>" not in markup
+    predictions.write_text(json.dumps([prediction, prediction]))
+    with pytest.raises(ValueError, match="unique pages"):
+        prepare_packet(manifest, tmp_path / "invalid-review", count=1, predictions_path=predictions)
 
 
 def test_region_instrumentation_preserves_pdf_text_stream_order():

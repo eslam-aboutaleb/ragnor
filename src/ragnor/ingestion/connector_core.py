@@ -343,6 +343,7 @@ def _outcome_pages(extractor: Any, data: bytes, source_name: str, result: LoadRe
             outcome.text,
             {
                 "page_extraction": {
+                    "evidence_sha256": outcome.evidence_sha256,
                     "provider": outcome.provider,
                     "version": outcome.version,
                     "status": str(outcome.status),

@@ -154,3 +154,31 @@ recovery remains a reason to review evidence, not to certify completeness.
 Underlying interfaces: [pdfplumber](https://github.com/jsvine/pdfplumber),
 [Tesseract](https://tesseract-ocr.github.io/tessdoc/Command-Line-Usage.html), and
 [PDFium's threading requirements](https://pypdfium2.readthedocs.io/en/stable/python_api.html).
+
+## Routing and evidence storage
+
+Adapter version 2 keeps native text and tables when a partial page has no image
+content. Drawing rules alone no longer trigger OCR. Pages with images or without
+usable native text still receive OCR. These routing decisions do not approve a
+page: uncertain visual content remains partial. Failed OCR preserves available
+native text. When native tables accompany OCR, words inside those table boxes
+are replaced with the native table HTML to avoid duplicate table values.
+Ambiguous table grids are rejected individually; the page retains its words and
+text and remains partial, with a `rejected_tables` diagnostic.
+
+Connector `RawDocument` metadata retains full page words, regions and tables.
+Vector-store chunks carry their counts and `evidence_sha256` instead of copying
+that geometry into every chunk. Hosts needing later geometry lookup must retain
+the original page evidence; Ragnor does not introduce an evidence database.
+Review allowlist configuration contains a digest and count of the approval set,
+so large host-reviewed allowlists do not exceed extractor configuration bounds.
+
+At most four optional PDF workers run concurrently per host Python process;
+waiting for a worker consumes the document deadline. On POSIX, worker and OCR
+output files have an OS-enforced file-size ceiling, and a watchdog terminates
+the worker process group if its owning host disappears. An optional
+`PDFExtractionLimits(max_memory_bytes=...)` applies a Linux `RLIMIT_AS` address
+space ceiling, inherited by OCR children. It is disabled by default; requesting
+it on another platform fails closed. This is not an RSS measurement or a total
+memory budget across concurrent workers. Container limits remain appropriate
+for deployment-wide resource control.

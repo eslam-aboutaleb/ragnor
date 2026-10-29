@@ -230,3 +230,43 @@ host-controlled files, not an identity provider or automatically generated appro
 An empty metric policy, absent price, unresolved citations, pending reviews or an
 unapproved baseline fails qualification. Baseline tolerance defaults to zero;
 production tolerances require maintainers' approval.
+
+## Benchmarking the SDK adapters offline
+
+`--provider sdk-native`, `sdk-ocr` and `sdk-auto` invoke the installed Ragnor SDK
+adapters. The benchmark uses the SDK's own bounded subprocess transport rather
+than wrapping it in another process timeout. Existing standalone provider names
+remain available for comparison. No dataset or model fetching occurs in this
+command; OCR requires an already installed executable and local traineddata.
+
+```sh
+python -m benchmarks.run_quality \
+  --manifest benchmarks/data/extended/comparison/quality-manifest.json \
+  --provider sdk-auto --cohort common \
+  --tesseract-language eng+ara --tessdata-dir benchmarks/data/extended/tessdata \
+  --output benchmarks/data/extended/comparison/sdk-auto-v6.json \
+  --predictions-out benchmarks/data/extended/comparison/sdk-auto-v6-predictions.json
+python -m benchmarks.qualification packet \
+  --manifest benchmarks/data/extended/comparison/quality-manifest.json \
+  --predictions benchmarks/data/extended/comparison/sdk-auto-v6-predictions.json \
+  --output benchmarks/data/extended/sdk-review-v6 --count 50
+```
+
+The review packet shows SDK text and tables beside source previews and reference
+annotations. Each pending review binds the reference and exact SDK evidence hash.
+Reference `status` and `extraction_review_status` are separate pending decisions;
+approving the reference does not approve SDK output. It does not approve the
+reference, extraction or release policy automatically.
+After actual review, the host may supply approved extraction evidence hashes to
+`EvidenceAllowlistVerifier`; authentication and storage remain host responsibilities.
+Re-extraction after changes to source, models, adapter version or evidence requires
+fresh approval. The release qualification command still requires an explicitly
+approved policy and human reviews; extraction success alone does not satisfy it.
+
+SDK text includes native table HTML. CER/WER score that actual returned text,
+including markup, while table structure/value metrics score table HTML separately.
+Those text error rates cannot be interpreted as a pure visible-transcription
+comparison with standalone providers returning plain text. SDK CPU usage includes
+reaped worker descendants; RSS is left unmeasured rather than reporting the
+benchmark parent's memory as the worker's. Runs sharing a host with other work
+are unsuitable for isolated throughput or latency claims.
