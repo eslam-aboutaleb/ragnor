@@ -27,6 +27,7 @@ Issues = "https://github.com/eslam-aboutaleb/ragnor/issues"
 [project.optional-dependencies]
 test = [
     "pytest>=8.3",
+    "pytest-cov>=7.1,<8",
     "numpy>=1.24",
     "litellm>=1.84",
     "pytest-asyncio>=0.24",
@@ -35,6 +36,9 @@ test = [
     "sqlalchemy[asyncio]>=2.0.30",
     "asyncpg>=0.29",
     "pypdf>=5,<7",
+    "pdfplumber>=0.11.10,<0.12",
+    "pypdfium2>=5.14,<6",
+    "pillow>=12,<14",
     "pathspec>=0.12,<2",
     "httpx>=0.28,<1",
     "mcp>=1.0.0",
@@ -65,6 +69,10 @@ faiss = [
     "faiss-cpu>=1.8",
 ]
 pdf = ["pypdf>=5,<7"]
+pdf-layout = ["pypdf>=5,<7", "pdfplumber>=0.11.10,<0.12"]
+pdf-ocr = ["pypdf>=5,<7", "pypdfium2>=5.14,<6", "pillow>=12,<14"]
+pdf-auto = ["ragnor[pdf-layout,pdf-ocr]"]
+pdf-llm = ["ragnor[pdf-ocr,litellm]"]
 directory = ["pathspec>=0.12,<2"]
 watch = ["watchfiles>=0.24"]
 web = ["httpx>=0.28,<1"]
@@ -74,7 +82,7 @@ opentelemetry = ["opentelemetry-api>=1.20"]
 mcp = ["mcp>=1.0.0"]
 tokenizers-tiktoken = ["tiktoken>=0.7,<1"]
 all = [
-    "ragnor[litellm,pgvector,database,qdrant,chroma,faiss,pdf,directory,watch,web,object-storage,rerank,opentelemetry,mcp,tokenizers-tiktoken]",
+    "ragnor[litellm,pgvector,database,qdrant,chroma,faiss,pdf,pdf-layout,pdf-ocr,pdf-auto,pdf-llm,directory,watch,web,object-storage,rerank,opentelemetry,mcp,tokenizers-tiktoken]",
 ]
 
 
@@ -87,6 +95,9 @@ python_files = ["test_*.py"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
 pythonpath = ["src"]
+
+[tool.coverage.run]
+patch = ["subprocess"]
 
 [tool.ruff]
 target-version = "py311"

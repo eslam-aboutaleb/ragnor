@@ -20,6 +20,7 @@ from ragnor.ingestion.connector_core import (
     SourceStatus,
     collect_pages,
     extract_documents,
+    merge_extraction_quality,
     parse_checkpoint_since,
 )
 
@@ -217,7 +218,7 @@ class ObjectStorageConnector:
                 result.skipped.append(SkipRecord(relative, "unsupported_extension"))
                 continue
             if item.get("size") is not None and item.size > self.max_file_size:
-                result.skipped.append(SkipRecord(relative, "oversized"))
+                self._oversized(result, relative, suffix == "pdf")
                 continue
             try:
                 data, response = await asyncio.to_thread(self._read, item)
@@ -228,7 +229,12 @@ class ObjectStorageConnector:
                 result.complete = False
                 continue
             if data is None:
-                result.skipped.append(SkipRecord(relative, "oversized"))
+                self._oversized(
+                    result,
+                    relative,
+                    suffix == "pdf"
+                    or response.get("ContentType", "").split(";", 1)[0] == "application/pdf",
+                )
                 continue
             extracted = extract_documents(
                 data,
@@ -243,6 +249,7 @@ class ObjectStorageConnector:
                 extractor=self.extractor,
             )
             result.extend(extracted)
+            merge_extraction_quality(result.metadata, extracted.metadata)
             result.skipped.extend(extracted.skipped)
             result.errors.extend(extracted.errors)
             if extracted.errors:
@@ -252,6 +259,15 @@ class ObjectStorageConnector:
             result.status = SourceStatus.EMPTY
         self._last_result = result
         return result
+
+    @staticmethod
+    def _oversized(result: LoadResult, relative: str, pdf: bool) -> None:
+        if pdf:
+            result.errors.append({"reason": "pdf_size_limit"})
+            result.complete = False
+            result.status = SourceStatus.INCOMPLETE
+        else:
+            result.skipped.append(SkipRecord(relative, "oversized"))
 
     async def load_all(
         self, *, max_pages: int | None = None, page_size: int | None = None

@@ -64,7 +64,10 @@ Successful empty scans use `SourceStatus.EMPTY`. Missing sources use `NOT_FOUND`
 permission/authentication failures use `INACCESSIBLE`, and temporary service or
 transport failures use `TRANSIENT`. These are not interchangeable with emptiness.
 `skipped` records represent intentional exclusions such as ignored, binary,
-oversized, unsupported, or no-text content. `errors` represent inability to
+unsupported content, size-policy exclusions for non-PDF files, or legacy
+custom-extractor no-text output. Recognized PDFs exceeding a connector size
+limit fail the scan; increasing file size must not authorize deletion of a
+previous revision. `errors` represent inability to
 establish an authoritative scan. A failed file is not evidence that it was deleted.
 
 An authoritative empty result is a no-op by default. The existing
@@ -112,11 +115,53 @@ part of the extractor options fingerprint. HTML removes obvious navigation,
 script/style, and landmark boilerplate conservatively, preserving article
 headings, visible link text, and link targets. It does not execute JavaScript.
 
-PDF extraction uses real PDF page-tree order. Each nonempty page retains its
-1-based `location['page']`; blank/scanned/no-extractable-text pages generate
-location-bearing skip records. Empty text does not prove that a page is scanned,
-so this is explicitly a no-text flag, not OCR detection. OCR is not included.
-Malformed documents or page-limit overflow are errors, never silent truncation.
+PDF extraction uses real PDF page-tree order. Each extracted page retains its
+1-based `location['page']`. Built-in PDF extraction now defaults to **strict**:
+only a page without content operations or annotations can be certified blank.
+Textless images, drawings, forms, annotations and unknown content need OCR or
+verification; a page combining text and visual content is partial. This is
+deliberately conservative: even a logo or decorative rule may require a custom
+verified extractor. The pypdf adapter cannot certify table fidelity, reading order,
+or the semantic completeness of a text layer. Optional SDK OCR/layout adapters
+are available through explicit configuration; see [SDK PDF extractors](pdf-extractors.md).
+
+`PDFExtractor.extract_outcomes(data)` returns typed `PageExtractionOutcome`
+records with `extracted`, `verified_blank`, `needs_ocr`, `partial`, `failed`, or
+host-defined `policy_excluded` statuses. Connector results expose a bounded
+`metadata['extraction_quality']` summary (complete, page count, status counts),
+separate from traversal. The collector aggregates these summaries across files
+and pages. A successful traversal cannot override failed extraction quality.
+Only verified blanks or explicit exclusions produce intentional skip records.
+
+Under strict policy a single unverified page rejects **all pages of that PDF
+revision** with an incomplete, non-authoritative result. This prevents sync from
+replacing a prior complete revision and prevents `purge_on_empty=True` from
+deleting it. Other successfully extracted files in a non-authoritative sync can
+still be updated; absence never authorizes deletion. Malformed/encrypted/zero-page
+PDFs and page/byte-limit overflow also fail closed. Defaults are 1,000 pages and
+50,000,000 source bytes; configure `options['max_pages']` / `options['max_bytes']`.
+These bounds do not sandbox PDF decompression; isolate untrusted parsing in a
+host-managed worker with memory and execution limits.
+
+`PDFExtractor(options={'policy': 'review'})` withholds unverified revisions for
+host review. Explicit `allow_partial` returns available text with page provenance
+and incomplete quality; it never becomes authoritative and the legacy ingestion
+pipeline refuses it. A sync host opting into this policy may publish the partial
+document without deleting unseen documents. Choose this only when that tradeoff
+is intentional. There is no implicit OCR or review service.
+
+Migration: direct `extract()` and `extract_pages()` retain their string and
+`(page, text)` return types, including empty pages. They are legacy text views,
+not completeness certificates. Connector integrations use outcomes instead;
+custom extractors without outcomes retain their existing caller-owned contract.
+PDF extractor version 3 and effective policy/limits change fingerprints and force
+reindexing. Non-PDF records keep their existing fingerprint behavior.
+
+Diagnostics contain reason codes, page numbers, and a SHA-256 source identity,
+not document text, provider messages or signed URLs. Keep the original bytes in
+the host's private artifact store for retries; pass an opaque artifact reference
+through source metadata/provenance if needed. Ragnor does not retain PDF bytes in
+vector metadata or choose the host's artifact retention policy.
 
 Actual extractor identity, version, and effective options feed ingestion
 fingerprints. Original source provenance, source metadata, and location survive

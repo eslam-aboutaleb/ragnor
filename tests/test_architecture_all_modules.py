@@ -29,6 +29,9 @@ VENDOR_ROOTS = frozenset(
         "watchfiles",
         "mcp",
         "pypdf",
+        "pdfplumber",
+        "pypdfium2",
+        "PIL",
         "opentelemetry",
     }
 )
@@ -142,3 +145,23 @@ def test_advisory_lock_compatibility_imports_without_optional_sqlalchemy() -> No
 def test_checker_distinguishes_local_lazy_from_eager_imports() -> None:
     assert _eager_vendor_imports("import sqlalchemy\n") == ["sqlalchemy"]
     assert _eager_vendor_imports("def optional():\n    import sqlalchemy\n") == []
+
+
+def test_pdf_sdk_adapters_import_and_configure_without_optional_dependencies():
+    script = """
+import builtins, sys
+original = builtins.__import__
+def blocked(name, *args, **kwargs):
+    if name.split('.')[0] in {'pypdf', 'pdfplumber', 'pypdfium2', 'PIL'}:
+        raise ImportError('optional package blocked')
+    return original(name, *args, **kwargs)
+builtins.__import__ = blocked
+from ragnor.ingestion import AutoPDFExtractor, PdfPlumberExtractor, TesseractPDFExtractor
+for adapter in (AutoPDFExtractor(), PdfPlumberExtractor(), TesseractPDFExtractor()):
+    assert adapter.options['policy'] == 'strict'
+assert not any(name in sys.modules for name in ('pypdf', 'pdfplumber', 'pypdfium2', 'PIL'))
+"""
+    result = subprocess.run(  # noqa: S603 -- fixed interpreter and literal test script
+        [sys.executable, "-c", script], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stderr

@@ -14,6 +14,10 @@ when used.
 | `chroma` | Chroma vector storage |
 | `faiss` | Local FAISS indexing |
 | `pdf` | PDF text extraction |
+| `pdf-layout` | Native PDF text/regions and structured table cells/spans with pdfplumber |
+| `pdf-ocr` | PDF rendering and local OCR adapter; host installs Tesseract/language models |
+| `pdf-auto` | Native extraction with OCR fallback for uncertain pages |
+| `pdf-llm` | Hosted multimodal OCR through LiteLLM; no Tesseract or local OCR models required |
 | `directory` | Local directory extraction |
 | `watch` | File watching |
 | `web` | HTTP document loading |
@@ -29,7 +33,12 @@ when used.
 python -m pip install 'ragnor[qdrant]'
 python -m pip install 'ragnor[pgvector]'
 python -m pip install 'ragnor[tokenizers-tiktoken]'
+python -m pip install 'ragnor[pdf-auto]'
 ```
+
+See [SDK PDF extractors](../pdf-extractors.md) for structured outcomes, limits,
+host verification and ingestion examples. OCR success alone does not authorize
+publication; uncertain pages remain partial until accepted by host policy.
 
 Inject credentials and configure connections through your host application.
 Provider consistency, tenant authorization and network availability depend
