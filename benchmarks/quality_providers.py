@@ -7,9 +7,11 @@ import html
 import io
 import platform
 import resource
+import hashlib
+from pathlib import Path
 import shutil
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib.metadata import version
 from typing import Any
 
@@ -25,6 +27,11 @@ class QualityPage:
     tables: list[dict] | None = None
     python_peak_rss_bytes: int = 0
     ocr_peak_rss_bytes: int | None = None
+    regions: list[dict] | None = None
+    semantic_fields: dict | None = None
+    verified_complete: bool | None = None
+    raster_metrics: dict = field(default_factory=dict)
+    cpu_seconds: float | None = None
 
 
 def rss(children=False) -> int:
@@ -44,7 +51,13 @@ class PypdfProvider:
     def extract_outcomes(self, data: bytes) -> list[QualityPage]:
         outcomes = PDFExtractor().extract_outcomes(data)
         return [
-            QualityPage(row.page, row.text, str(row.status), python_peak_rss_bytes=rss())
+            QualityPage(
+                row.page,
+                row.text,
+                str(row.status),
+                python_peak_rss_bytes=rss(),
+                verified_complete=row.complete,
+            )
             for row in outcomes
         ]
 
@@ -53,14 +66,22 @@ class PdfplumberProvider:
     supports_layout = True
     supports_tables = True
     id = "pdfplumber"
-    options = {"use_text_flow": True, "table_strategy": "lines", "crop": "mediabox"}
+    options = {
+        "use_text_flow": True,
+        "table_strategy": "lines",
+        "crop": "mediabox",
+        "region_analysis": "separate laparams={}",
+    }
     version = property(lambda self: version("pdfplumber"))
 
     def extract_outcomes(self, data: bytes) -> list[QualityPage]:
         import pdfplumber  # noqa: PLC0415
 
         result = []
-        with pdfplumber.open(io.BytesIO(data)) as document:
+        with (
+            pdfplumber.open(io.BytesIO(data)) as document,
+            pdfplumber.open(io.BytesIO(data), laparams={}) as analysis_document,
+        ):
             for number, original_page in enumerate(document.pages, 1):
                 # Upstream annotations refer to MediaBox renders, not PDF CropBox.
                 page = original_page.crop(original_page.mediabox)
@@ -96,9 +117,20 @@ class PdfplumberProvider:
                     )
                     tables.append({"bbox": box(table.bbox), "html": markup})
                 text = " ".join(word["text"] for word in words)
+                analysis_page = analysis_document.pages[number - 1].crop(original_page.mediabox)
+                blocks = [
+                    {"bbox": box([block["x0"], block["top"], block["x1"], block["bottom"]])}
+                    for block in analysis_page.objects.get("textboxhorizontal", [])
+                ]
                 result.append(
                     QualityPage(
-                        number, text, "extracted" if text else "no_text", words, tables, rss()
+                        number,
+                        text,
+                        "extracted" if text else "no_text",
+                        words,
+                        tables,
+                        rss(),
+                        regions=blocks,
                     )
                 )
         return result
@@ -109,6 +141,23 @@ class TesseractProvider:
     supports_tables = False
     id = "tesseract"
     options = {"dpi": 200, "language": "eng", "psm": 3}
+
+    def __init__(self, *, language="eng", tessdata_dir: str | None = None):
+        self.tessdata_dir = tessdata_dir
+        self.options = {
+            "dpi": 200,
+            "language": language,
+            "psm": 3,
+            "renderer": "explicit_tsv",
+            "subprocess_timeout_seconds": 30,
+        }
+        if tessdata_dir:
+            self.options["traineddata_sha256"] = {
+                name: hashlib.sha256(
+                    (Path(tessdata_dir) / f"{name}.traineddata").read_bytes()
+                ).hexdigest()
+                for name in language.split("+")
+            }
 
     @staticmethod
     def executable():
@@ -123,6 +172,23 @@ class TesseractProvider:
             [self.executable(), "--version"], capture_output=True, text=True, check=True, timeout=5
         ).stdout.splitlines()[0]
 
+    def command(self):
+        command = [
+            self.executable(),
+            "stdin",
+            "stdout",
+            "-l",
+            self.options["language"],
+            "--psm",
+            "3",
+        ]
+        if self.tessdata_dir:
+            command.extend(["--tessdata-dir", self.tessdata_dir])
+        # A custom tessdata directory may contain models without configs/tsv.
+        # Select renderers explicitly instead of relying on that external file.
+        command.extend(["-c", "tessedit_create_tsv=1", "-c", "tessedit_create_txt=0"])
+        return command
+
     def extract_outcomes(self, data: bytes) -> list[QualityPage]:
         import pypdfium2 as pdfium  # noqa: PLC0415
 
@@ -131,31 +197,23 @@ class TesseractProvider:
             for number in range(len(document)):
                 page = document[number]
                 bitmap = page.render(scale=self.options["dpi"] / 72)
-                image = bitmap.to_pil()
+                image = bitmap.to_pil().copy()
                 output = io.BytesIO()
                 image.save(output, format="PNG")
                 width, height = image.size
                 bitmap.close()
                 page.close()
                 completed = subprocess.run(  # noqa: S603 -- host executable, fixed arguments, no shell
-                    [self.executable(), "stdin", "stdout", "-l", "eng", "--psm", "3", "tsv"],
+                    self.command(),
                     input=output.getvalue(),
                     capture_output=True,
                     check=True,
                     timeout=30,
                 )
-                words = []
-                for row in csv.DictReader(io.StringIO(completed.stdout.decode()), delimiter="\t"):
-                    if row["level"] != "5" or not row["text"].strip():
-                        continue
-                    x, y, w, h = (int(row[key]) for key in ["left", "top", "width", "height"])
-                    words.append(
-                        {
-                            "text": row["text"],
-                            "bbox": [x / width, y / height, (x + w) / width, (y + h) / height],
-                        }
-                    )
+                words, regions = parse_tsv(completed.stdout.decode(), width, height)
                 text = " ".join(word["text"] for word in words)
+                from benchmarks.coverage_metrics import ink_coverage  # noqa: PLC0415
+
                 result.append(
                     QualityPage(
                         number + 1,
@@ -165,9 +223,39 @@ class TesseractProvider:
                         None,
                         rss(),
                         rss(children=True),
+                        regions=regions,
+                        raster_metrics=ink_coverage(image, words),
                     )
                 )
         return result
+
+
+def parse_tsv(raw: str, width: int, height: int) -> tuple[list[dict], list[dict]]:
+    reader = csv.DictReader(io.StringIO(raw), delimiter="\t", quoting=csv.QUOTE_NONE)
+    required = {"level", "text", "left", "top", "width", "height", "block_num"}
+    if not required <= set(reader.fieldnames or []):
+        raise ValueError("OCR output is not the declared TSV protocol")
+    words, blocks = [], {}
+    for row in reader:
+        if None in row or any(row[key] is None for key in required):
+            raise ValueError("Malformed OCR word record")
+        if row["level"] != "5" or not row["text"].strip():
+            continue
+        x, y, w, h = (int(row[key]) for key in ["left", "top", "width", "height"])
+        words.append(
+            {
+                "text": row["text"],
+                "bbox": [x / width, y / height, (x + w) / width, (y + h) / height],
+            }
+        )
+        bounds = blocks.setdefault(row["block_num"], [1.0, 1.0, 0.0, 0.0])
+        bounds[:] = [
+            min(bounds[0], x / width),
+            min(bounds[1], y / height),
+            max(bounds[2], (x + w) / width),
+            max(bounds[3], (y + h) / height),
+        ]
+    return words, [{"bbox": bounds} for bounds in blocks.values()]
 
 
 PROVIDERS: dict[str, Any] = {

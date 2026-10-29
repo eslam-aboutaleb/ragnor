@@ -29,11 +29,15 @@ from benchmarks.quality_metrics import (
     validate_bbox,
 )
 from benchmarks.quality_providers import PROVIDERS, QualityPage
+from benchmarks.coverage_metrics import region_detection
+from benchmarks.semantic_metrics import score_fields
+from benchmarks.reference_schema import validate_prediction, validate_references
+from benchmarks.cost_accounting import cost_report
 
 
 def validate_manifest(path: Path) -> dict:
     manifest = json.loads(path.read_text(encoding="utf-8"))
-    if manifest["schema_version"] != 2 or not manifest["documents"]:
+    if manifest["schema_version"] not in {2, 3} or not manifest["documents"]:
         raise ValueError("Invalid quality manifest")
     ids = set()
     for doc in manifest["documents"]:
@@ -54,10 +58,30 @@ def validate_manifest(path: Path) -> dict:
                     raise ValueError("Duplicate region ID")
                 region_ids.add(region["id"])
                 validate_bbox(region["bbox"])
+        if manifest["schema_version"] == 3:
+            validate_references(doc)
+    probe_ids, queries = set(), set()
+    pages = {doc["document_id"]: len(doc["pages"]) for doc in manifest["documents"]}
+    for probe in manifest.get("qa_probes", []):
+        from benchmarks.rag_probes import search_key  # noqa: PLC0415
+
+        if any(
+            not isinstance(probe.get(field), str) or not probe[field].strip()
+            for field in ["id", "query", "answer"]
+        ):
+            raise ValueError("Invalid curated QA reference")
+        if probe["id"] in probe_ids or search_key(probe["query"]) in queries:
+            raise ValueError("Duplicate curated QA reference")
+        probe_ids.add(probe["id"])
+        queries.add(search_key(probe["query"]))
+        if type(probe.get("page")) is not int or not 1 <= probe["page"] <= pages.get(
+            probe.get("document_id"), 0
+        ):
+            raise ValueError("Curated QA references an unknown source page")
     return manifest
 
 
-def score_page(
+def score_page(  # noqa: PLR0915 -- separate observable page metrics and bounded adapters
     reference: dict,
     actual: QualityPage | None,
     *,
@@ -68,6 +92,7 @@ def score_page(
         layout_supported = actual is not None and actual.words is not None
     if tables_supported is None:
         tables_supported = actual is not None and actual.tables is not None
+    layout_supported = layout_supported and reference.get("geometry_ground_truth", True)
     scores = page_text_scores(reference["expected_text"], actual.text if actual else "")
     scores.update(
         {
@@ -79,7 +104,14 @@ def score_page(
         }
     )
     if layout_supported:
-        scores.update(layout_scores(reference["regions"], (actual.words or []) if actual else []))
+        by_id = {region["id"]: region for region in reference["regions"]}
+        ordered = [by_id[identity] for identity in reference.get("reading_order", list(by_id))]
+        scores.update(layout_scores(ordered, (actual.words or []) if actual else []))
+        scores.update(region_detection(reference["regions"], actual.regions if actual else []))
+    semantic = (
+        dict(actual.semantic_fields) if actual and actual.semantic_fields is not None else None
+    )
+    scores.update(actual.raster_metrics if actual else {})
     reference_tables = [r for r in reference["regions"] if r["category"] == "Table"]
     scores["reference_tables"] = len(reference_tables)
     if tables_supported:
@@ -119,6 +151,36 @@ def score_page(
                 values.append(zero)
                 scores["invalid_table_predictions"] = scores.get("invalid_table_predictions", 0) + 1
         scores["table_metrics"] = values
+        for field in reference.get("critical_fields", []):
+            table_id = field.get("table_region_id")
+            if table_id is None:
+                continue
+            semantic = semantic if semantic is not None else {}
+            ref_index = next(
+                (i for i, table in enumerate(reference_tables) if table["id"] == table_id), None
+            )
+            found = next((j for i, j in matches if i == ref_index), None)
+            if found is not None:
+                try:
+                    cell = (
+                        TableParser(actual_tables[found]["html"])
+                        .grid()
+                        .get((field["row"], field["col"]))
+                    )
+                    if cell is not None:
+                        semantic[field["id"]] = cell.text
+                except (ValueError, KeyError):
+                    pass  # Invalid tables already count as failed predictions above.
+    scores.update(score_fields(reference.get("critical_fields", []), semantic))
+    # A completeness claim must not hide an observable empty required region/page/table/field.
+    unsafe = bool(
+        scores.get("empty_text_regions", 0)
+        or scores.get("field_failures")
+        or (reference["expected_text"].strip() and (actual is None or not actual.text.strip()))
+        or (tables_supported and scores.get("matched_tables", 0) < scores["reference_tables"])
+    )
+    scores["completeness_claim"] = actual.verified_complete if actual else None
+    scores["unsafe_complete"] = bool(actual and actual.verified_complete is True and unsafe)
     return scores
 
 
@@ -144,6 +206,22 @@ def aggregate(rows: list[dict]) -> dict:
         "layout_scored_pages": len(layout),
         "table_capable_pages": len(table_rows),
         "mean_region_token_recall": mean("region_token_recall", layout),
+        "mean_region_precision": mean("region_precision", layout),
+        "mean_region_recall": mean("region_recall", layout),
+        "reference_region_count": sum(row.get("reference_region_count", 0) for row in layout),
+        "predicted_region_count": sum(row.get("predicted_region_count") or 0 for row in layout),
+        "mean_word_box_ink_coverage": mean("word_box_ink_coverage"),
+        "reference_fields": sum(row.get("reference_fields", 0) for row in rows),
+        "mean_field_task_accuracy": mean("field_task_accuracy"),
+        "mean_field_answer_coverage": mean("field_answer_coverage"),
+        "completeness_claims": sum(row.get("completeness_claim") is True for row in rows),
+        "unsafe_complete_pages": sum(row.get("unsafe_complete", False) for row in rows),
+        "observed_verification_false_negative_rate": (
+            sum(row.get("unsafe_complete", False) for row in rows)
+            / sum(row.get("completeness_claim") is True for row in rows)
+            if any(row.get("completeness_claim") is True for row in rows)
+            else None
+        ),
         "empty_text_regions": sum(row.get("empty_text_regions", 0) for row in layout),
         "reference_text_regions": sum(row.get("text_regions", 0) for row in layout),
         "mean_reading_order_pair_accuracy": mean("reading_order_pair_accuracy", layout),
@@ -162,11 +240,23 @@ def aggregate(rows: list[dict]) -> dict:
     }
 
 
-def run(path: Path, provider_name: str, *, timeout=60.0, cohort="all") -> dict:
+def run(  # noqa: PLR0913 -- explicit benchmark composition and host options
+    path: Path,
+    provider_name: str,
+    *,
+    timeout=60.0,
+    cohort="all",
+    provider_instance=None,
+    rag=True,
+    rag_limit=40,
+    cpu_usd_per_hour=None,
+    pricing_source=None,
+    predictions_out: Path | None = None,
+) -> dict:
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("Timeout must be positive and finite")
     manifest = validate_manifest(path)
-    provider = PROVIDERS[provider_name]()
+    provider = provider_instance or PROVIDERS[provider_name]()
     selected = manifest["documents"]
     if cohort == "common":
         selected = [
@@ -175,6 +265,7 @@ def run(path: Path, provider_name: str, *, timeout=60.0, cohort="all") -> dict:
             if doc["family"] != "public" or doc["document_id"] in manifest["stress_sources"]
         ]
     rows, failures, durations, peaks, ocr_peaks = [], [], [], [], []
+    predictions, cpu_times = {}, []
     for doc in selected:
         started = perf_counter()
         try:
@@ -196,13 +287,29 @@ def run(path: Path, provider_name: str, *, timeout=60.0, cohort="all") -> dict:
         durations.append(perf_counter() - started)
         by_page = {page.page: page for page in actual}
         for reference in doc["pages"]:
+            predicted = by_page.get(reference["page"])
+            if predicted is not None:
+                try:
+                    validate_prediction(predicted)
+                except ValueError:
+                    failures.append(
+                        {
+                            "document_id": doc["document_id"],
+                            "page": reference["page"],
+                            "reason": "invalid_prediction",
+                        }
+                    )
+                    predicted = None
             result = score_page(
                 reference,
-                by_page.get(reference["page"]),
+                predicted,
                 layout_supported=provider.supports_layout,
                 tables_supported=provider.supports_tables,
             )
             rows.append({"document_id": doc["document_id"], "family": doc["family"], **result})
+            if predicted is not None:
+                predictions[doc["document_id"], reference["page"]] = predicted
+        cpu_times.extend(page.cpu_seconds for page in actual if page.cpu_seconds is not None)
         peaks.extend(page.python_peak_rss_bytes for page in actual)
         ocr_peaks.extend(
             page.ocr_peak_rss_bytes for page in actual if page.ocr_peak_rss_bytes is not None
@@ -227,6 +334,11 @@ def run(path: Path, provider_name: str, *, timeout=60.0, cohort="all") -> dict:
         "fonttools",
         "apted",
         "rapidfuzz",
+        "rank-bm25",
+        "numpy",
+        "sympy",
+        "pyarrow",
+        "markdown-it-py",
     ]:
         try:
             versions[package] = version(package)
@@ -239,9 +351,26 @@ def run(path: Path, provider_name: str, *, timeout=60.0, cohort="all") -> dict:
         "versions": versions,
         "cohort": cohort,
         "timeout": timeout,
+        "retrieval": {"enabled": rag, "limit": rag_limit, "k": 5, "mode": "SDK BM25Plus"},
+        "pricing": {"cpu_usd_per_hour": cpu_usd_per_hour, "source": pricing_source},
     }
-    return {
-        "schema_version": 2,
+    if predictions_out is not None:
+        from dataclasses import asdict  # noqa: PLC0415
+
+        predictions_out.write_text(
+            json.dumps(
+                [
+                    {"document_id": doc, "page": page, **asdict(predicted)}
+                    for (doc, page), predicted in predictions.items()
+                ],
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+    from benchmarks.rag_probes import run_rag  # noqa: PLC0415
+
+    result = {
+        "schema_version": 3,
         "corpus_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
         "run_id": hashlib.sha256(
             json.dumps(
@@ -264,22 +393,30 @@ def run(path: Path, provider_name: str, *, timeout=60.0, cohort="all") -> dict:
         "pages": rows,
         "performance": {
             "document_p50_seconds": statistics.median(durations),
-            "document_p95_seconds": sorted(durations)[max(0, int(len(durations) * 0.95) - 1)],
+            "document_p95_seconds": sorted(durations)[math.ceil(len(durations) * 0.95) - 1],
             "provider_python_peak_rss_bytes": max(peaks, default=None),
             "ocr_process_peak_rss_bytes": max(ocr_peaks, default=None),
             "cost_per_1000_pages": None,
         },
+        "cost": cost_report(
+            sum(cpu_times) if len(cpu_times) == len(selected) else None,
+            len(rows),
+            cpu_usd_per_hour=cpu_usd_per_hour,
+            pricing_source=pricing_source,
+        ),
+        "retrieval": run_rag({**manifest, "documents": selected}, predictions, limit=rag_limit)
+        if rag
+        else None,
         "qualification": "experimental; no production release threshold or complete human signoff",
         "unmeasured": [
             "chart/formula semantics",
-            "real scan degradation distribution",
-            "Arabic/RTL",
-            "handwriting",
-            "downstream embedding retrieval",
-            "authenticated citation resolution",
-            "provider cost",
+            "population-wide scan/language/handwriting generalization beyond the selected corpus",
+            "downstream semantic embedding/answer models (lexical SDK path is measured)",
+            "host billing rate unless supplied explicitly",
         ],
     }
+    result["performance"]["cost_per_1000_pages"] = result["cost"]["total_usd_per_1000_pages"]
+    return result
 
 
 def main():
@@ -289,8 +426,33 @@ def main():
     parser.add_argument("--cohort", choices=["all", "common"], default="all")
     parser.add_argument("--timeout", type=float, default=60)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--no-rag", action="store_true")
+    parser.add_argument("--rag-limit", type=int, default=40)
+    parser.add_argument("--cpu-usd-per-hour", type=float)
+    parser.add_argument("--pricing-source")
+    parser.add_argument("--predictions-out", type=Path)
+    parser.add_argument("--tesseract-language", default="eng")
+    parser.add_argument("--tessdata-dir")
     args = parser.parse_args()
-    result = run(args.manifest, args.provider, timeout=args.timeout, cohort=args.cohort)
+    from benchmarks.quality_providers import TesseractProvider  # noqa: PLC0415
+
+    provider = (
+        TesseractProvider(language=args.tesseract_language, tessdata_dir=args.tessdata_dir)
+        if args.provider == "tesseract"
+        else None
+    )
+    result = run(
+        args.manifest,
+        args.provider,
+        timeout=args.timeout,
+        cohort=args.cohort,
+        provider_instance=provider,
+        rag=not args.no_rag,
+        rag_limit=args.rag_limit,
+        cpu_usd_per_hour=args.cpu_usd_per_hour,
+        pricing_source=args.pricing_source,
+        predictions_out=args.predictions_out,
+    )
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps({"documents": result["documents"], "failures": len(result["failures"])}))
 

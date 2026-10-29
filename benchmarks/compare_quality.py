@@ -7,8 +7,19 @@ import json
 import math
 from pathlib import Path
 
-LOWER_IS_BETTER = {"mean_page_cer", "mean_page_wer", "missing_pages", "invalid_table_predictions"}
+LOWER_IS_BETTER = {
+    "mean_page_cer",
+    "mean_page_wer",
+    "missing_pages",
+    "invalid_table_predictions",
+    "unsafe_complete_pages",
+    "empty_text_regions",
+}
 HIGHER_IS_BETTER = {
+    "mean_region_precision",
+    "mean_region_recall",
+    "mean_field_task_accuracy",
+    "mean_field_answer_coverage",
     "mean_token_recall",
     "mean_numeric_token_recall",
     "mean_region_token_recall",
@@ -33,6 +44,15 @@ def compare(baseline: dict, candidate: dict, *, tolerance=0.0) -> dict:
         raise ValueError("Reports use different cohorts")
     if set(baseline["families"]) != set(candidate["families"]):
         raise ValueError("Reports use different family coverage")
+    if baseline.get("schema_version") != candidate.get("schema_version"):
+        raise ValueError("Reports use different scoring schemas")
+    if baseline.get("pages") and candidate.get("pages"):
+
+        def keys(report):
+            return {(row["document_id"], row["page"]) for row in report["pages"]}
+
+        if keys(baseline) != keys(candidate):
+            raise ValueError("Reports use different page identities")
     checks = []
     sections = {"all": (baseline["summary"], candidate["summary"])}
     sections.update(
@@ -62,6 +82,40 @@ def compare(baseline: dict, candidate: dict, *, tolerance=0.0) -> dict:
                     "before": before,
                     "after": after,
                     "passed": passed,
+                }
+            )
+    left_rag, right_rag = baseline.get("retrieval"), candidate.get("retrieval")
+    if left_rag:
+        if not right_rag or any(
+            left_rag.get(key) != right_rag.get(key)
+            for key in ["k", "probe_origin", "total_queries"]
+        ):
+            raise ValueError("Reports use different retrieval probe configurations")
+        if {row["probe_id"] for row in left_rag.get("probes", [])} != {
+            row["probe_id"] for row in right_rag.get("probes", [])
+        }:
+            raise ValueError("Reports use different retrieval queries")
+        for metric in ["recall_at_k", "mrr", "citation_resolution_rate", "source_answer_hit_rate"]:
+            before, after = left_rag.get(metric), right_rag.get(metric)
+            if before is not None:
+                checks.append(
+                    {
+                        "family": "retrieval",
+                        "metric": metric,
+                        "before": before,
+                        "after": after,
+                        "passed": isinstance(after, (int, float))
+                        and math.isfinite(after)
+                        and after + tolerance >= before,
+                    }
+                )
+        if (left_rag.get("authorization_and_revision") or {}).get("passed") is True:
+            checks.append(
+                {
+                    "family": "retrieval",
+                    "metric": "authorization_and_revision",
+                    "passed": (right_rag.get("authorization_and_revision") or {}).get("passed")
+                    is True,
                 }
             )
     failures_passed = len(candidate["failures"]) <= len(baseline["failures"])

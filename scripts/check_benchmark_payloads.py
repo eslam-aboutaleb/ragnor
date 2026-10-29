@@ -10,10 +10,37 @@ def forbidden_payloads(paths: list[str]) -> list[str]:
     result = []
     for name in paths:
         path = PurePosixPath(name)
-        if name.startswith(("benchmarks/data/", "benchmarks/fixtures/")) or (
-            name.startswith(("benchmarks/", "docs/qualification/"))
-            and path.suffix.lower()
-            in {".pdf", ".png", ".jpg", ".jpeg", ".parquet", ".json", ".jsonl", ".zip"}
+        if (
+            ".reference." in path.name
+            or (
+                name.startswith("benchmarks/")
+                and path.suffix == ".txt"
+                and path.name != "requirements.txt"
+            )
+            or name.startswith(("benchmarks/data/", "benchmarks/fixtures/"))
+            or (
+                name.startswith(("benchmarks/", "docs/qualification/"))
+                and path.suffix.lower()
+                in {
+                    ".pdf",
+                    ".png",
+                    ".jpg",
+                    ".jpeg",
+                    ".parquet",
+                    ".json",
+                    ".jsonl",
+                    ".zip",
+                    ".html",
+                    ".csv",
+                    ".tsv",
+                    ".xml",
+                    ".docx",
+                    ".tar",
+                    ".lzma",
+                    ".tiff",
+                    ".tif",
+                }
+            )
         ):
             result.append(name)
     return result
