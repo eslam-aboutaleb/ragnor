@@ -70,7 +70,7 @@ logger = logging.getLogger(__name__)
 
 _SCROLL_BATCH = 100
 # Keep the original namespace so existing Qdrant point IDs remain stable.
-_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "ragit-qdrant-point-ids")
+_ID_NAMESPACE = uuid.UUID("60d82b2c-e7d2-5618-bbb9-4669907728bc")
 
 
 def _point_id(doc_id: Any) -> Any:

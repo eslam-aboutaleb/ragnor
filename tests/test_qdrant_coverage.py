@@ -62,6 +62,8 @@ class TestPointId:
         second = _point_id("doc-1")
 
         assert isinstance(first, uuid.UUID)
+        # Existing installations must retain the IDs generated before the rename.
+        assert first == uuid.UUID("b1cb745d-9711-53de-9155-967df27b3769")
         assert first == second
         assert first != _point_id("doc-2")
 
