@@ -92,7 +92,7 @@ OCR children. Raw child stdout/stderr and logs are suppressed; reports contain I
 fixed failure codes and scores, not document text. Latency includes process startup
 and IPC, excludes metric scoring, and is reported as document p50/p95. Python
 provider RSS and OCR subprocess RSS are recorded separately, not summed or called
-whole-system memory. Cloud cost remains unmeasured.
+whole-system memory. Cost accounting is described below.
 
 ## Regression checks and remaining acceptance
 
@@ -111,10 +111,10 @@ Tests use hand-computed wrong-value, row swap, lost merge, omitted column, missi
 table, provider timeout and corrupted-manifest cases. Small regression PDFs are
 generated in temporary directories; CI never fetches the public corpus.
 
-Issue #60 remains open for independent annotation review, Arabic/RTL, handwriting,
-real scan families, full chart/formula semantics, downstream retrieval and
-permission-aware citation checks, measured provider costs and reviewed release
-thresholds. Results are in [the aggregate qualification summary](qualification/pdf-quality-results.md).
+Issue #60 remains open for independent annotation/family review, measured chart/formula
+provider semantics, natural-question RAG validation, supplied host prices and approved
+release thresholds. V3 adds Arabic scans/handwriting and SDK retrieval/citation contracts
+as described below. Results are in [the aggregate qualification summary](qualification/pdf-quality-results.md).
 
 ## No benchmark data in Git
 
@@ -123,3 +123,108 @@ ignored `benchmarks/data/`. Historical local fixtures and raw qualification JSON
 are also ignored. Only acquisition/scoring code, generated test recipes and
 aggregate Markdown results are committed. `scripts/check_benchmark_payloads.py`
 checks the Git index and CI rejects committed data payloads.
+
+## Extended qualification paths (schema v3)
+
+The extended importer adds 20 Arabic document images, ten physical Arabic scans,
+and nine unambiguous Arabic manuscript image/transcript pairs. It excludes the
+handwriting dataset's shared A/B transcripts where page boundaries cannot be
+established. Sources, licenses, pinned revisions and archive/model hashes are
+recorded in the local manifest. Original references are retained locally.
+These imported transcriptions do **not** supply layout boxes: those pages set
+`geometry_ground_truth=false` and layout scores remain unmeasured. See
+[source decisions](qualification/public-pdf-sources.md).
+
+```sh
+python -m benchmarks.extended_corpus \
+  --output benchmarks/data/extended/human-corpus \
+  --base-manifest benchmarks/data/dpbench-full/quality-manifest.json \
+  --combined-output benchmarks/data/extended/comparison
+# This combines the 60-page structural cohort with 39 Arabic pages: 99 pages.
+# Repeat this command sequentially with pypdf, pdfplumber, and tesseract.
+python -m benchmarks.run_quality \
+  --manifest benchmarks/data/extended/comparison/quality-manifest.json \
+  --provider tesseract --tesseract-language ara+eng \
+  --tessdata-dir benchmarks/data/extended/human-corpus/tessdata \
+  --timeout 90 --output benchmarks/data/extended/comparison/tesseract-v3.json
+python -m benchmarks.qualification packet \
+  --manifest benchmarks/data/extended/comparison/quality-manifest.json \
+  --output benchmarks/data/extended/review-packet --count 50
+```
+
+All 50 review records start **pending**. `index.html` presents source renderings,
+transcriptions, region overlays, reading order and critical fields. A reviewer
+must check alignment, omissions, spans, numeric values, exclusions, ambiguities
+and family labels; upstream review provenance is separate from local approval.
+PDF image conversion uses a fixed metadata epoch so repeated acquisition produces
+stable input hashes. Physical scans are embedded as image PDFs, not mislabeled
+as original born-digital PDFs.
+
+V3 adds the following measurements and contracts:
+
+- Class-agnostic text-block precision/recall at IoU 0.5 and omitted region IDs.
+  These measure block detection separately from word recall and order.
+- Foreground ink coverage uses Otsu thresholding and predicted word boxes.
+  Background page area is excluded. Graphics can contribute foreground pixels;
+  coverage is a diagnostic proxy and cannot certify transcription correctness.
+- Critical-field text exact match, normalized Decimal numeric accuracy with
+  explicit absolute tolerances, chart-value scoring, and restricted rational
+  formula equivalence. Formula parsing uses a bounded AST without `eval`, supports
+  at most two symbols and degree 12, and compares on the common rational domain.
+  It does not support arbitrary LaTeX or prove equality at excluded singularities.
+- Upstream table cells project deterministically into explicit grid coordinates,
+  spans and numeric reference fields. Predicted values are read from the matched
+  table at those coordinates. Covered grid positions in merged cells are not
+  independent annotations. Missing and wrong values both fail; answer coverage
+  is reported separately. Generic chart/formula fields require explicit references
+  and provider outputs; the current providers do not implement those ports.
+- Observable unsafe completeness claims and their rate among positive claims.
+  This is a lower-bound diagnostic: unsupported geometry/semantics and missing
+  reference labels cannot reveal every false negative.
+- Real SDK chunking, lexical retrieval, evaluation, evidence assembly and source
+  lookup with BM25Plus. Recall@K/MRR and answer-source hits use actual expected
+  chunk IDs; omitted answers remain misses. Reference-derived anchor queries are
+  explicitly contract probes, not human-authored natural-question QA. Optional
+  `qa_probes` supply unique queries, reference answers and source page IDs.
+- Citation resolution requires exact immutable source spans. Separate probes
+  deny another tenant, missing revisions and revoked sources, and verify that a
+  retained old revision still resolves after a new revision appears. These SDK
+  contract checks do not qualify a production backend's authorization policy.
+- Provider CPU time includes completed OCR subprocesses; normalized CPU hours
+  and observed external API charges are reported separately. CPU accounting
+  excludes process startup and scoring. `--cpu-usd-per-hour` requires
+  `--pricing-source`; total USD remains null without a supplied price. No cloud
+  calls are made by the bundled providers. Idle/capital costs remain excluded.
+
+`--predictions-out` explicitly enables local raw prediction export; the default
+report contains scores and IDs. `--no-rag` disables SDK probes when measuring
+extraction alone. P95 uses the nearest-rank definition. Schema v2/v3 results
+cannot be compared as if they used the same scoring protocol. Comparison also
+rejects changing page identities, losing field metrics, changing retrieval
+queries, degrading retrieval/citations, or failing revision/authorization probes.
+
+The packet also writes an unapproved `policy-template.json`. Maintainers must
+review its scope, fill its allowlists and baseline hash, and save their approved
+policy as `policy.json`; generating the template grants no approval.
+The qualification checker consumes these host-owned policy and review files:
+
+```sh
+python -m benchmarks.qualification check \
+  --report benchmarks/data/extended/comparison/tesseract-v3.json \
+  --manifest benchmarks/data/extended/comparison/quality-manifest.json \
+  --policy benchmarks/data/extended/review-packet/policy.json \
+  --reviews benchmarks/data/extended/review-packet/reviews.json \
+  --baseline benchmarks/data/extended/comparison/tesseract-v3.json \
+  --output benchmarks/data/extended/review-packet/qualification.json
+```
+
+Policy requires `approved_by`, `approved_at`, `allowed_policy_approvers`,
+`allowed_reviewers`, `minimum_reviewed_pages` (at least 30), `required_families`,
+`required_summary_metrics`, `quality_tolerance`, and `baseline_sha256`. The baseline
+hash is SHA-256 of `json.dumps(report, sort_keys=True).encode()`. Review records
+bind corpus and per-page reference hashes, must be distinct, and require allowlisted
+reviewer identities and dates. These are externally supplied attestations in
+host-controlled files, not an identity provider or automatically generated approval.
+An empty metric policy, absent price, unresolved citations, pending reviews or an
+unapproved baseline fails qualification. Baseline tolerance defaults to zero;
+production tolerances require maintainers' approval.

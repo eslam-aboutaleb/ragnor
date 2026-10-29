@@ -94,15 +94,96 @@ whole-system totals. These are local observations, not capacity guarantees.
   better aggregate public CER: its rotation and mixed-page families regress.
   This demonstrates why a single global text score is not a release gate.
 
+## Extended v3 comparison: Arabic scans, handwriting and SDK contracts
+
+An additional fixed comparison uses **89 documents / 99 page instances**: the
+60-page structural cohort plus 20 Misraj document images, ten physical Yarmouk
+scans and nine unambiguous HATHRD manuscript image/transcript pairs. Sources are
+pinned and described in [the source decisions](public-pdf-sources.md). These are
+upstream transcriptions; they do not constitute independent local approval.
+
+All providers completed this cohort with **zero failures or missing pages**.
+The deadline was 90 seconds per document. Tesseract 5.5.3 used Arabic + English
+fast models pinned to tag 4.1.0, PSM 3 and 200 DPI. This differs from the earlier
+English-only v2 run above; those OCR numbers are separate configurations.
+Pdfplumber retains its original text-flow extraction; an independent analysis
+pass measures blocks without reordering the extraction stream.
+
+| Family | Pages | pypdf CER | pdfplumber CER | Bilingual OCR CER |
+| --- | ---: | ---: | ---: | ---: |
+| arabic_handwriting | 9 | 100.00% | 100.00% | 72.92% |
+| arabic_mixed_origin | 20 | 100.00% | 100.00% | 46.46% |
+| arabic_real_scan | 10 | 100.00% | 100.00% | 28.88% |
+| mixed_two_page | 20 | 53.73% | 54.80% | 32.43% |
+| public | 10 | 7.45% | 9.60% | 30.93% |
+| rotated_90 | 10 | 7.45% | 57.95% | 34.41% |
+| scan_100dpi_jpeg35 | 10 | 100.00% | 100.00% | 42.73% |
+| scan_200dpi | 10 | 100.00% | 100.00% | 33.93% |
+
+CER can exceed 100% when insertions exceed reference length. The native parsers
+are negative controls on image-only PDFs; their 100% errors do not imply missing
+outcome pages. Arabic transcription-only sources have no asserted geometric
+ground truth, so their region/order accuracy remains unmeasured.
+
+| Contract / resource metric | pypdf | pdfplumber | Bilingual OCR |
+| --- | ---: | ---: | ---: |
+| Recall@5 | 15.18% | 11.26% | 4.76% |
+| MRR | 0.1667 | 0.1429 | 0.0476 |
+| Answer-source hit rate | 23.81% | 14.29% | 4.76% |
+| Citation resolution | 100.00% | 100.00% | 100.00% |
+| Mean numeric-field task accuracy | 0.00% | 8.48% | 0.00% |
+| Positive completeness claims | 0 | 0 | 0 |
+| Document p50 | 0.224s | 0.186s | 2.133s |
+| Document p95 | 0.270s | 0.574s | 6.984s |
+| Provider peak RSS | 48.0 MiB | 156.8 MiB | 176.0 MiB |
+| OCR subprocess peak RSS | — | — | 183.5 MiB |
+| CPU hours / 1,000 pages | 0.0187 | 0.0364 | 0.6459 |
+
+Pdfplumber text-block precision/recall are 7.09% / 25.00%
+on pages with layout ground truth. OCR foreground-ink coverage averages 71.93%;
+coverage is a diagnostic, not proof of correct words or values. There are 3,030
+numeric grid-position references projected from upstream table annotations,
+including covered positions in merged cells and repeated stress variants.
+The field score is a macro average over pages with reference fields. OCR emits
+no structured table values in this adapter, so those field tasks score zero.
+
+The 21 unique queries are reference-derived lexical anchors, deduplicated from
+40 balanced probes, with fixed source/page targets. Expected answer-bearing
+chunks are located in actual parser output; omitted answers remain misses.
+They test the SDK chunker, BM25 retrieval, evaluation, evidence and source lookup,
+not natural-question or semantic-model QA. Citation resolution tests exact spans
+of whatever was retrieved; it must not be interpreted as correct-answer accuracy.
+All providers passed the four source authorization/revision checks and the
+cross-tenant retrieval denial probe. Production backend authorization remains
+a separate qualification concern.
+
+No provider asserted verified completeness on this cohort. Observable verifier
+false-negative rates therefore remain **unmeasured**, rather than being called
+zero. Injected false completeness claims are caught by unit tests. General
+chart/formula scoring is implemented with bounded semantics, but the corpus has
+no independently validated canonical field labels or provider semantic outputs
+for those tasks; no measured chart/formula accuracy is claimed.
+
+External API charges were zero for these local providers. Compute USD and total
+USD / 1,000 pages remain null because no host price was supplied. CPU measurement
+excludes startup/scoring and does not price idle or capital costs.
+
+The local 50-page review packet contains pending decisions and an unapproved
+policy template. The qualification command correctly returns **not qualified**
+with six failed gates: policy approval, human review, reviewed family coverage,
+table-value measurement, span measurement and a priced compute scope for the
+OCR baseline. No human approval or production tolerance was synthesized.
+A second pypdf replay passed all **89** zero-tolerance quality, retrieval and
+citation comparisons on the same manifest. Latency and usage remain observations.
+
 ## Remaining limits
 
-Issue #60 remains open. Full independent annotation review, Arabic/RTL, handwriting,
-representative real-world scans, semantic chart/formula evaluation, downstream RAG
-retrieval, permission-aware citations, provider cost and approved production
-limits are not established. The reference table models are upstream labels, not
-new human annotations created by this run. The controlled degradations do not
-certify arbitrary camera captures, skew, real noise or cross-page table stitching.
+Issue #60 remains open for independent annotation and full-family review,
+natural-question QA, measured chart/formula provider semantics, host prices and
+approved release policy. Contracts/invoices, cross-page table stitching and
+arbitrary capture/noise distributions are not certified by these selections.
+The public transcriptions and controlled variants do not replace manual review.
 
-All PDFs, images, ground-truth text/HTML, manifests, predictions and raw JSON
-reports remain local and ignored. This document contains aggregate results only.
-See [metric definitions and commands](../extraction-benchmarks.md).
+All PDFs, images, ground-truth text/HTML, manifests, predictions, raw JSON reports
+and review packets remain local and ignored. This document contains aggregate
+results only. See [metric definitions and commands](../extraction-benchmarks.md).

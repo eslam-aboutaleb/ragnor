@@ -46,7 +46,24 @@ def _provider_process(provider: Any, data: bytes, connection: Any) -> None:
             contextlib.redirect_stderr(sink),
         ):
             try:
-                connection.send((True, provider.extract_outcomes(data)))
+                import resource  # noqa: PLC0415 -- local Linux/macOS benchmark worker
+
+                before = [
+                    resource.getrusage(kind)
+                    for kind in (resource.RUSAGE_SELF, resource.RUSAGE_CHILDREN)
+                ]
+                outcomes = provider.extract_outcomes(data)
+                after = [
+                    resource.getrusage(kind)
+                    for kind in (resource.RUSAGE_SELF, resource.RUSAGE_CHILDREN)
+                ]
+                cpu = sum(
+                    a.ru_utime + a.ru_stime - b.ru_utime - b.ru_stime
+                    for a, b in zip(after, before, strict=True)
+                )
+                if outcomes and hasattr(outcomes[0], "cpu_seconds"):
+                    outcomes[0].cpu_seconds = cpu
+                connection.send((True, outcomes))
             except Exception:
                 connection.send((False, None))
     finally:

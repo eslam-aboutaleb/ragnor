@@ -59,14 +59,16 @@ def create_smoke_corpus(output: Path) -> Path:
                         NameObject("/BitsPerComponent"): NumberObject(8),
                     }
                 )
-                resources[NameObject("/XObject")] = DictionaryObject({NameObject("/Im0"): image})
+                resources[NameObject("/XObject")] = DictionaryObject(
+                    {NameObject("/Im0"): writer._add_object(image)}
+                )
                 operations += b"q 100 0 0 100 0 0 cm /Im0 Do Q"
             elif kind == "vector":
                 operations += b"0 0 100 100 re f"
             if operations:
                 stream = DecodedStreamObject()
                 stream.set_data(operations)
-                page[NameObject("/Contents")] = stream
+                page[NameObject("/Contents")] = writer._add_object(stream)
             page[NameObject("/Resources")] = resources
             status = (
                 "partial"
