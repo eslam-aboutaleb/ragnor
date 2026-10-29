@@ -166,6 +166,10 @@ The core install has **zero third-party packages** — `import ragnor.*` never r
 | `all`              | `ragnor[litellm,pgvector,qdrant,chroma,faiss]` | Every shipped capability at once                           |
 
 The `pdf` and `web` extras enable PDF text extraction and HTTP document loading.
+Optional `pdf-layout`, `pdf-ocr` and `pdf-auto` extras provide SDK table/layout
+extraction, local Tesseract OCR and automatic page routing. See
+[SDK PDF extractors](docs/pdf-extractors.md) for structured results and host
+verification policies. Tesseract and its language models are installed by the host.
 
 ---
 

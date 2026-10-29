@@ -51,6 +51,11 @@ class IncompleteScanError(SourceError):
 
 def _error_record(error: Any) -> dict[str, Any]:
     """Do not retain exception messages, which may contain source credentials."""
+    from ragnor.ingestion.extraction_types import PDFExtractionError  # noqa: PLC0415
+
+    if isinstance(error, PDFExtractionError):
+        code = error.code if error.code in PDFExtractionError.codes else "provider_failed"
+        return {"reason": "pdf_extraction_failed", "code": code, "error_type": "PDFExtractionError"}
     if isinstance(error, dict):
         # Connector-owned structured errors remain useful without copying
         # arbitrary provider messages or payloads into public diagnostics.
@@ -300,9 +305,12 @@ async def collect_pages(
 
 
 def _outcome_pages(extractor: Any, data: bytes, source_name: str, result: LoadResult):
+    from dataclasses import asdict  # noqa: PLC0415
     from ragnor.ingestion.extractors import PageExtractionStatus  # noqa: PLC0415
 
     outcomes = extractor.extract_outcomes(data)
+    if outcomes and outcomes[0].diagnostics.get("runtime"):
+        result.metadata["extraction_runtime"] = outcomes[0].diagnostics["runtime"]
     complete = bool(outcomes) and all(outcome.complete for outcome in outcomes)
     counts: dict[str, int] = {}
     for outcome in outcomes:
@@ -330,7 +338,24 @@ def _outcome_pages(extractor: Any, data: bytes, source_name: str, result: LoadRe
                 SkipRecord(source_name, str(outcome.status), location={"page": outcome.page})
             )
     return [
-        (outcome.page, outcome.text)
+        (
+            outcome.page,
+            outcome.text,
+            {
+                "page_extraction": {
+                    "provider": outcome.provider,
+                    "version": outcome.version,
+                    "status": str(outcome.status),
+                    "reason": outcome.reason,
+                    "words": [asdict(word) for word in outcome.words],
+                    "regions": [asdict(region) for region in outcome.regions],
+                    "tables": [asdict(table) for table in outcome.tables],
+                    "diagnostics": outcome.diagnostics,
+                }
+            }
+            if outcome.words or outcome.tables or outcome.regions or outcome.diagnostics
+            else {},
+        )
         for outcome in outcomes
         if outcome.text.strip()
         and outcome.status
@@ -338,7 +363,7 @@ def _outcome_pages(extractor: Any, data: bytes, source_name: str, result: LoadRe
     ]
 
 
-def extract_documents(  # noqa: PLR0913, PLR0917
+def extract_documents(  # noqa: PLR0913, PLR0917, PLR0915
     data: bytes,
     source_name: str,
     external_id: str | None,
@@ -386,7 +411,11 @@ def extract_documents(  # noqa: PLR0913, PLR0917
                 return result
         if hasattr(extractor, "extract_outcomes"):
             pages = _outcome_pages(extractor, data, source_name, result)
+            # Optional providers attest package/model identities while extracting.
+            metadata["extraction"]["options"] = safe_config(getattr(extractor, "options", {}))
             metadata.update(result.metadata)
+            if "extraction_runtime" in result.metadata:
+                metadata["extraction"]["options"]["runtime"] = result.metadata["extraction_runtime"]
         else:
             # Custom legacy extractors retain their caller-defined completeness contract.
             pages = (
@@ -394,7 +423,9 @@ def extract_documents(  # noqa: PLR0913, PLR0917
                 if hasattr(extractor, "extract_pages")
                 else [(None, extractor.extract(data, name=source_name))]
             )
-        for page, text in pages:
+        for extracted_page in pages:
+            page, text = extracted_page[:2]
+            page_metadata = extracted_page[2] if len(extracted_page) > 2 else {}
             location = {"page": page} if page is not None else None
             if not text.strip():
                 result.skipped.append(SkipRecord(source_name, "no_text", location=location))
@@ -404,7 +435,7 @@ def extract_documents(  # noqa: PLR0913, PLR0917
                     source_name,
                     text,
                     external_id,
-                    dict(metadata),
+                    {**metadata, **page_metadata},
                     dict(provenance),
                     identity,
                     location,

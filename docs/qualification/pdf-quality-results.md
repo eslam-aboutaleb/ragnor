@@ -176,6 +176,18 @@ OCR baseline. No human approval or production tolerance was synthesized.
 A second pypdf replay passed all **89** zero-tolerance quality, retrieval and
 citation comparisons on the same manifest. Latency and usage remain observations.
 
+## SDK integration smoke verification
+
+The optional SDK adapters now run independently of benchmark code. An
+`AutoPDFExtractor` smoke check exercised six existing corpus PDFs: a native
+public page, degraded scan, rotated page, physical Arabic scan, manuscript and
+mixed-origin Arabic document. It returned 2,305 words and three native table
+models across those six pages, with no worker failures. All six remained partial
+because no host verification policy was supplied. This verifies runtime wiring,
+not extraction accuracy or publication approval. The historical provider accuracy
+measurements above are not a complete requalification of the SDK adapters.
+See [SDK usage and verification](../pdf-extractors.md).
+
 ## Remaining limits
 
 Issue #60 remains open for independent annotation and full-family review,

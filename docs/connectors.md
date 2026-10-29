@@ -122,7 +122,8 @@ Textless images, drawings, forms, annotations and unknown content need OCR or
 verification; a page combining text and visual content is partial. This is
 deliberately conservative: even a logo or decorative rule may require a custom
 verified extractor. The pypdf adapter cannot certify table fidelity, reading order,
-or the semantic completeness of a text layer. OCR is not included.
+or the semantic completeness of a text layer. Optional SDK OCR/layout adapters
+are available through explicit configuration; see [SDK PDF extractors](pdf-extractors.md).
 
 `PDFExtractor.extract_outcomes(data)` returns typed `PageExtractionOutcome`
 records with `extracted`, `verified_blank`, `needs_ocr`, `partial`, `failed`, or

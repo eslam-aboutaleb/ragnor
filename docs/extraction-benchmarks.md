@@ -2,7 +2,9 @@
 
 This source-checkout benchmark measures text, omission, reading-order and table
 fidelity separately. It adds no SDK dependencies and does not register a
-production OCR or layout adapter. Acquisition, rendering and provider execution
+production OCR or layout adapter by itself. The SDK now provides separately
+configured [runtime adapters](pdf-extractors.md); benchmark adapters remain
+measurement tools. Acquisition, rendering and provider execution
 happen only through explicit commands.
 
 ## Reproduce
