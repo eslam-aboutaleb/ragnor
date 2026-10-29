@@ -7,6 +7,7 @@ Intentional policy skips are separate from errors that invalidate a snapshot.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
+from hashlib import sha256
 from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import Any, Protocol, runtime_checkable
@@ -62,6 +63,15 @@ def _error_record(error: Any) -> dict[str, Any]:
             value = error.get(key)
             if key in error and (value is None or isinstance(value, (int, float))):
                 record[key] = value
+        if isinstance(error.get("page"), int) and error["page"] > 0:
+            record["page"] = error["page"]
+        source_id = error.get("source_id")
+        if (
+            isinstance(source_id, str)
+            and len(source_id) == 64
+            and all(char in "0123456789abcdef" for char in source_id)
+        ):
+            record["source_id"] = source_id
         return record
     return {"reason": "source_failure", "error_type": type(error).__name__}
 
@@ -169,10 +179,27 @@ class LoadResult(list):
     def authoritative(self) -> bool:
         return (
             self.complete
+            and self.metadata.get("extraction_quality", {}).get("complete", True)
             and self.status in {"ok", "empty", "success", "empty_success"}
             and not self.errors
             and not self.incremental
         )
+
+
+def merge_extraction_quality(target: dict[str, Any], incoming: dict[str, Any]) -> None:
+    """Aggregate bounded page counts independently of traversal completeness."""
+    quality = incoming.get("extraction_quality")
+    if quality is None:
+        return
+    previous = target.get("extraction_quality", {"complete": True, "pages": 0, "counts": {}})
+    counts = dict(previous["counts"])
+    for status, count in quality["counts"].items():
+        counts[status] = counts.get(status, 0) + count
+    target["extraction_quality"] = {
+        "complete": previous["complete"] and quality["complete"],
+        "pages": previous["pages"] + quality["pages"],
+        "counts": counts,
+    }
 
 
 @runtime_checkable
@@ -233,7 +260,10 @@ async def collect_pages(
         result.checkpoint = page.checkpoint
         result.next_cursor = page.next_cursor
         result.has_more = page.has_more
-        result.metadata.update(page.metadata)
+        merge_extraction_quality(result.metadata, page.metadata)
+        result.metadata.update(
+            {key: value for key, value in page.metadata.items() if key != "extraction_quality"}
+        )
         if page.errors or page.status not in {"ok", "empty", "success", "empty_success"}:
             result.status = (
                 SourceStatus.INCOMPLETE
@@ -267,6 +297,45 @@ async def collect_pages(
             return result
         seen.append(token)
         cursor = token
+
+
+def _outcome_pages(extractor: Any, data: bytes, source_name: str, result: LoadResult):
+    from ragnor.ingestion.extractors import PageExtractionStatus  # noqa: PLC0415
+
+    outcomes = extractor.extract_outcomes(data)
+    complete = bool(outcomes) and all(outcome.complete for outcome in outcomes)
+    counts: dict[str, int] = {}
+    for outcome in outcomes:
+        counts[outcome.status] = counts.get(outcome.status, 0) + 1
+    quality = {"complete": complete, "pages": len(outcomes), "counts": counts}
+    result.metadata["extraction_quality"] = quality
+    if not complete:
+        result.complete = False
+        result.status = SourceStatus.INCOMPLETE
+        result.errors = [
+            {"reason": outcome.reason, "code": str(outcome.status), "page": outcome.page}
+            for outcome in outcomes
+            if not outcome.complete
+        ][:100]
+        if not result.errors:
+            result.errors.append({"reason": "no_pages"})
+        if getattr(extractor, "options", {}).get("policy", "strict") != "allow_partial":
+            return []
+    for outcome in outcomes:
+        if outcome.status in {
+            PageExtractionStatus.VERIFIED_BLANK,
+            PageExtractionStatus.POLICY_EXCLUDED,
+        }:
+            result.skipped.append(
+                SkipRecord(source_name, str(outcome.status), location={"page": outcome.page})
+            )
+    return [
+        (outcome.page, outcome.text)
+        for outcome in outcomes
+        if outcome.text.strip()
+        and outcome.status
+        not in {PageExtractionStatus.VERIFIED_BLANK, PageExtractionStatus.POLICY_EXCLUDED}
+    ]
 
 
 def extract_documents(  # noqa: PLR0913, PLR0917
@@ -315,11 +384,16 @@ def extract_documents(  # noqa: PLR0913, PLR0917
             if "\x00" in decoded or controls / max(1, len(decoded)) > 0.1:
                 result.skipped.append(SkipRecord(source_name, "binary"))
                 return result
-        pages = (
-            extractor.extract_pages(data)
-            if hasattr(extractor, "extract_pages")
-            else [(None, extractor.extract(data, name=source_name))]
-        )
+        if hasattr(extractor, "extract_outcomes"):
+            pages = _outcome_pages(extractor, data, source_name, result)
+            metadata.update(result.metadata)
+        else:
+            # Custom legacy extractors retain their caller-defined completeness contract.
+            pages = (
+                extractor.extract_pages(data)
+                if hasattr(extractor, "extract_pages")
+                else [(None, extractor.extract(data, name=source_name))]
+            )
         for page, text in pages:
             location = {"page": page} if page is not None else None
             if not text.strip():
@@ -337,9 +411,20 @@ def extract_documents(  # noqa: PLR0913, PLR0917
                 )
             )
     except Exception as exc:
+        result.clear()
         result.errors.append(_error_record(exc))
         result.complete = False
         result.status = SourceStatus.ERROR
+        if hasattr(extractor, "extract_outcomes"):
+            result.metadata["extraction_quality"] = {
+                "complete": False,
+                "pages": 0,
+                "counts": {},
+            }
+    if result.errors and hasattr(extractor, "extract_outcomes"):
+        source_id = sha256((external_id or source_name).encode()).hexdigest()
+        for error in result.errors:
+            error["source_id"] = source_id
     return result
 
 

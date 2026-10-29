@@ -896,3 +896,23 @@ def test_version_store_protocol_is_runtime_checkable() -> None:
     from ragnor.ingestion import VersionStore
 
     assert isinstance(_FakeVersionStore(), VersionStore)
+
+
+@pytest.mark.asyncio
+async def test_incomplete_pdf_cannot_replace_or_purge_previous_version() -> None:
+    from ragnor.ingestion.connector_core import extract_documents
+    from tests.test_pdf_integrity import mixed_pdf
+
+    store = _MutableStore()
+    versions = _HostVersionStore(store)
+    sessions = _FakeSessionFactory()
+    pipeline = _pipeline(store, versions, sessions)
+    await pipeline.run(_source(), versions)
+    assert await store.count() == 1
+    incomplete = extract_documents(mixed_pdf(), "policy.pdf", "policy", {}, {})
+    assert not incomplete.authoritative
+    assert await pipeline.run(incomplete, versions, purge_on_empty=True) == 0
+    assert await store.count() == 1
+    assert len(versions.created) == 1
+    assert not versions.deleted
+    assert not versions.closed
