@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import timedelta
 
 import pytest
 from sqlalchemy import Column, MetaData, Table, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from ragnor import RagnorBuilder
 from ragnor.jobs.adapters.relational import (
@@ -32,6 +34,48 @@ async def test_missing_host_schema_fails_before_claim(tmp_path):
     store = RelationalJobStoreFactory(sessions).job_store(scope="tenant")
     try:
         with pytest.raises(RuntimeError, match="host database schema is missing"):
+            await store.claim_and_mark_processing(1, "worker")
+    finally:
+        await engine.dispose()
+
+
+async def test_in_memory_sqlite_is_not_qualified_for_distributed_claims():
+    engine = create_sqlite_engine("sqlite+aiosqlite:///:memory:")
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(metadata.create_all)
+        store = RelationalJobStoreFactory(sessions).job_store(scope="tenant")
+        with pytest.raises(RuntimeError, match="file-backed"):
+            await store.claim_and_mark_processing(1, "worker")
+    finally:
+        await engine.dispose()
+
+
+async def test_legacy_sqlite_savepoint_mode_fails_before_claim(tmp_path):
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'legacy.db'}")
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(metadata.create_all)
+        store = RelationalJobStoreFactory(sessions).job_store(scope="tenant")
+        with pytest.raises(RuntimeError, match="savepoints inside outer rollback"):
+            await store.claim_and_mark_processing(1, "worker")
+    finally:
+        await engine.dispose()
+
+
+async def test_postgres_non_read_committed_isolation_fails_before_claim():
+    url = os.environ.get("RAGNOR_TEST_DATABASE_URL")
+    if not url:
+        pytest.skip("requires a real PostgreSQL service")
+    engine = create_async_engine(url, isolation_level="SERIALIZABLE")
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(metadata.create_all)
+        store = RelationalJobStoreFactory(sessions).job_store(scope="tenant")
+        with pytest.raises(RuntimeError, match="READ COMMITTED"):
             await store.claim_and_mark_processing(1, "worker")
     finally:
         await engine.dispose()

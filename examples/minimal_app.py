@@ -69,7 +69,6 @@ class ExampleSettings:
     job_stale_after_seconds: float = 300.0
     worker_id: str = "example-worker"
     ingest_on_startup: bool = False
-    database_url: str = ""
 
 
 def _fake_embed(text: str) -> list[float]:

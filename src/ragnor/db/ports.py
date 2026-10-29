@@ -29,18 +29,6 @@ class SQLFactory(ABC):
     """
 
     @abstractmethod
-    def create_session_factory(self, database_url: str) -> SessionProvider:
-        """Build a session factory bound to ``database_url``.
-
-        Args:
-            database_url: Database URL understood by the
-                underlying driver stack.
-
-        Returns:
-            A callable yielding async session context managers.
-        """
-
-    @abstractmethod
     async def fetch_all(
         self,
         session: Any,

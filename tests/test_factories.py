@@ -1,7 +1,7 @@
 """Tests for the abstract factory layer.
 
 Covers the two seams a host can override: ``SQLFactory``
-(sessions, queries, mutations, advisory locking -- built on
+(queries, mutations, source locking -- built on
 ``SQLAlchemyFactory``) and ``VectorStoreFactory`` (store
 creation -- built on ``RegistryVectorStoreFactory``), the
 ``get_vector_store`` compatibility path, factory injection
@@ -24,7 +24,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ragnor.db.sql_factory import SQLAlchemyFactory, SQLFactory
 from ragnor.embeddings.dimensions import register_dimension
@@ -52,43 +52,46 @@ SRC_DIR = str(Path(__file__).resolve().parents[1] / "src")
 # ---------------------------------------------------------------------------
 
 
-async def test_create_session_factory_returns_callable() -> None:
-    session_factory = SQLAlchemyFactory().create_session_factory(SQLITE_URL)
-
-    assert callable(session_factory)
-    async with session_factory() as session:
-        result = await session.execute(text("SELECT 1"))
-        assert result.scalar() == 1
+def test_sql_factory_does_not_create_host_engine() -> None:
+    assert not hasattr(SQLAlchemyFactory(), "create_session_factory")
 
 
 async def test_execute_fetch_all_and_fetch_scalar() -> None:
     factory = SQLAlchemyFactory()
-    session_factory = factory.create_session_factory(SQLITE_URL)
-
-    async with session_factory() as session:
-        await factory.execute(session, "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)")
-        await factory.execute(session, "INSERT INTO items (name) VALUES (:name)", {"name": "alpha"})
-        await factory.execute(session, "INSERT INTO items (name) VALUES (:name)", {"name": "beta"})
-
-        rows = await factory.fetch_all(session, "SELECT id, name FROM items ORDER BY id")
-        assert rows == [{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta"}]
-
-        count = await factory.fetch_scalar(session, "SELECT COUNT(*) FROM items")
-        assert count == 2
+    engine = create_async_engine(SQLITE_URL)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with sessions() as session:
+            await factory.execute(session, "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)")
+            await factory.execute(
+                session, "INSERT INTO items (name) VALUES (:name)", {"name": "alpha"}
+            )
+            await factory.execute(
+                session, "INSERT INTO items (name) VALUES (:name)", {"name": "beta"}
+            )
+            rows = await factory.fetch_all(session, "SELECT id, name FROM items ORDER BY id")
+            assert rows == [{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta"}]
+            assert await factory.fetch_scalar(session, "SELECT COUNT(*) FROM items") == 2
+    finally:
+        await engine.dispose()
 
 
 async def test_fetch_all_binds_named_params() -> None:
     factory = SQLAlchemyFactory()
-    session_factory = factory.create_session_factory(SQLITE_URL)
-
-    async with session_factory() as session:
-        await factory.execute(session, "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)")
-        await factory.execute(session, "INSERT INTO items (name) VALUES (:name)", {"name": "alpha"})
-
-        rows = await factory.fetch_all(
-            session, "SELECT name FROM items WHERE name = :name", {"name": "alpha"}
-        )
-        assert rows == [{"name": "alpha"}]
+    engine = create_async_engine(SQLITE_URL)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with sessions() as session:
+            await factory.execute(session, "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)")
+            await factory.execute(
+                session, "INSERT INTO items (name) VALUES (:name)", {"name": "alpha"}
+            )
+            rows = await factory.fetch_all(
+                session, "SELECT name FROM items WHERE name = :name", {"name": "alpha"}
+            )
+            assert rows == [{"name": "alpha"}]
+    finally:
+        await engine.dispose()
 
 
 # ---------------------------------------------------------------------------
@@ -416,9 +419,6 @@ class _RecordingLockFactory(SQLFactory):
     def __init__(self) -> None:
         self.lock_keys: list[str] = []
 
-    def create_session_factory(self, database_url: str) -> Any:
-        raise NotImplementedError
-
     async def fetch_all(
         self, session: Any, statement: str, params: dict[str, Any] | None = None
     ) -> list[dict[str, Any]]:
@@ -473,9 +473,6 @@ class _RecordingSQLFactory(SQLFactory):
         self.fetched_all: list[tuple[str, dict[str, Any] | None]] = []
         self.fetched_scalars: list[tuple[str, dict[str, Any] | None]] = []
         self.executed: list[tuple[str, dict[str, Any] | None]] = []
-
-    def create_session_factory(self, database_url: str) -> Any:
-        raise NotImplementedError
 
     async def fetch_all(
         self, session: Any, statement: str, params: dict[str, Any] | None = None

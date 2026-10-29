@@ -3,15 +3,14 @@
 Runs as its own process so
 job processing never blocks an API request: the API
 writes a job row in the same transaction as the row it
-refers to; this worker claims pending jobs with
-``FOR UPDATE SKIP LOCKED``, processes them, and marks
+refers to; this worker atomically claims pending jobs, processes them, and marks
 them ``completed``.
 
 The drainer is parameterized by an
 :class:`~ragnor.jobs.outbox.EmbeddingJobStore` and a
 :class:`~ragnor.jobs.outbox.JobProcessor`, so it works
 against any job table. Multiple drainers can run
-concurrently: ``SKIP LOCKED`` keeps two workers from
+concurrently: an adapter's atomic claim keeps two workers from
 processing the same job, so this scales horizontally
 without coordination.
 """

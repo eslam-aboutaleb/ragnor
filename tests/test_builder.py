@@ -109,7 +109,6 @@ def test_builder_settings_satisfies_rag_settings_protocol() -> None:
     assert settings.embedding_model == "local"
     assert settings.rag_distance_threshold == 1.3
     assert settings.vector_store_provider == "memory"
-    assert settings.database_url == ""
 
 
 @pytest.mark.asyncio

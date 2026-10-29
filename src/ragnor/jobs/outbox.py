@@ -100,8 +100,8 @@ class EmbeddingJobStore(Protocol):
     async def claim_pending(self, limit: int, worker_id: str) -> list[JobPayload]:
         """Select up to ``limit`` claimable jobs (pending, or failed with
         a due retry and attempts remaining), ordered by creation time,
-        using ``FOR UPDATE SKIP LOCKED`` so concurrent workers never
-        claim the same row."""
+        using an adapter-specific atomic claim so concurrent workers
+        cannot claim the same row."""
         raise NotImplementedError
 
     async def mark_processing(self, jobs: list[JobPayload], worker_id: str) -> list[JobPayload]:

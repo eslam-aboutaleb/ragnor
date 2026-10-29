@@ -13,7 +13,12 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
-from ragnor.core.exceptions import ConfigurationError, sanitize_message
+from ragnor.core.exceptions import ConfigurationError, sanitize_message as _sanitize_message
+
+
+def sanitize_message(message: str) -> str:
+    """Keep the historical config-module redaction import available."""
+    return _sanitize_message(message)
 
 
 class DeploymentMode(StrEnum):
@@ -37,7 +42,6 @@ class RagSettings(Protocol):
     job_stale_after_seconds: float
     worker_id: str
     ingest_on_startup: bool
-    database_url: str
 
 
 @runtime_checkable
@@ -67,7 +71,6 @@ class RagnorConfig:
     job_stale_after_seconds: float = 300.0
     worker_id: str = "ragnor-worker"
     ingest_on_startup: bool = False
-    database_url: str = ""
     deployment_mode: DeploymentMode = DeploymentMode.LOCAL
     embedding_dim: int | None = None
 
@@ -98,13 +101,11 @@ class RagnorConfig:
 
     def __repr__(self) -> str:
         masked_key = "***" if self.openai_api_key else ""
-        masked_url = sanitize_message(self.database_url) if self.database_url else ""
         return (
             f"RagnorConfig(embedding_model={self.embedding_model!r}, "
             f"rag_distance_threshold={self.rag_distance_threshold!r}, "
             f"vector_store_provider={self.vector_store_provider!r}, "
             f"openai_api_key={masked_key!r}, "
-            f"database_url={masked_url!r}, "
             f"deployment_mode={self.deployment_mode!r}, "
             f"embedding_dim={self.embedding_dim!r})"
         )

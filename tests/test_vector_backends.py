@@ -667,11 +667,11 @@ class TestQdrantStore:
         with pytest.raises(ValueError, match="Unsafe table_name"):
             QdrantStore(table_name="bad;name", embedding_dim=DIM, client=qdrant_client)
 
-    def test_client_created_lazily_from_settings(self, qdrant_module: types.ModuleType) -> None:
+    def test_client_created_lazily_from_explicit_url(self, qdrant_module: types.ModuleType) -> None:
         store = QdrantStore(
             table_name="docs",
             embedding_dim=DIM,
-            settings=types.SimpleNamespace(database_url="http://qdrant:6333"),
+            url="http://qdrant:6333",
         )
 
         client = store._resolve_client()
@@ -682,7 +682,7 @@ class TestQdrantStore:
     def test_client_resolution_without_url_raises(self, qdrant_module: types.ModuleType) -> None:
         store = QdrantStore(table_name="docs", embedding_dim=DIM)
 
-        with pytest.raises(RuntimeError, match="QdrantStore needs a url"):
+        with pytest.raises(RuntimeError, match="QdrantStore needs an explicit url"):
             store._resolve_client()
 
 
