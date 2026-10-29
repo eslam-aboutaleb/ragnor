@@ -52,6 +52,15 @@ def process(data, request):
     budget, config = Budget(limits), request["config"]
     runtime = {"packages": _versions()}
     engine = request["engine"]
+    if engine == "render":
+        from ragnor.ingestion._pdf_render import render_pages  # noqa: PLC0415
+
+        return {
+            "schema_version": 1,
+            "page_count": len(baseline),
+            "runtime": runtime,
+            **render_pages(data, baseline, config, limits),
+        }
     if engine not in {"native", "ocr", "auto"}:
         raise PDFExtractionError("invalid_document")
     if engine in {"native", "auto"}:
@@ -68,6 +77,11 @@ def process(data, request):
             for page in pages
             if engine == "ocr" or (not page.complete and (not page.text.strip() or page.has_images))
         }
+        if engine == "ocr" and config.get("page_numbers") is not None:
+            requested = set(config["page_numbers"])
+            if not requested <= {p.page for p in baseline}:
+                raise PDFExtractionError("invalid_document")
+            selected &= requested
         if selected:
             if os.name != "posix":
                 raise PDFExtractionError("provider_failed")

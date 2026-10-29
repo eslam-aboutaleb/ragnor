@@ -1,6 +1,7 @@
 """Optional SDK adapters for native PDF layout, local OCR and page routing.
 
-Vendor code runs in bounded subprocesses. Importing these adapters has no vendor
+Local PDF vendors run in bounded subprocesses; hosted OCR uses host transports.
+Importing these adapters has no vendor
 dependencies. Unverified visual/OCR pages stay partial until a host policy accepts
 them; the legacy extract/extract_pages views return text without that guarantee.
 """
@@ -8,6 +9,7 @@ them; the legacy extract/extract_pages views return text without that guarantee.
 from __future__ import annotations
 
 import json
+import asyncio
 import hashlib
 import math
 import os
@@ -18,6 +20,7 @@ from typing import Any
 
 from ragnor.embeddings._safe_config import safe_config
 from ragnor.ingestion._pdf_process import execute
+from ragnor.ingestion.ocr import OCRProvider, shared_limits
 from ragnor.ingestion.extraction_types import PDFExtractionError, PDFExtractionLimits, PageVerifier
 from ragnor.ingestion.extractors import Extractor, PageExtractionOutcome, PageExtractionStatus
 
@@ -93,6 +96,15 @@ class _PDFAdapter(Extractor):
             )
             for page in pages
         ]
+
+    async def aextract_outcomes(self, data: bytes) -> list[PageExtractionOutcome]:
+        return await asyncio.to_thread(self.extract_outcomes, data)
+
+    async def aextract_pages(self, data: bytes) -> list[tuple[int, str]]:
+        return [(page.page, page.text) for page in await self.aextract_outcomes(data)]
+
+    async def aextract(self, data: bytes, *, name: str = "") -> str:
+        return "\n\n".join(text for _, text in await self.aextract_pages(data) if text)
 
     def _review(self, page: PageExtractionOutcome) -> PageExtractionOutcome:
         if (
@@ -218,10 +230,39 @@ class TesseractPDFExtractor(_PDFAdapter):
             policy,
         )
 
-    def extract_outcomes(self, data: bytes) -> list[PageExtractionOutcome]:
+    def extract_outcomes(
+        self,
+        data: bytes,
+        *,
+        page_numbers: frozenset[int] | None = None,
+        limits: PDFExtractionLimits | None = None,
+    ) -> list[PageExtractionOutcome]:
         if os.name != "posix":
             raise PDFExtractionError("ocr_requires_posix_process_cleanup")
-        return super().extract_outcomes(data)
+        effective = shared_limits(self.limits, limits or self.limits)
+        config = dict(self._config)
+        if page_numbers is not None:
+            if not page_numbers or any(type(p) is not int or p < 1 for p in page_numbers):
+                raise ValueError("OCR page selection must contain positive integers")
+            config["page_numbers"] = sorted(page_numbers)
+        pages, runtime = execute(data, self._engine, config, effective)
+        digest = hashlib.sha256(data).hexdigest()
+        return [
+            self._review(
+                replace(
+                    page,
+                    diagnostics={**page.diagnostics, "runtime": runtime, "source_sha256": digest},
+                )
+            )
+            for page in pages
+        ]
+
+    async def aextract_outcomes(self, data: bytes, **kwargs) -> list[PageExtractionOutcome]:
+        return await asyncio.to_thread(self.extract_outcomes, data, **kwargs)
+
+
+class TesseractOCRProvider(TesseractPDFExtractor):
+    """Local implementation of the OCRProvider port; existing PDF API preserved."""
 
 
 class AutoPDFExtractor(_PDFAdapter):
@@ -238,24 +279,43 @@ class AutoPDFExtractor(_PDFAdapter):
         self,
         *,
         native: PdfPlumberExtractor | None = None,
-        ocr: TesseractPDFExtractor | None = None,
+        ocr: OCRProvider | None = None,
         limits: PDFExtractionLimits | None = None,
         verifier: PageVerifier | None = None,
         policy: str = "strict",
     ) -> None:
         native = native or PdfPlumberExtractor()
         ocr = ocr or TesseractPDFExtractor()
-        if native._verifier is not None or ocr._verifier is not None:
+        if native._verifier is not None or getattr(ocr, "_verifier", None) is not None:
             raise ValueError("Configure verification on AutoPDFExtractor, not its children")
-        configs = [
-            asdict(value) for value in (limits or PDFExtractionLimits(), native.limits, ocr.limits)
-        ]
-        shared = PDFExtractionLimits(
-            **{
-                key: min(values)
-                if (values := [c[key] for c in configs if c[key] is not None])
-                else None
-                for key in configs[0]
-            }
+        if not isinstance(ocr, OCRProvider):
+            raise ValueError("ocr must implement OCRProvider")
+        self._native = native
+        self._ocr_provider = ocr
+        shared = shared_limits(limits or PDFExtractionLimits(), native.limits, ocr.limits)
+        ocr_config = (
+            ocr._config
+            if isinstance(ocr, TesseractPDFExtractor)
+            else safe_config(
+                {
+                    "id": ocr.id,
+                    "version": ocr.version,
+                    "options": ocr.options,
+                }
+            )
         )
-        self._configure({"native": native._config, "ocr": ocr._config}, shared, verifier, policy)
+        self._configure({"native": native._config, "ocr": ocr_config}, shared, verifier, policy)
+
+    def extract_outcomes(self, data: bytes) -> list[PageExtractionOutcome]:
+        if isinstance(self._ocr_provider, TesseractPDFExtractor):
+            return super().extract_outcomes(data)
+        from ragnor.ingestion._provider_pdf import extract_auto  # noqa: PLC0415
+
+        return extract_auto(self, data)
+
+    async def aextract_outcomes(self, data: bytes) -> list[PageExtractionOutcome]:
+        if isinstance(self._ocr_provider, TesseractPDFExtractor):
+            return await super().aextract_outcomes(data)
+        from ragnor.ingestion._provider_pdf import aextract_auto  # noqa: PLC0415
+
+        return await aextract_auto(self, data)
