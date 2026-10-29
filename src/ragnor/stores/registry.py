@@ -51,10 +51,8 @@ def get_vector_store(  # noqa: PLR0913, PLR0917
             the provider; the settings object is forwarded to the
             backend constructor when it declares an explicit
             ``settings`` parameter, so backends can read their
-            optional host fields -- ``rag_distance_metric`` for
-            the metric (when ``metric`` is omitted) and
-            ``database_url`` for the pgvector store to open its
-            own sessions when no session factory is injected.
+            optional host fields such as ``rag_distance_metric``
+            for the metric (when ``metric`` is omitted).
         session_factory: Session provider injected into the store.
         embedding_fn: Embedding function injected into the store for
             automatic query embedding.

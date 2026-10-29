@@ -3,8 +3,7 @@
 The outbox pattern decouples row insertion from
 background processing: job rows are written in the
 same transaction as the row they refer to, and a
-drainer worker claims pending jobs with
-``FOR UPDATE SKIP LOCKED``, processes them, and
+drainer worker atomically claims pending jobs, processes them, and
 records the outcome with retry/backoff/dead-letter
 semantics.
 """

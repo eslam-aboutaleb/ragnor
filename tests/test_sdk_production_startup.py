@@ -88,19 +88,15 @@ def test_ragnor_config_and_builder_settings_validation_and_redaction() -> None:
         embedding_model="text-embedding-3-small",
         embedding_dim=1536,
         openai_api_key="sk-secret-key-99887766",
-        database_url="postgresql+asyncpg://admin:topsecret@db.internal:5432/ragnor",
         deployment_mode=DeploymentMode.PRODUCTION,
     )
     cfg.validate()
     assert "sk-secret-key-99887766" not in repr(cfg)
-    assert "topsecret" not in repr(cfg)
 
     bs = BuilderSettings(
         openai_api_key="sk-secret-key-99887766",
-        database_url="postgresql+asyncpg://admin:topsecret@db.internal:5432/ragnor",
     )
     assert "sk-secret-key-99887766" not in repr(bs)
-    assert "topsecret" not in repr(bs)
 
     with pytest.raises(ConfigurationError):
         RagnorConfig(embedding_model="").validate()

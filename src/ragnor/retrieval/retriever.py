@@ -151,8 +151,8 @@ class HybridRetriever:
                 and carrying the default distance threshold.
             session_factory: Session provider the vector store
                 uses when a method is called without a session.
-                When omitted, the store opens its own sessions
-                from ``settings.database_url``.
+                SQL stores require this host-owned provider when
+                called without a session.
             strategy: Optional retrieval strategy (see
                 :mod:`ragnor.retrieval.strategies`). When
                 supplied, the constructor builds nothing --

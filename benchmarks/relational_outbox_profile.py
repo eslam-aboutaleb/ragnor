@@ -1,7 +1,7 @@
-"""Repeatable real-PostgreSQL outbox contention benchmark (no asserted SLA).
+"""Repeatable real SQL outbox contention benchmark (no asserted SLA).
 
-CI records observed duration/throughput for 1, 2, and 4 workers.
-Each worker owns its own async PostgreSQL session via a shared host factory.
+CI records observed duration/throughput for 1, 2, and 4 workers on
+PostgreSQL and file-backed SQLite. Each worker uses host-owned sessions.
 No user data, credentials or payload content are printed.
 """
 
@@ -13,31 +13,40 @@ import os
 from time import perf_counter
 from uuid import uuid4
 
-from sqlalchemy import text
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from ragnor.jobs.adapters.postgres import DDL, PostgresEmbeddingJobStore
+from ragnor.jobs.adapters.relational import RelationalJobStoreFactory, metadata
 
 
 async def main() -> None:
-    url = os.environ["RAGNOR_TEST_DATABASE_URL"]
+    url = os.environ["RAGNOR_CONTRACT_DATABASE_URL"]
     engine = create_async_engine(url)
+    if url.startswith("sqlite+"):
+
+        @event.listens_for(engine.sync_engine, "connect")
+        def disable_driver_transaction_control(dbapi_connection, _connection_record) -> None:
+            dbapi_connection.isolation_level = None
+
+        @event.listens_for(engine.sync_engine, "begin")
+        def begin_transaction(connection) -> None:
+            connection.exec_driver_sql("BEGIN")
+
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with engine.begin() as connection:
-            for statement in DDL:
-                await connection.execute(text(statement))
+            await connection.run_sync(metadata.create_all)
         results = []
         for workers in (1, 2, 4):
             scope = f"benchmark-{uuid4()}"
-            store = PostgresEmbeddingJobStore(sessions, scope=scope)
+            store = RelationalJobStoreFactory(sessions).job_store(scope=scope)
             for number in range(80):
                 await store.enqueue({"scope": scope, "idempotency_key": f"chunk-{number}"})
 
             async def worker(
                 worker_num: int,
                 started: asyncio.Event,
-                active_store: PostgresEmbeddingJobStore,
+                active_store,
             ) -> list[str]:
                 await started.wait()
                 owned: list[str] = []
@@ -69,7 +78,11 @@ async def main() -> None:
                     "worker_job_counts": [len(batch) for batch in batches],
                 }
             )
-        print(json.dumps(results, sort_keys=True, indent=2))
+        print(
+            json.dumps(
+                {"dialect": engine.dialect.name, "results": results}, sort_keys=True, indent=2
+            )
+        )
     finally:
         await engine.dispose()
 

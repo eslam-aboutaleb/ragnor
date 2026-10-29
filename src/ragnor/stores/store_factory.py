@@ -106,8 +106,7 @@ class RegistryVectorStoreFactory(VectorStoreFactory):
         ``settings`` is forwarded only to backends whose
         constructor declares an explicit ``settings`` parameter,
         so a backend can read its optional host fields (such as
-        ``rag_distance_metric`` or the pgvector
-        ``database_url``); a constructor that only accepts
+        ``rag_distance_metric``); a constructor that only accepts
         ``**kwargs`` receives the documented registry kwargs
         unchanged.
         """

@@ -62,7 +62,7 @@ For tests and zero-dependency development — **not** a production backend. It a
 
 ### pgvector store (built-in)
 
-The built-in production backend for PostgreSQL tables with `vector` and `tsvector` columns — the only ragnor component that is PostgreSQL-specific. It requires the `pgvector` extra (`pip install -e ".[pgvector]"`), plus `table_name` and `embedding_dim`, and either a `session_factory` or `settings` carrying a `database_url` to open its own sessions. The optional `tsquery_config` (default `"english"`, a lowercase identifier) must match the tsvector column's configuration.
+The built-in production backend for PostgreSQL tables with `vector` and `tsvector` columns. It requires the `pgvector` extra (`pip install -e ".[pgvector]"`), plus `table_name`, `embedding_dim`, and a host-owned `session_factory`. The optional `tsquery_config` (default `"english"`, a lowercase identifier) must match the tsvector column's configuration.
 
 ```python
 from ragnor.stores import PgVectorStore
@@ -70,7 +70,7 @@ from ragnor.stores import PgVectorStore
 store = PgVectorStore(
     table_name="policy_chunks",
     embedding_dim=1536,  # required
-    session_factory=my_session_factory,  # or settings.database_url
+    session_factory=my_session_factory,
     embedding_fn=embedder,  # auto-embed queries
 )
 ```
@@ -79,7 +79,7 @@ The pgvector store keeps its optimized single-query `hybrid_search` (one round-t
 
 ### Qdrant store (built-in)
 
-Production vector search on a Qdrant server. Requires the `qdrant` extra (`pip install -e ".[qdrant]"`), plus `table_name` (the collection name) and `embedding_dim`. The client is created lazily from `url`/`api_key` (falling back to `settings.database_url`) on first use, or injected directly via `client` for hosts and tests that manage their own.
+Production vector search on a Qdrant server. Requires the `qdrant` extra (`pip install -e ".[qdrant]"`), plus `table_name` (the collection name) and `embedding_dim`. The client is created lazily from an explicit `url`/`api_key` on first use, or injected directly via `client` for hosts that manage their own.
 
 ```python
 from ragnor.stores import QdrantStore
@@ -87,7 +87,7 @@ from ragnor.stores import QdrantStore
 store = QdrantStore(
     table_name="policy_chunks",  # Qdrant collection name
     embedding_dim=1536,  # required
-    url="http://localhost:6333",  # or settings.database_url
+    url="http://localhost:6333",
     api_key="...",  # optional, for authenticated servers
     embedding_fn=embedder,  # auto-embed queries
     # client=my_client,               # or inject a pre-built AsyncQdrantClient
