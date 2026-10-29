@@ -14,7 +14,7 @@ def test_corpus_and_raw_reports_are_rejected_while_code_and_summary_are_allowed(
     allowed = [
         "benchmarks/run_quality.py",
         "benchmarks/requirements.txt",
-        "docs/qualification/pdf-quality-results.md",
+        "docs/extraction-benchmarks.md",
         "tests/test_pdf_quality_metrics.py",
     ]
     assert forbidden_payloads(forbidden + allowed) == forbidden
