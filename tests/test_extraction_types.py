@@ -41,6 +41,15 @@ def test_invalid_word_geometry_is_rejected(box):
 
 
 def test_evidence_hash_changes_for_source_model_and_geometry_but_not_acceptance():
+    from typing import get_type_hints
+    from ragnor.ingestion.extractors import PageExtractionOutcome as LegacyOutcome
+    from ragnor.ingestion.extraction_types import (
+        PageExtractionOutcome as SharedOutcome,
+        PageVerifier,
+    )
+
+    assert LegacyOutcome is SharedOutcome is PageExtractionOutcome
+    assert get_type_hints(PageVerifier.verify)["page"] is SharedOutcome
     original = PageExtractionOutcome(
         1,
         PageExtractionStatus.PARTIAL,

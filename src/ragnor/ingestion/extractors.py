@@ -5,56 +5,11 @@ from __future__ import annotations
 import re
 import math
 from dataclasses import dataclass, field
-from enum import StrEnum
 from html.parser import HTMLParser
 from io import BytesIO
 from typing import Any
 
-from ragnor.ingestion.extraction_types import (
-    ExtractionRegion,
-    ExtractionTable,
-    ExtractionWord,
-    extraction_evidence_hash,
-)
-
-
-class PageExtractionStatus(StrEnum):
-    EXTRACTED = "extracted"
-    VERIFIED_BLANK = "verified_blank"
-    NEEDS_OCR = "needs_ocr"
-    PARTIAL = "partial"
-    FAILED = "failed"
-    POLICY_EXCLUDED = "policy_excluded"
-
-
-@dataclass(frozen=True)
-class PageExtractionOutcome:
-    """Page evidence; diagnostics never include provider exception messages."""
-
-    page: int
-    status: PageExtractionStatus
-    text: str = field(default="", repr=False)
-    reason: str = ""
-    has_images: bool = False
-    has_drawing: bool = False
-    provider: str = "pdf"
-    version: str = "3"
-    words: tuple[ExtractionWord, ...] = field(default=(), repr=False)
-    tables: tuple[ExtractionTable, ...] = field(default=(), repr=False)
-    regions: tuple[ExtractionRegion, ...] = ()
-    diagnostics: dict[str, Any] = field(default_factory=dict)
-
-    @property
-    def evidence_sha256(self) -> str:
-        return extraction_evidence_hash(self)
-
-    @property
-    def complete(self) -> bool:
-        return self.status in {
-            PageExtractionStatus.EXTRACTED,
-            PageExtractionStatus.VERIFIED_BLANK,
-            PageExtractionStatus.POLICY_EXCLUDED,
-        }
+from ragnor.ingestion.extraction_types import PageExtractionOutcome, PageExtractionStatus
 
 
 class Extractor:

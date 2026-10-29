@@ -318,7 +318,7 @@ else:
             text=True,
             check=False,
         )
-        if result.returncode or result.stdout.strip().startswith("Z"):
+        if result.returncode:
             break
         time.sleep(0.02)
     else:

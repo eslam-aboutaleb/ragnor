@@ -56,10 +56,21 @@ def _stop(process: subprocess.Popen) -> None:
         return
     with contextlib.suppress(ProcessLookupError):
         if os.name == "posix":
-            os.killpg(process.pid, signal.SIGKILL)
+            os.killpg(process.pid, signal.SIGTERM)
         else:
             process.kill()
-    process.wait()
+    try:
+        process.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        pass
+    finally:
+        if process.poll() is None:
+            with contextlib.suppress(ProcessLookupError):
+                if os.name == "posix":
+                    os.killpg(process.pid, signal.SIGKILL)
+                else:
+                    process.kill()
+            process.wait()
 
 
 def execute(
@@ -99,6 +110,7 @@ def execute(
                 "output_limit",
                 "resource_limit",
                 "runtime_changed",
+                "timeout",
             }
             raise PDFExtractionError(code if code in allowed else "provider_failed")
         if response.get("schema_version") != 1 or not isinstance(response.get("runtime"), dict):

@@ -7,11 +7,9 @@ import hashlib
 import json
 import math
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import Any, Protocol
+from enum import StrEnum
 from collections.abc import Iterable
-
-if TYPE_CHECKING:
-    from ragnor.ingestion.extractors import PageExtractionOutcome
 
 BBox = tuple[float, float, float, float]
 
@@ -114,6 +112,45 @@ class ExtractionTable:
         return "<table>" + "".join(rows) + "</table>"
 
 
+class PageExtractionStatus(StrEnum):
+    EXTRACTED = "extracted"
+    VERIFIED_BLANK = "verified_blank"
+    NEEDS_OCR = "needs_ocr"
+    PARTIAL = "partial"
+    FAILED = "failed"
+    POLICY_EXCLUDED = "policy_excluded"
+
+
+@dataclass(frozen=True)
+class PageExtractionOutcome:
+    """Page evidence; diagnostics never include provider exception messages."""
+
+    page: int
+    status: PageExtractionStatus
+    text: str = field(default="", repr=False)
+    reason: str = ""
+    has_images: bool = False
+    has_drawing: bool = False
+    provider: str = "pdf"
+    version: str = "3"
+    words: tuple[ExtractionWord, ...] = field(default=(), repr=False)
+    tables: tuple[ExtractionTable, ...] = field(default=(), repr=False)
+    regions: tuple[ExtractionRegion, ...] = ()
+    diagnostics: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def evidence_sha256(self) -> str:
+        return extraction_evidence_hash(self)
+
+    @property
+    def complete(self) -> bool:
+        return self.status in {
+            PageExtractionStatus.EXTRACTED,
+            PageExtractionStatus.VERIFIED_BLANK,
+            PageExtractionStatus.POLICY_EXCLUDED,
+        }
+
+
 class PageVerifier(Protocol):
     """Host-owned acceptance policy; identity/options must describe its behavior.
 
@@ -125,7 +162,8 @@ class PageVerifier(Protocol):
     version: str
     options: dict[str, Any]
 
-    def verify(self, page: PageExtractionOutcome) -> bool: ...
+    def verify(self, page: PageExtractionOutcome) -> bool:
+        raise NotImplementedError
 
 
 def extraction_evidence_hash(page: PageExtractionOutcome) -> str:
