@@ -142,7 +142,8 @@ rendering; SDK callers can use threads without concurrently calling PDFium in
 the host process. No multiprocessing main-module guard is required. Provider
 stdout/stderr are suppressed, and exceptions expose fixed error codes. On
 Linux/macOS the document deadline kills the worker process group, including OCR
-descendants. OCR currently requires a POSIX host for that cleanup guarantee;
+descendants. Cleanup allows up to one second to reap children before force-killing
+a worker. OCR currently requires a POSIX host for that cleanup guarantee;
 native layout extraction also works without the OCR executable.
 
 These quotas do not constitute a hard RSS cap on native parser allocations.

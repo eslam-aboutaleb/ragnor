@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import signal
 import sys
 from dataclasses import asdict, replace
 from importlib.metadata import PackageNotFoundError, version
@@ -102,6 +103,13 @@ def main():
         os.dup2(sink.fileno(), 1)
         os.dup2(sink.fileno(), 2)
         with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+
+            def terminate(_signum, _frame):
+                # Unwind subprocess.run so it reaps its OCR child before exit.
+                raise PDFExtractionError("timeout")
+
+            if os.name == "posix":
+                signal.signal(signal.SIGTERM, terminate)
             try:
                 request = json.loads(sys.argv[1])
                 limits = PDFExtractionLimits(**request["limits"])
