@@ -11,3 +11,6 @@ coverage.xml
 htmlcov/
 .DS_Store
 test-results/
+benchmarks/data/
+benchmarks/fixtures/
+docs/qualification/*.json

@@ -1,0 +1,10 @@
+# Optional local benchmark environment; none are mandatory SDK dependencies.
+pypdf==6.21.2
+rapidfuzz==3.14.6
+pdfplumber==0.11.10
+pdfminer.six==20260107
+pypdfium2==5.14.0
+pillow==13.0.0
+fonttools==4.68.0
+apted==1.0.3
+lxml==6.1.3
