@@ -27,6 +27,7 @@ from .connector_core import (
     TransientSourceError,
     collect_pages,
     extract_documents,
+    merge_extraction_quality,
     parse_checkpoint_since,
 )
 from .sources import RawDocument
@@ -435,6 +436,13 @@ class DirectoryConnector:
     def _load_page(self, cursor: Any, size: int) -> LoadResult:
         page = self._discover(cursor, size)
         documents, skipped, errors = [], list(page.skipped), list(page.errors)
+        extraction_metadata: dict[str, Any] = {}
+        for skip in list(skipped):
+            if skip.reason == "oversized" and Path(skip.path).suffix.lower() == ".pdf":
+                skipped.remove(skip)
+                errors.append({"reason": "pdf_size_limit"})
+                self._failed = True
+                self._failure_status = SourceStatus.INCOMPLETE
         for item in page:
             rel = item["relative_path"]
             try:
@@ -453,13 +461,19 @@ class DirectoryConnector:
                     extractor=self.extractor,
                 )
                 documents.extend(extracted)
+                merge_extraction_quality(extraction_metadata, extracted.metadata)
                 skipped.extend(extracted.skipped)
                 errors.extend(extracted.errors)
                 if not extracted.complete or extracted.errors:
                     self._failed = True
-                    self._failure_status = SourceStatus.ERROR
+                    self._failure_status = extracted.status
             except OverflowError as exc:
-                skipped.append(SkipRecord(path=rel, reason="oversized", detail=str(exc)))
+                if item["media_type"] == "application/pdf":
+                    errors.append({"reason": "pdf_size_limit"})
+                    self._failed = True
+                    self._failure_status = SourceStatus.INCOMPLETE
+                else:
+                    skipped.append(SkipRecord(path=rel, reason="oversized", detail=str(exc)))
             except (OSError, ValueError, RuntimeError) as exc:
                 if not isinstance(exc, OSError):
                     exc = OSError(errno.EACCES, str(exc))
@@ -481,6 +495,7 @@ class DirectoryConnector:
             status=self._failure_status if self._failed else page.status,
             total_items=len(page) + len(page.skipped),
             pages=1,
+            metadata=extraction_metadata,
         )
         self._last_result = result
         self._skipped = skipped

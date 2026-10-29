@@ -680,3 +680,37 @@ async def test_paginated_connector_source_traversal(
     assert report.added_count == 2
     assert await manifest_store.get("tenant1", "page1_doc.txt") is not None
     assert await manifest_store.get("tenant1", "page2_doc.txt") is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("activation_mode", [ActivationMode.DOCUMENT, ActivationMode.COLLECTION])
+async def test_incomplete_pdf_preserves_manifest_and_active_vectors(  # noqa: PLR0913
+    manifest_store, state_store, vector_store, settings, chunker, activation_mode
+):
+    from ragnor.ingestion.connector_core import extract_documents
+    from tests.test_pdf_integrity import mixed_pdf
+
+    embedder = _RecordingEmbedder()
+    coordinator = DefaultSyncCoordinator(
+        manifest_store=manifest_store,
+        state_store=state_store,
+        vector_store=vector_store,
+        embedder=embedder,
+        chunker=chunker,
+        settings=settings,
+        activation_mode=activation_mode,
+    )
+    original = RawDocument("invoice.pdf", "previous complete text", "invoice")
+    await coordinator.run_sync(scope="tenant", source=[original])
+    before = await manifest_store.get("tenant", "invoice")
+    generation = before.active_generation
+    ids = list(before.chunk_ids)
+    calls = embedder.call_count
+    incomplete = extract_documents(mixed_pdf(), "invoice.pdf", "invoice", {}, {})
+    report = await coordinator.run_sync(scope="tenant", source=incomplete)
+    after = await manifest_store.get("tenant", "invoice")
+    assert not report.authoritative
+    assert after.active_generation == generation
+    assert after.chunk_ids == ids
+    assert embedder.call_count == calls
+    assert await vector_store.get_embeddings(ids)
