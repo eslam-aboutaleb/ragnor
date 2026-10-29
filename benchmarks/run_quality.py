@@ -28,7 +28,7 @@ from benchmarks.quality_metrics import (
     table_scores,
     validate_bbox,
 )
-from benchmarks.quality_providers import PROVIDERS, QualityPage
+from benchmarks.quality_providers import PROVIDERS, QualityPage, SDKProvider
 from benchmarks.coverage_metrics import region_detection
 from benchmarks.semantic_metrics import score_fields
 from benchmarks.reference_schema import validate_prediction, validate_references
@@ -269,7 +269,12 @@ def run(  # noqa: PLR0913 -- explicit benchmark composition and host options
     for doc in selected:
         started = perf_counter()
         try:
-            actual = _extract(provider, (path.parent / doc["path"]).read_bytes(), timeout)
+            data = (path.parent / doc["path"]).read_bytes()
+            actual = (
+                provider.extract_bounded(data, timeout)
+                if isinstance(provider, SDKProvider)
+                else _extract(provider, data, timeout)
+            )
             numbers = [page.page for page in actual]
             if sorted(numbers) != list(range(1, len(doc["pages"]) + 1)):
                 raise ValueError("Provider returned invalid page numbering")
@@ -394,7 +399,9 @@ def run(  # noqa: PLR0913 -- explicit benchmark composition and host options
         "performance": {
             "document_p50_seconds": statistics.median(durations),
             "document_p95_seconds": sorted(durations)[math.ceil(len(durations) * 0.95) - 1],
-            "provider_python_peak_rss_bytes": max(peaks, default=None),
+            "provider_python_peak_rss_bytes": None
+            if isinstance(provider, SDKProvider)
+            else max(peaks, default=None),
             "ocr_process_peak_rss_bytes": max(ocr_peaks, default=None),
             "cost_per_1000_pages": None,
         },
@@ -434,11 +441,15 @@ def main():
     parser.add_argument("--tesseract-language", default="eng")
     parser.add_argument("--tessdata-dir")
     args = parser.parse_args()
-    from benchmarks.quality_providers import TesseractProvider  # noqa: PLC0415
+    from benchmarks.quality_providers import SDKOCRProvider, TesseractProvider  # noqa: PLC0415
 
     provider = (
         TesseractProvider(language=args.tesseract_language, tessdata_dir=args.tessdata_dir)
         if args.provider == "tesseract"
+        else SDKOCRProvider(language=args.tesseract_language, tessdata_dir=args.tessdata_dir)
+        if args.provider == "sdk-ocr"
+        else SDKProvider(language=args.tesseract_language, tessdata_dir=args.tessdata_dir)
+        if args.provider == "sdk-auto"
         else None
     )
     result = run(

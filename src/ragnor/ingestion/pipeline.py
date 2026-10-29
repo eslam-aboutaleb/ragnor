@@ -454,6 +454,15 @@ class IngestionPipeline:
                 if len(documents) > 1:
                     chunk.id = f"document_{index}:{chunk.id}"
                 chunk.metadata = {**document.metadata, **chunk.metadata}
+                evidence = chunk.metadata.get("page_extraction")
+                if isinstance(evidence, dict) and isinstance(evidence.get("evidence_sha256"), str):
+                    # RawDocument retains full geometry; avoid replicating a whole
+                    # page's word/table payload into every vector-store chunk.
+                    compact = dict(evidence)
+                    for key in ("words", "regions", "tables"):
+                        if key in compact:
+                            compact[key + "_count"] = len(compact.pop(key))
+                    chunk.metadata["page_extraction"] = compact
                 chunk.metadata["source"] = document.source_name
                 if document.external_id is not None:
                     chunk.metadata["external_id"] = document.external_id

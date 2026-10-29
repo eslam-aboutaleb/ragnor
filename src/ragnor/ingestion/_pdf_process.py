@@ -9,7 +9,9 @@ import signal
 import subprocess
 import sys
 import tempfile
-from dataclasses import asdict
+import threading
+import time
+from dataclasses import asdict, replace
 from typing import Any
 
 from ragnor.ingestion.extraction_types import (
@@ -62,6 +64,7 @@ def _stop(process: subprocess.Popen) -> None:
     try:
         process.wait(timeout=1)
     except subprocess.TimeoutExpired:
+        # Escalate to process-group SIGKILL in the finally block.
         pass
     finally:
         if process.poll() is None:
@@ -73,12 +76,33 @@ def _stop(process: subprocess.Popen) -> None:
             process.wait()
 
 
+_WORKER_SLOTS = threading.BoundedSemaphore(4)
+
+
 def execute(
     data: bytes, engine: str, config: dict, limits: PDFExtractionLimits
 ) -> tuple[list[PageExtractionOutcome], dict[str, Any]]:
     if len(data) > limits.max_bytes:
         raise PDFExtractionError("input_limit")
-    request = {"engine": engine, "config": config, "limits": asdict(limits)}
+    started = time.monotonic()
+    if not _WORKER_SLOTS.acquire(timeout=limits.timeout_seconds):
+        raise PDFExtractionError("timeout")
+    try:
+        remaining = limits.timeout_seconds - (time.monotonic() - started)
+        if remaining <= 0:
+            raise PDFExtractionError("timeout")
+        return _execute(data, engine, config, replace(limits, timeout_seconds=remaining))
+    finally:
+        _WORKER_SLOTS.release()
+
+
+def _execute(data, engine, config, limits):
+    request = {
+        "engine": engine,
+        "config": config,
+        "limits": asdict(limits),
+        "parent_pid": os.getpid(),
+    }
     with tempfile.TemporaryFile() as output:
         process = subprocess.Popen(  # noqa: S603 -- fixed SDK worker; config is data, never code
             [sys.executable, "-m", "ragnor.ingestion._pdf_worker", json.dumps(request)],

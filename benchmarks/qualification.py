@@ -25,7 +25,12 @@ def reference_fingerprint(document: dict, page: dict) -> str:
 
 
 def prepare_packet(
-    manifest_path: Path, output: Path, *, count=50, baseline_path: Path | None = None
+    manifest_path: Path,
+    output: Path,
+    *,
+    count=50,
+    baseline_path: Path | None = None,
+    predictions_path: Path | None = None,
 ) -> dict:
     import pypdfium2 as pdfium  # noqa: PLC0415
     from PIL import ImageDraw  # noqa: PLC0415
@@ -34,6 +39,19 @@ def prepare_packet(
     if not 1 <= count <= 50:
         raise ValueError("Review packets contain at most 50 pages")
     manifest = validate_manifest(manifest_path)
+    predictions = {}
+    if predictions_path is not None:
+        for prediction in json.loads(predictions_path.read_text(encoding="utf-8")):
+            key = f"{prediction['document_id']}:{prediction['page']}"
+            digest = prediction.get("evidence_sha256")
+            if (
+                key in predictions
+                or not isinstance(digest, str)
+                or len(digest) != 64
+                or any(char not in "0123456789abcdef" for char in digest)
+            ):
+                raise ValueError("SDK review predictions need unique pages and evidence hashes")
+            predictions[key] = prediction
     groups = defaultdict(list)
     for document in manifest["documents"]:
         for page in document["pages"]:
@@ -47,8 +65,13 @@ def prepare_packet(
     records, sections = [], []
     for index, (document, page) in enumerate(selected):
         key = f"{document['document_id']}:{page['page']}"
+        prediction = predictions.get(key)
+        if predictions_path is not None and prediction is None:
+            raise ValueError("SDK review page is missing its prediction")
         with pdfium.PdfDocument(manifest_path.parent / document["path"]) as pdf:
+            pdf.init_forms()
             source = pdf[page["page"] - 1]
+            source.set_cropbox(*source.get_mediabox())
             scale = min(150 / 72, (20_000_000 / (source.get_width() * source.get_height())) ** 0.5)
             bitmap = source.render(scale=scale)
             image = bitmap.to_pil().convert("RGB").copy()
@@ -68,6 +91,17 @@ def prepare_packet(
             {
                 "key": key,
                 "reference_sha256": reference_fingerprint(document, page),
+                **(
+                    {
+                        "extraction_evidence_sha256": prediction["evidence_sha256"],
+                        "extraction_status": prediction["status"],
+                        "extraction_review_status": "pending",
+                        "extraction_reviewer": None,
+                        "extraction_reviewed_at": None,
+                    }
+                    if prediction
+                    else {}
+                ),
                 "status": "pending",
                 "reviewer": None,
                 "reviewed_at": None,
@@ -95,9 +129,24 @@ def prepare_packet(
                     indent=2,
                 )
             )
-            + "</pre></section>"
+            + "</pre>"
+            + (
+                "<h3>SDK extraction (unapproved)</h3><pre dir=auto>"
+                + html.escape(prediction["text"])
+                + "</pre><h3>SDK tables</h3><pre>"
+                + html.escape(json.dumps(prediction.get("tables"), ensure_ascii=False, indent=2))
+                + "</pre>"
+                if prediction
+                else ""
+            )
+            + "</section>"
         )
     packet = {
+        **(
+            {"predictions_sha256": hashlib.sha256(predictions_path.read_bytes()).hexdigest()}
+            if predictions_path is not None
+            else {}
+        ),
         "schema_version": 1,
         "corpus_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
         "instructions": "Human reviewer checks source/transcription, omitted regions, "
@@ -286,13 +335,18 @@ def main():
     packet.add_argument("--output", type=Path, required=True)
     packet.add_argument("--count", type=int, default=50)
     packet.add_argument("--baseline", type=Path)
+    packet.add_argument("--predictions", type=Path)
     gate = sub.add_parser("check")
     for name in ["report", "manifest", "policy", "reviews", "baseline", "output"]:
         gate.add_argument("--" + name, type=Path, required=True)
     args = parser.parse_args()
     if args.command == "packet":
         result = prepare_packet(
-            args.manifest, args.output, count=args.count, baseline_path=args.baseline
+            args.manifest,
+            args.output,
+            count=args.count,
+            baseline_path=args.baseline,
+            predictions_path=args.predictions,
         )
         print(json.dumps({"review_pages": len(result["reviews"]), "status": "pending"}))
         return 0

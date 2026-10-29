@@ -255,7 +255,7 @@ def extract_ocr(data, baseline, config, budget, selected):
                     words=words,
                     regions=regions,
                     provider="tesseract",
-                    version="1",
+                    version="2",
                     diagnostics=diagnostics,
                     reason="rendered_white_page"
                     if blank
@@ -277,7 +277,7 @@ def extract_ocr(data, baseline, config, budget, selected):
                     text="",
                     reason=reason,
                     provider="tesseract",
-                    version="1",
+                    version="2",
                 )
             finally:
                 page.close()

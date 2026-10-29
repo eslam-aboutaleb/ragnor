@@ -202,7 +202,12 @@ class EvidenceAllowlistVerifier:
 
     @property
     def options(self) -> dict[str, Any]:
-        return {"approved_evidence_sha256": sorted(self._hashes)}
+        return {
+            "approved_evidence_count": len(self._hashes),
+            "approved_evidence_set_sha256": hashlib.sha256(
+                json.dumps(sorted(self._hashes)).encode()
+            ).hexdigest(),
+        }
 
     def verify(self, page: PageExtractionOutcome) -> bool:
         return extraction_evidence_hash(page) in self._hashes
@@ -217,10 +222,13 @@ class PDFExtractionLimits:
     max_text_chars: int = 2_000_000
     max_words: int = 200_000
     max_cells: int = 50_000
+    max_memory_bytes: int | None = None
     timeout_seconds: float = 60.0
 
     def __post_init__(self) -> None:
         for key, value in vars(self).items():
+            if key == "max_memory_bytes" and value is None:
+                continue
             if key == "timeout_seconds":
                 if isinstance(value, bool) or not math.isfinite(value) or value <= 0:
                     raise ValueError("Extraction timeout must be positive and finite")

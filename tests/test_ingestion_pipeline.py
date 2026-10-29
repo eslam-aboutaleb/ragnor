@@ -916,3 +916,23 @@ async def test_incomplete_pdf_cannot_replace_or_purge_previous_version() -> None
     assert len(versions.created) == 1
     assert not versions.deleted
     assert not versions.closed
+
+
+def test_chunk_metadata_keeps_evidence_identity_without_repeating_page_geometry():
+    pipeline = _pipeline(_FakeStore(), _FakeVersionStore(), _FakeSessionFactory())
+    evidence = {
+        "evidence_sha256": "a" * 64,
+        "status": "partial",
+        "words": [{"text": "example", "bbox": [0, 0, 1, 1]}] * 1000,
+        "regions": [],
+        "tables": [],
+    }
+    document = RawDocument(
+        source_name="sample.pdf", content="example", metadata={"page_extraction": evidence}
+    )
+    chunks = pipeline._chunk([document])
+    assert chunks
+    compact = chunks[0].metadata["page_extraction"]
+    assert compact["evidence_sha256"] == "a" * 64
+    assert compact["words_count"] == 1000 and "words" not in compact
+    assert len(document.metadata["page_extraction"]["words"]) == 1000

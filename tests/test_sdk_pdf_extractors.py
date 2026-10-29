@@ -177,12 +177,14 @@ def test_router_keeps_native_pages_and_ocrs_only_uncertain_pages(fake_ocr):
     assert "Native SDK" in pages[0].text and "4200" in pages[1].text
 
 
-def test_router_retains_native_table_structure_when_ocr_is_used(fake_ocr):
+def test_router_keeps_native_tables_without_unnecessary_ocr(fake_ocr):
     page = AutoPDFExtractor(ocr=ocr_adapter(fake_ocr)).extract_outcomes(digital_pdf(table=True))[0]
-    assert page.provider == "tesseract"
+    assert page.provider == "pdfplumber"
     assert page.tables[0].cells[0].colspan == 2
-    assert "<table>" in page.text and "4200" in page.text
-    assert page.diagnostics["native_table_provider"] == "pdfplumber"
+    assert page.text.count("<table>") == 1
+    assert "4200" not in page.text
+    assert "tesseract" not in page.diagnostics["runtime"]
+    assert not page.complete
 
 
 def test_white_render_can_be_blank_but_no_text_is_not_automatically_blank(fake_ocr):
@@ -473,3 +475,239 @@ def test_connector_keeps_fixed_dependency_failure_code_without_provider_text():
     assert not result.authoritative
     assert result.errors[0]["code"] == "dependency_missing"
     assert result.errors[0]["reason"] == "pdf_extraction_failed"
+
+
+def test_native_table_page_does_not_require_an_ocr_installation():
+    adapter = AutoPDFExtractor(ocr=TesseractPDFExtractor(executable="missing-ocr"))
+    page = adapter.extract_outcomes(digital_pdf(table=True))[0]
+    assert page.provider == "pdfplumber" and page.tables
+    assert not page.complete
+
+
+def test_router_cannot_weaken_optional_memory_limit():
+    adapter = AutoPDFExtractor(
+        native=PdfPlumberExtractor(limits=PDFExtractionLimits(max_memory_bytes=500_000_000)),
+        limits=PDFExtractionLimits(max_memory_bytes=900_000_000),
+    )
+    assert adapter.limits.max_memory_bytes == 500_000_000
+
+
+def test_sdk_benchmark_uses_worker_deadline_and_real_tables():
+    from benchmarks.quality_providers import SDKNativeProvider
+
+    provider = SDKNativeProvider()
+    page = provider.extract_bounded(digital_pdf(table=True), 10)[0]
+    assert provider.adapter.limits.timeout_seconds == 10
+    assert page.tables and 'colspan="2"' in page.tables[0]["html"]
+    assert page.words and not page.verified_complete
+    assert page.cpu_seconds is not None
+
+
+def test_invalid_table_grid_preserves_text_but_cannot_claim_completeness(monkeypatch):
+    from ragnor.ingestion import _pdf_native
+    from ragnor.ingestion._pdf_worker import Budget
+    from ragnor.ingestion.extractors import PDFExtractor
+
+    def invalid_grid(*args):
+        raise ValueError("Overlapping table cells")
+
+    monkeypatch.setattr(_pdf_native, "_table", invalid_grid)
+    data = digital_pdf(table=True)
+    page = _pdf_native.extract_native(
+        data,
+        PDFExtractor().extract_outcomes(data),
+        PdfPlumberExtractor()._config,
+        Budget(PDFExtractionLimits()),
+    )[0]
+    assert "Summary" in page.text and "20" in page.text
+    assert page.words and not page.tables
+    assert page.status == PageExtractionStatus.PARTIAL
+    assert page.diagnostics["rejected_tables"] == 1
+
+
+def test_router_deduplicates_ocr_table_text_and_keeps_native_text_on_ocr_failure(monkeypatch):
+    from dataclasses import replace
+    from ragnor.ingestion import _pdf_native, _pdf_ocr
+    from ragnor.ingestion._pdf_worker import process
+    from dataclasses import asdict
+    from ragnor.ingestion.extraction_types import ExtractionWord
+
+    data = digital_pdf(table=True)
+    native = PdfPlumberExtractor().extract_outcomes(data)[0]
+    native = replace(native, has_images=True)
+    monkeypatch.setattr(_pdf_native, "extract_native", lambda *args: [native])
+    ocr = replace(
+        native,
+        provider="tesseract",
+        text="OUTSIDE Summary",
+        words=(
+            ExtractionWord("OUTSIDE", (0.8, 0.8, 0.9, 0.9)),
+            ExtractionWord("Summary", (0.1, 0.3, 0.2, 0.35)),
+        ),
+    )
+    monkeypatch.setattr(_pdf_ocr, "extract_ocr", lambda *args: ({1: ocr}, {}))
+    adapter = AutoPDFExtractor()
+    request = {"engine": "auto", "config": adapter._config, "limits": asdict(adapter.limits)}
+    page = process(data, request)["pages"][0]
+    assert page["text"].count("Summary") == 1 and "OUTSIDE" in page["text"]
+    assert page["text"].count("<table>") == 1
+    failed = replace(ocr, text="", status=PageExtractionStatus.FAILED, words=())
+    monkeypatch.setattr(_pdf_ocr, "extract_ocr", lambda *args: ({1: failed}, {}))
+    page = process(data, request)["pages"][0]
+    assert page["text"] == native.text
+    assert page["status"] == PageExtractionStatus.PARTIAL
+    assert page["diagnostics"]["ocr_fallback_status"] == "failed"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Worker supervision requires POSIX")
+def test_worker_reaps_ocr_when_host_process_disappears(fake_ocr, tmp_path):
+    import subprocess
+    import time
+    import signal
+
+    command, models = fake_ocr
+    pid_file = tmp_path / "orphan-pid"
+    pdf = tmp_path / "input.pdf"
+    pdf.write_bytes(scanned_pdf())
+    command.write_text(f"""#!{sys.executable}
+import os,sys,time
+if '--version' in sys.argv:
+ print('fixture-tesseract 1.0')
+else:
+ sys.stdin.buffer.read()
+ open({str(pid_file)!r},'w').write(str(os.getpid()))
+ time.sleep(120)
+""")
+    script = """
+import sys
+from pathlib import Path
+from ragnor.ingestion import TesseractPDFExtractor, PDFExtractionLimits
+TesseractPDFExtractor(executable=sys.argv[2], tessdata_dir=sys.argv[3],
+    page_timeout=120, limits=PDFExtractionLimits(timeout_seconds=120)
+).extract_outcomes(Path(sys.argv[1]).read_bytes())
+"""
+    host = subprocess.Popen(  # noqa: S603 -- fixed fixture script, local argv
+        [sys.executable, "-c", script, str(pdf), str(command), str(models)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    group = None
+    try:
+        deadline = time.monotonic() + 15
+        while not pid_file.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert pid_file.exists(), "OCR fixture did not start"
+        pid = int(pid_file.read_text())
+        group = os.getpgid(pid)
+        host.kill()
+        host.wait(timeout=5)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            result = subprocess.run(  # noqa: S603 -- fixed OS process query
+                [shutil.which("ps"), "-p", str(pid), "-o", "stat="],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode or result.stdout.strip().startswith("Z"):
+                break
+            time.sleep(0.05)
+        else:
+            pytest.fail("OCR child survived loss of its SDK host")
+    finally:
+        if host.poll() is None:
+            host.kill()
+            host.wait(timeout=5)
+        if group is not None:
+            try:
+                os.killpg(group, signal.SIGKILL)
+            except ProcessLookupError:
+                # Normal cleanup already removed the worker group.
+                pass
+
+
+@pytest.mark.skipif(os.name != "posix", reason="File-size limits require POSIX")
+def test_ocr_output_flood_is_bounded_and_never_published(fake_ocr):
+    command, _ = fake_ocr
+    command.write_text(f"""#!{sys.executable}
+import sys
+if '--version' in sys.argv:
+ print('fixture-tesseract 1.0')
+else:
+ sys.stdin.buffer.read()
+ sys.stdout.write('X' * 2_000_000)
+""")
+    page = ocr_adapter(
+        fake_ocr, limits=PDFExtractionLimits(max_output_bytes=256_000)
+    ).extract_outcomes(scanned_pdf())[0]
+    assert page.status == PageExtractionStatus.FAILED
+    assert not page.text and not page.complete
+
+
+def test_worker_queue_respects_deadline_without_starting_a_process(monkeypatch):
+    import threading
+    from ragnor.ingestion import _pdf_process
+
+    slots = threading.BoundedSemaphore(1)
+    slots.acquire()
+    monkeypatch.setattr(_pdf_process, "_WORKER_SLOTS", slots)
+    with pytest.raises(PDFExtractionError, match="timeout"):
+        PdfPlumberExtractor(limits=PDFExtractionLimits(timeout_seconds=0.02)).extract_outcomes(
+            digital_pdf()
+        )
+    slots.release()
+    assert PdfPlumberExtractor().extract_outcomes(digital_pdf())[0].complete
+
+
+def test_degenerate_word_geometry_preserves_plain_text_and_stays_partial(monkeypatch):
+    from ragnor.ingestion import _pdf_native
+    from ragnor.ingestion._pdf_worker import Budget
+    from ragnor.ingestion.extractors import PDFExtractor
+
+    original = _pdf_native.ExtractionWord
+
+    def zero_width(text, box):
+        return original(text, (box[0], box[1], box[0], box[3]))
+
+    monkeypatch.setattr(_pdf_native, "ExtractionWord", zero_width)
+    data = digital_pdf()
+    page = _pdf_native.extract_native(
+        data,
+        PDFExtractor().extract_outcomes(data),
+        PdfPlumberExtractor()._config,
+        Budget(PDFExtractionLimits()),
+    )[0]
+    assert page.text == "Native SDK text" and not page.words
+    assert not page.complete and page.diagnostics["unlocated_words"] == 3
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX resource limits")
+def test_worker_resource_limits_preserve_tighter_host_limits(monkeypatch):
+    import resource
+    from ragnor.ingestion import _pdf_worker
+
+    applied = []
+    monkeypatch.setattr(_pdf_worker.sys, "platform", "linux")
+    monkeypatch.setattr(resource, "getrlimit", lambda kind: (1024, 2048))
+    monkeypatch.setattr(resource, "setrlimit", lambda kind, limits: applied.append((kind, limits)))
+    _pdf_worker._set_resource_limits(
+        PDFExtractionLimits(max_output_bytes=8192, max_memory_bytes=4096)
+    )
+    assert applied == [(resource.RLIMIT_FSIZE, (1024, 1024)), (resource.RLIMIT_AS, (1024, 1024))]
+
+
+def test_explicit_memory_cap_fails_closed_on_unsupported_platform(monkeypatch):
+    from ragnor.ingestion import _pdf_worker
+
+    monkeypatch.setattr(_pdf_worker.sys, "platform", "win32")
+    with pytest.raises(PDFExtractionError, match="resource_limit"):
+        _pdf_worker._set_resource_limits(PDFExtractionLimits(max_memory_bytes=1_000_000))
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux address-space ceiling")
+def test_linux_memory_ceiling_is_applied_only_to_the_worker():
+    with pytest.raises(PDFExtractionError):
+        PdfPlumberExtractor(
+            limits=PDFExtractionLimits(max_memory_bytes=10_000_000)
+        ).extract_outcomes(digital_pdf())
+    assert PdfPlumberExtractor().extract_outcomes(digital_pdf())[0].complete
