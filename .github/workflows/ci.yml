@@ -21,14 +21,14 @@ permissions:
 jobs:
   commit-messages:
     name: Commit message format
-    uses: eslam-aboutaleb/ci-workflows/.github/workflows/commit-messages.yml@4c4fe5ab336debb608fcee263a875d58bd14acc3
+    uses: eslam-aboutaleb/ci-workflows/.github/workflows/commit-messages.yml@cb10612004f98e6ec10158af72c4d0e1a044e436
     permissions:
       contents: read
       pull-requests: read
 
   python:
     name: Shared Python quality
-    uses: eslam-aboutaleb/ci-workflows/.github/workflows/python.yml@4c4fe5ab336debb608fcee263a875d58bd14acc3
+    uses: eslam-aboutaleb/ci-workflows/.github/workflows/python.yml@cb10612004f98e6ec10158af72c4d0e1a044e436
     with:
       project-dir: .
       manager: pip
@@ -237,7 +237,7 @@ jobs:
 
   security:
     name: Shared security analysis
-    uses: eslam-aboutaleb/ci-workflows/.github/workflows/security.yml@4c4fe5ab336debb608fcee263a875d58bd14acc3
+    uses: eslam-aboutaleb/ci-workflows/.github/workflows/security.yml@cb10612004f98e6ec10158af72c4d0e1a044e436
     permissions:
       contents: read
       actions: read
@@ -249,7 +249,7 @@ jobs:
 
   workflow-validation:
     name: Shared workflow validation
-    uses: eslam-aboutaleb/ci-workflows/.github/workflows/workflow-lint.yml@4c4fe5ab336debb608fcee263a875d58bd14acc3
+    uses: eslam-aboutaleb/ci-workflows/.github/workflows/workflow-lint.yml@cb10612004f98e6ec10158af72c4d0e1a044e436
 
   optional-backends:
     name: Optional Backend (${{ matrix.extra }})
