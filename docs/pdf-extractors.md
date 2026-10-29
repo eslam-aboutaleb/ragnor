@@ -143,7 +143,7 @@ the host process. No multiprocessing main-module guard is required. Provider
 stdout/stderr are suppressed, and exceptions expose fixed error codes. On
 Linux/macOS the document deadline kills the worker process group, including OCR
 descendants. Cleanup allows up to one second to reap children before force-killing
-a worker. OCR currently requires a POSIX host for that cleanup guarantee;
+a worker. Tesseract OCR currently requires a POSIX host for that cleanup guarantee;
 native layout extraction also works without the OCR executable.
 
 These quotas do not constitute a hard RSS cap on native parser allocations.
@@ -182,3 +182,73 @@ space ceiling, inherited by OCR children. It is disabled by default; requesting
 it on another platform fails closed. This is not an RSS measurement or a total
 memory budget across concurrent workers. Container limits remain appropriate
 for deployment-wide resource control.
+
+## Hosted multimodal OCR through LiteLLM
+
+`OCRProvider` is a PDF-level port with synchronous `extract_outcomes` and
+asynchronous `aextract_outcomes` methods, optional page selection and shared
+resource limits. `TesseractOCRProvider` implements it using the existing local
+Tesseract worker; `TesseractPDFExtractor` remains compatible. The hosted
+`LiteLLMOCRProvider` uses the same outcome types and verification policy.
+
+```sh
+pip install 'ragnor[pdf-llm,pdf-layout]'
+```
+
+```python
+from pathlib import Path
+from ragnor.ingestion import AutoPDFExtractor, LiteLLMOCRProvider
+
+ocr = LiteLLMOCRProvider(model="openai/gpt-5")
+# Or: LiteLLMOCRProvider(model="gemini/gemini-2.5-pro")
+extractor = AutoPDFExtractor(ocr=ocr)
+pages = extractor.extract_outcomes(Path("document.pdf").read_bytes())
+for page in pages:
+    print(page.page, page.status, page.text)
+
+# In an async application:
+# pages = await extractor.aextract_outcomes(pdf_bytes)
+```
+
+Choose an available vision-capable model identifier supported by your LiteLLM
+installation and account. The backend forwards the identifier without a hardcoded
+model list. LiteLLM handles provider-specific routing for the standard
+[text plus image input](https://docs.litellm.ai/docs/completion/vision).
+GPT-5 and Gemini request contracts are tested with fake transports; no live model
+accuracy or availability qualification is claimed.
+
+Credentials can come from LiteLLM's environment configuration or the provider's
+`api_key` argument. `api_base` supports a host-selected gateway endpoint.
+Host-owned LiteLLM Router methods can be injected as `completion=router.completion`
+and `acompletion=router.acompletion`; the SDK does not close host clients.
+Keys and callables are excluded from options, provenance and representations.
+
+Selecting hosted OCR explicitly authorizes sending selected page images to the
+configured model service. There is no automatic switch from local OCR to cloud.
+The auto router sends only uncertain pages that lack usable native text or contain
+images. PDF rendering stays inside the bounded local worker and does not require
+Tesseract or traineddata. Standalone hosted OCR renders every requested page.
+
+Defaults are 150 DPI, at most 20 OCR pages per document, 4,096 completion tokens
+per page, a 30-second request timeout and two concurrent async requests per document. Document,
+pixel and output quotas still apply. Internal LiteLLM retries are disabled; a
+host-owned Router may implement its own policy. `generation_options` permits
+explicit `temperature`, `top_p`, `seed` or `reasoning_effort` settings; none are forced
+onto models that may not support them. Limits bound requests/tokens, not an exact
+USD price. Usage counters are recorded when returned by the provider.
+
+Hosted output supplies text/Markdown without fabricated word coordinates or table
+cells. Native table evidence may be retained separately by the auto router.
+Successful responses remain partial until host verification. Truncated, refused,
+empty or otherwise incomplete responses cannot be promoted by a verifier. Model,
+prompt, source and rendered-image identities are bound to the review evidence;
+changing them requires new approval. Hosted output can vary between runs; evidence
+allowlists approve exact outcomes, not future calls.
+
+Use async methods for cancellable model requests and bounded concurrency. Sync
+methods use the synchronous LiteLLM transport and its HTTP timeout; injected
+transports must honor that timeout. Existing connector extraction remains
+synchronous. Worker memory limits cover local rendering, not the hosted client.
+Cancellation during local rendering leaves the worker governed by
+its existing deadline/cleanup bounds. The SDK disables LiteLLM request logging
+for these calls; hosts still own gateway logging, callbacks and data retention.

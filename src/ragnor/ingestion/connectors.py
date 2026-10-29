@@ -44,7 +44,10 @@ from ragnor.ingestion.pdf_extractors import (
     AutoPDFExtractor,
     PdfPlumberExtractor,
     TesseractPDFExtractor,
+    TesseractOCRProvider,
 )
+from ragnor.ingestion.ocr import OCRProvider
+from ragnor.ingestion.litellm_ocr import LiteLLMOCRProvider
 from ragnor.ingestion.http_connector import Credential, HttpApiConnector, WebsiteConnector
 from ragnor.ingestion.object_connector import ObjectStorageClient, ObjectStorageConnector
 from ragnor.ingestion.sources import ConnectorDocumentSource, DocumentSourceConnector
@@ -63,6 +66,9 @@ ObjectStoreConnector = ObjectStorageConnector
 S3Connector = ObjectStorageConnector
 
 __all__ = [
+    "OCRProvider",
+    "LiteLLMOCRProvider",
+    "TesseractOCRProvider",
     "EvidenceAllowlistVerifier",
     "AutoPDFExtractor",
     "ExtractionCell",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import base64
 import json
 import os
 import signal
@@ -145,6 +146,27 @@ def _execute(data, engine, config, limits):
             raise ValueError("Invalid worker page count")
         if [page.page for page in pages] != list(range(1, count + 1)):
             raise ValueError("Missing, duplicated or reordered worker pages")
+        if engine == "render":
+            images = response.get("images")
+            if not isinstance(images, list):
+                raise ValueError("Invalid render protocol")
+            for image in images:
+                if any(
+                    type(image[key]) is not int or image[key] < 1 for key in ("width", "height")
+                ):
+                    raise ValueError("Invalid render dimensions")
+                if image["width"] * image["height"] > limits.max_pixels:
+                    raise ValueError("Render exceeds pixel quota")
+                if not isinstance(image["image_base64"], str) or not base64.b64decode(
+                    image["image_base64"], validate=True
+                ).startswith(b"\x89PNG\r\n\x1a\n"):
+                    raise ValueError("Invalid rendered PNG")
+            expected = config.get("page_numbers")
+            if [image["page"] for image in images] != (
+                expected if expected is not None else list(range(1, count + 1))
+            ):
+                raise ValueError("Invalid rendered page selection")
+            return pages, {**response["runtime"], "images": images}
         return pages, response["runtime"]
     except (KeyError, TypeError, ValueError):
         raise PDFExtractionError("invalid_worker_response") from None

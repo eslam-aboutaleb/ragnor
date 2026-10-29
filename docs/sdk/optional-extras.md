@@ -17,6 +17,7 @@ when used.
 | `pdf-layout` | Native PDF text/regions and structured table cells/spans with pdfplumber |
 | `pdf-ocr` | PDF rendering and local OCR adapter; host installs Tesseract/language models |
 | `pdf-auto` | Native extraction with OCR fallback for uncertain pages |
+| `pdf-llm` | Hosted multimodal OCR through LiteLLM; no Tesseract or local OCR models required |
 | `directory` | Local directory extraction |
 | `watch` | File watching |
 | `web` | HTTP document loading |
