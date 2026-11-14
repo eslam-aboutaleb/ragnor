@@ -34,7 +34,7 @@ test = [
     "aiosqlite>=0.20",
     "sqlalchemy[asyncio]>=2.0.30",
     "asyncpg>=0.29",
-    "pypdf>=5,<7",
+    "pypdf>=5,<8",
     "pathspec>=0.12,<2",
     "httpx>=0.28,<1",
     "mcp>=1.0.0",
@@ -64,7 +64,7 @@ chroma = [
 faiss = [
     "faiss-cpu>=1.8",
 ]
-pdf = ["pypdf>=5,<7"]
+pdf = ["pypdf>=5,<8"]
 directory = ["pathspec>=0.12,<2"]
 watch = ["watchfiles>=0.24"]
 web = ["httpx>=0.28,<1"]
