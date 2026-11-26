@@ -22,6 +22,10 @@ import pytest
 
 pytest.importorskip("llama_index.core")
 
+from tests.llamaindex_env import harden_nltk_cache  # noqa: E402
+
+harden_nltk_cache()
+
 from llama_index.core.node_parser import SentenceSplitter  # noqa: E402
 from llama_index.core.schema import Document, NodeRelationship, QueryBundle, TextNode  # noqa: E402
 from llama_index.core.vector_stores.types import (  # noqa: E402
