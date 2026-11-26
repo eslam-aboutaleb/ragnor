@@ -403,3 +403,15 @@ def test_real_tesseract_extracts_legible_scan_and_reports_confidence():
     assert page.diagnostics["mean_confidence"] > 0
     blank, _ = run_ocr(scanned_pdf(white=True), config)
     assert blank[0].status == PageExtractionStatus.VERIFIED_BLANK
+
+
+def test_page_quota_breach_reports_the_limit_code_not_invalid_document():
+    from pypdf import PdfReader, PdfWriter
+
+    writer = PdfWriter()
+    for raw in (digital_pdf(), scanned_pdf()):
+        writer.add_page(PdfReader(io.BytesIO(raw)).pages[0])
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    with pytest.raises(PDFExtractionError, match="input_limit"):
+        execute(buffer.getvalue(), "render", {}, PDFExtractionLimits(max_pages=1))
