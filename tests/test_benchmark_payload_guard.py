@@ -16,6 +16,8 @@ def test_corpus_and_raw_reports_are_rejected_while_code_and_summary_are_allowed(
         "benchmarks/requirements.txt",
         "docs/extraction-benchmarks.md",
         "tests/test_pdf_quality_metrics.py",
+        "benchmarks/pdf_extraction/fixtures/documents/plain-digital-report.pdf",
+        "benchmarks/pdf_extraction/fixtures/manifest.jsonl",
     ]
     assert forbidden_payloads(forbidden + allowed) == forbidden
 
@@ -30,3 +32,18 @@ def test_review_packets_and_transcripts_cannot_escape_data_guard():
         "benchmarks/transcript.txt",
     ]
     assert forbidden_payloads(paths) == paths
+
+
+def test_repository_index_has_no_forbidden_payloads():
+    import subprocess
+
+    tracked = (
+        subprocess.run(  # noqa: S603 -- fixed read-only Git call
+            ["git", "ls-files", "-z"],  # noqa: S607
+            check=True,
+            capture_output=True,
+        )
+        .stdout.decode()
+        .split("\0")
+    )
+    assert forbidden_payloads([name for name in tracked if name]) == []

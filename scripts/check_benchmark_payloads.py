@@ -6,10 +6,16 @@ import subprocess
 from pathlib import PurePosixPath
 
 
+# Synthetic, CC0, checksum-verified gate fixtures that live in the repository.
+ALLOWED_PREFIX = "benchmarks/pdf_extraction/"
+
+
 def forbidden_payloads(paths: list[str]) -> list[str]:
     result = []
     for name in paths:
         path = PurePosixPath(name)
+        if name.startswith(ALLOWED_PREFIX):
+            continue
         if (
             ".reference." in path.name
             or (
