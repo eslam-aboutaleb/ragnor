@@ -35,6 +35,7 @@ from .connector_core import (
     SourceStatus,
     collect_pages,
     extract_documents,
+    merge_extraction_quality,
 )
 from .sources import RawDocument
 
@@ -199,6 +200,7 @@ class HttpApiConnector:
         self._last_result: LoadResult | None = None
         self._request_count = 0
         self._page_skipped: list[Any] = []
+        self._page_extraction_metadata: dict[str, Any] = {}
 
     @property
     def id(self) -> str:
@@ -393,8 +395,18 @@ class HttpApiConnector:
             provenance={"url": _safe_url(url)},
             extractor=self._extractor,
         )
+        merge_extraction_quality(self._page_extraction_metadata, result.metadata)
         if result.errors or (not result.complete and not result.has_more):
-            raise _Failure("extraction_failed", SourceStatus.ERROR)
+            error = result.errors[0] if result.errors else {}
+            raise _Failure(
+                "extraction_failed",
+                SourceStatus.INCOMPLETE,
+                **{
+                    key: value
+                    for key, value in error.items()
+                    if key in {"page", "code", "source_id"}
+                },
+            )
         self._page_skipped.extend(result.skipped)
         return result
 
@@ -470,6 +482,7 @@ class HttpApiConnector:
         """Read one bounded page; cursors belong only to this connector instance."""
         size = self.page_size if limit is None else _positive(limit, "limit")
         self._page_skipped = []
+        self._page_extraction_metadata = {}
         documents: list[RawDocument] = []
         errors: list[Any] = []
         state = self._initial_state()
@@ -523,6 +536,7 @@ class HttpApiConnector:
             complete=complete,
             pages=1,
             total_items=len(documents),
+            metadata=self._page_extraction_metadata,
         )
         self._last_result = result
         return result
