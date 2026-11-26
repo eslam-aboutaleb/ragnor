@@ -35,6 +35,7 @@ from ragnor.evidence.tokenizer import ExactTokenizerAdapter
 from ragnor.ingestion import PdfPlumberExtractor
 
 FIXTURES = Path(__file__).parent / "pdf_extraction" / "fixtures"
+SKIPPED: dict[str, str] = {}
 TOKENIZER = ExactTokenizerAdapter(lambda t: len(t.split()), name="whitespace-words")
 
 
@@ -76,7 +77,8 @@ def corpus_pages() -> tuple[dict[tuple[str, int], object], dict[str, bytes]]:
         data = (FIXTURES / rec["file"]).read_bytes()
         try:
             outcomes = extractor.extract_outcomes(data)
-        except Exception:  # corrupt/oversized fixtures are expected to fail
+        except Exception as exc:  # corrupt/oversized fixtures are expected to fail
+            SKIPPED[rec["document_id"]] = type(exc).__name__
             continue
         raw[rec["document_id"]] = data
         for outcome in outcomes:
