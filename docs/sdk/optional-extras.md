@@ -15,6 +15,8 @@ when used.
 | `faiss` | Local FAISS indexing |
 | `pdf` | PDF text extraction |
 | `pdf-ocr` | Sandboxed PDF rendering and local OCR worker; host installs Tesseract and its language models |
+| `pdf-llm` | Hosted multimodal OCR through LiteLLM; no Tesseract or local OCR models required |
+| `pdf-docling` | Docling layout/table adapter (MIT); pulls PyTorch and needs host-provisioned models |
 | `directory` | Local directory extraction |
 | `watch` | File watching |
 | `web` | HTTP document loading |

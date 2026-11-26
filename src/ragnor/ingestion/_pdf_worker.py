@@ -29,7 +29,15 @@ class Budget:
 
 def _versions():
     versions = {}
-    for name in ("pypdf", "pypdfium2", "pillow"):
+    for name in (
+        "pypdf",
+        "pypdfium2",
+        "pillow",
+        "docling",
+        "docling-core",
+        "docling-ibm-models",
+        "docling-parse",
+    ):
         try:
             versions[name] = version(name)
         except PackageNotFoundError:
@@ -63,6 +71,21 @@ def process(data, request):
             "page_count": len(baseline),
             "runtime": runtime,
             **render_pages(data, baseline, config, limits),
+        }
+    if engine == "docling":
+        from ragnor.ingestion._pdf_docling import (  # noqa: PLC0415
+            convert_document,
+            outcomes_from_conversion,
+        )
+
+        pages = outcomes_from_conversion(convert_document(data, config), baseline, budget, runtime)
+        if sum(len(page.text) for page in pages) > limits.max_text_chars:
+            raise PDFExtractionError("resource_limit")
+        return {
+            "schema_version": 1,
+            "pages": [asdict(page) for page in pages],
+            "page_count": len(baseline),
+            "runtime": runtime,
         }
     if engine != "ocr":
         raise PDFExtractionError("invalid_document")
