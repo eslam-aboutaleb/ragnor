@@ -38,22 +38,19 @@ Results are uploaded as the `real-model-benchmark-results` artifact
 
 ## Secrets to add
 
-Settings, Secrets and variables, Actions, Repository secrets. Models are
-LiteLLM model strings, so any supported provider works.
+Same names and convention as the owner's other repositories (an
+OpenAI-compatible LiteLLM gateway). Settings, Secrets and variables, Actions,
+Repository secrets:
 
-Required:
+- `LITELLM_API_KEY`: gateway virtual key
+- `LITELLM_API_BASE`: gateway URL, for example `https://gateway.example/v1`
 
-- `RAGNOR_BENCH_API_KEY`: API key (used for embeddings and the VLM unless the specific keys below are set)
-- `RAGNOR_BENCH_EMBEDDING_MODEL`: embedding model string
-- `RAGNOR_BENCH_VLM_MODEL`: vision model string
-
-Optional:
-
-- `RAGNOR_BENCH_API_BASE`: custom endpoint for a gateway or self-hosted server
-- `RAGNOR_BENCH_EMBEDDING_API_KEY`: key for embeddings only
-- `RAGNOR_BENCH_EMBEDDING_API_BASE`: endpoint for embeddings only
-- `RAGNOR_BENCH_VLM_API_KEY`: key for the VLM only
-- `RAGNOR_BENCH_VLM_API_BASE`: endpoint for the VLM only
+Models are not secrets. They are dispatch inputs with gateway-alias defaults:
+`embedding_model` = `openai/rag-embedding` and `vlm_model` =
+`openai/general-reasoning` (served by the llm-gateway aliases; the `openai/`
+prefix selects the OpenAI-compatible protocol). The gateway has no dedicated
+vision alias, so `general-reasoning` (GPT-4o upstream) is the default VLM.
+Change the inputs for another gateway or provider.
 
 A suite whose settings are missing is reported as skipped. It does not fail the run.
 
