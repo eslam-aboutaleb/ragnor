@@ -56,3 +56,36 @@ emits one warning per assembler instance, not a claim of hard model limits.
 The assembled evidence uses an exact counter for the **rendered evidence
 context**, including citation framing; the host must separately count user,
 system, tools and answer-budget tokens for the full model request.
+
+## Attesting a tokenizer against the deployed provider
+
+`ExactTokenizerAdapter(..., is_exact=True)` trusts the caller. To check that
+claim against the provider's own counts, supply a `ProviderPromptCounter`
+backed by the real provider (its token-count endpoint, or the prompt token
+usage of a real request) and run:
+
+```python
+from ragnor.evidence import attest_tokenizer, attest_prompt_counter
+
+attestation = attest_tokenizer(tokenizer, provider_counter, model_id="my-model-rev")
+attestation.require()          # raises TokenizerAttestationError on any mismatch
+attestation.fingerprint()      # stable hash of what was attested
+```
+
+`attest_tokenizer` compares the tokenizer with the provider's count of each
+probe (multilingual text, code, JSON, emoji and long input by default) after
+calibrating constant message framing. `attest_prompt_counter` compares a full
+serialized-prompt counter on the message shapes you pass. Results hold no probe
+text or credentials. A pass covers the probe set at attestation time only;
+re-run it when the model, revision or tokenizer changes. Ragnor makes no
+network call: the strength of the result is the strength of the oracle you
+supply.
+
+## Persisting snapshots
+
+`snapshot_to_dict` / `snapshot_from_dict` serialize `IngestionSnapshot` for a
+host-owned version table. Payloads from older releases load with empty values
+for newer optional fields and therefore never equal a current snapshot, so the
+source is re-ingested. A payload from a newer format, or a malformed one, raises
+`SnapshotFormatError`; a version store should treat that as "no current
+version" rather than skipping ingestion.
