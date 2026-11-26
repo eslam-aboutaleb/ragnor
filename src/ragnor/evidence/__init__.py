@@ -3,6 +3,14 @@
 from __future__ import annotations
 
 from ragnor.evidence.assembler import EvidenceAssembler, EvidenceCompressor
+from ragnor.evidence.attestation import (
+    DEFAULT_PROBES,
+    ProbeMismatch,
+    TokenizerAttestation,
+    TokenizerAttestationError,
+    attest_prompt_counter,
+    attest_tokenizer,
+)
 from ragnor.evidence.source_lookup import (
     BoundedSpanResult,
     MemorySnapshotStore,
@@ -28,6 +36,12 @@ from ragnor.evidence.types import (
 )
 
 __all__ = [
+    "DEFAULT_PROBES",
+    "ProbeMismatch",
+    "TokenizerAttestation",
+    "TokenizerAttestationError",
+    "attest_prompt_counter",
+    "attest_tokenizer",
     "ApproximateTokenizer",
     "BoundedSpanResult",
     "ContextBudget",
