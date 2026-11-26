@@ -5,6 +5,8 @@
 - Adopt Elastic License 2.0 (`Elastic-2.0`) for this source revision and future
   releases, preserving project notices. Earlier published artifacts retain
   their original terms. Previously published release 0.4.1 artifacts are unchanged.
+- Add versioned document-family extraction recipes with a verification-guarded
+  fast path, scoped stores and a family benchmark (`ragnor.ingestion.recipes`, Refs #67).
 
 
 All notable changes to ragnor (published on PyPI as `ragnor`) are
