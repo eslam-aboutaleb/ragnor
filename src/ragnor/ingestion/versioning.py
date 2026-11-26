@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
 from ragnor.chunking.base import Chunker
@@ -70,6 +70,69 @@ class IngestionSnapshot:
     extractor_options: dict[str, Any] = field(default_factory=dict)
     embedding_profile_hash: str = ""
     chunker_config_hash: str = ""
+
+
+SNAPSHOT_FORMAT_VERSION = 1
+"""Serialization format of :func:`snapshot_to_dict` payloads."""
+
+_REQUIRED_SNAPSHOT_FIELDS = (
+    "source_hash",
+    "embedding_model",
+    "embedding_dim",
+    "chunker_version",
+    "chunk_size",
+    "overlap",
+    "retrieval_schema_version",
+)
+
+
+class SnapshotFormatError(ValueError):
+    """A persisted snapshot payload cannot be interpreted safely."""
+
+
+def snapshot_to_dict(snapshot: IngestionSnapshot) -> dict[str, Any]:
+    """Serialize ``snapshot`` to a JSON-compatible dict for host-side storage."""
+    payload = asdict(snapshot)
+    payload["snapshot_format"] = SNAPSHOT_FORMAT_VERSION
+    return payload
+
+
+def snapshot_from_dict(payload: dict[str, Any]) -> IngestionSnapshot:
+    """Load a persisted snapshot, including payloads written by older releases.
+
+    Optional fields added after the first release (extractor identity,
+    embedding profile hash, chunker config hash) default to their
+    backward-compatible empty values when absent. Because a current snapshot
+    always carries a non-empty ``chunker_config_hash``, a historic row without
+    one never compares equal, so it is re-ingested rather than wrongly skipped.
+    Unknown keys from a newer writer are ignored, but a payload declaring a
+    newer ``snapshot_format`` than this release understands is refused.
+
+    Raises:
+        SnapshotFormatError: A required field is missing or has the wrong
+            type, or the format version is newer than supported.
+    """
+    if not isinstance(payload, dict):
+        raise SnapshotFormatError("snapshot payload must be an object")
+    declared = payload.get("snapshot_format", 0)
+    if not isinstance(declared, int) or isinstance(declared, bool) or declared < 0:
+        raise SnapshotFormatError("snapshot_format must be a non-negative integer")
+    if declared > SNAPSHOT_FORMAT_VERSION:
+        raise SnapshotFormatError(f"snapshot_format {declared} is newer than supported")
+    missing = [name for name in _REQUIRED_SNAPSHOT_FIELDS if name not in payload]
+    if missing:
+        raise SnapshotFormatError(f"snapshot payload is missing {', '.join(missing)}")
+    known = {f.name for f in fields(IngestionSnapshot)}
+    values = {k: v for k, v in payload.items() if k in known}
+    try:
+        values["embedding_dim"] = int(values["embedding_dim"])
+        values["chunk_size"] = int(values["chunk_size"])
+        values["overlap"] = int(values["overlap"])
+    except (TypeError, ValueError) as exc:
+        raise SnapshotFormatError("snapshot numeric field is invalid") from exc
+    if not isinstance(values.get("extractor_options", {}), dict):
+        raise SnapshotFormatError("extractor_options must be an object")
+    return IngestionSnapshot(**values)
 
 
 def snapshot_matches(
