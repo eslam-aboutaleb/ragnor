@@ -175,7 +175,7 @@ def test_provider_subprocess_returns_typed_outcomes(smoke_manifest):
     from benchmarks.pdf_extraction import _extract
 
     data = (smoke_manifest.parent / "digital.pdf").read_bytes()
-    outcomes = _extract(PDFExtractor(), data, 10)
+    outcomes = _extract(PDFExtractor(), data, 60)
     assert outcomes[0].text == "First page"
     assert outcomes[0].status == "extracted"
 

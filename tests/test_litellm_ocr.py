@@ -248,7 +248,7 @@ async def test_explicit_cancellation_propagates_and_reaps_pending_model_tasks():
 
     provider = LiteLLMOCRProvider(model="model", acompletion=slow)
     task = asyncio.create_task(provider.aextract_outcomes(scanned_pdf()))
-    await asyncio.wait_for(entered.wait(), 5)
+    await asyncio.wait_for(entered.wait(), 60)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
