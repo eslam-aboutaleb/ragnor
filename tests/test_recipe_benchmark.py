@@ -1,6 +1,5 @@
 """Benchmark gates (deterministic, offline)."""
 
-
 from benchmarks.recipe_family.runner import run_benchmark as recipe_benchmark
 
 
