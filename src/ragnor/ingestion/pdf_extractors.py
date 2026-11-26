@@ -20,7 +20,7 @@ from typing import Any
 
 from ragnor.embeddings._safe_config import safe_config
 from ragnor.ingestion._pdf_process import execute
-from ragnor.ingestion.ocr import shared_limits
+from ragnor.ingestion.ocr import OCRProvider, shared_limits
 from ragnor.ingestion.extraction_types import PDFExtractionError, PDFExtractionLimits, PageVerifier
 from ragnor.ingestion.extractors import Extractor, PageExtractionOutcome, PageExtractionStatus
 
@@ -160,6 +160,41 @@ class _PDFAdapter(Extractor):
         return "\n\n".join(text for _, text in self.extract_pages(data) if text)
 
 
+class PdfPlumberExtractor(_PDFAdapter):
+    """Machine-generated PDF text, normalized words/blocks and table cells/spans."""
+
+    id = "pdfplumber"
+    _engine = "native"
+
+    def __init__(  # noqa: PLR0913 -- explicit optional provider configuration
+        self,
+        *,
+        table_settings: dict | None = None,
+        word_settings: dict | None = None,
+        include_tables: bool = True,
+        limits: PDFExtractionLimits | None = None,
+        verifier: PageVerifier | None = None,
+        policy: str = "strict",
+    ) -> None:
+        if any(
+            value is not None and not isinstance(value, dict)
+            for value in (table_settings, word_settings)
+        ):
+            raise ValueError("Table and word settings must be dictionaries")
+        if type(include_tables) is not bool:
+            raise ValueError("include_tables must be boolean")
+        self._configure(
+            {
+                "table_settings": table_settings or {},
+                "word_settings": {"use_text_flow": True, **(word_settings or {})},
+                "include_tables": include_tables,
+            },
+            limits,
+            verifier,
+            policy,
+        )
+
+
 class TesseractPDFExtractor(_PDFAdapter):
     """Render PDF pages and run host-installed Tesseract, including ara+eng OCR.
 
@@ -241,3 +276,59 @@ class TesseractPDFExtractor(_PDFAdapter):
 
 class TesseractOCRProvider(TesseractPDFExtractor):
     """Local implementation of the OCRProvider port; existing PDF API preserved."""
+
+
+class AutoPDFExtractor(_PDFAdapter):
+    """Keep complete native pages; OCR uncertain pages and retain native tables.
+
+    Configure verification here, after routing, rather than on child adapters.
+    Shared quotas are the strictest of the router and both child configurations.
+    """
+
+    id = "pdf-auto"
+    _engine = "auto"
+
+    def __init__(  # noqa: PLR0913 -- composable provider and acceptance configuration
+        self,
+        *,
+        native: PdfPlumberExtractor | None = None,
+        ocr: OCRProvider | None = None,
+        limits: PDFExtractionLimits | None = None,
+        verifier: PageVerifier | None = None,
+        policy: str = "strict",
+    ) -> None:
+        native = native or PdfPlumberExtractor()
+        ocr = ocr or TesseractPDFExtractor()
+        if native._verifier is not None or getattr(ocr, "_verifier", None) is not None:
+            raise ValueError("Configure verification on AutoPDFExtractor, not its children")
+        if not isinstance(ocr, OCRProvider):
+            raise ValueError("ocr must implement OCRProvider")
+        self._native = native
+        self._ocr_provider = ocr
+        shared = shared_limits(limits or PDFExtractionLimits(), native.limits, ocr.limits)
+        ocr_config = (
+            ocr._config
+            if isinstance(ocr, TesseractPDFExtractor)
+            else safe_config(
+                {
+                    "id": ocr.id,
+                    "version": ocr.version,
+                    "options": ocr.options,
+                }
+            )
+        )
+        self._configure({"native": native._config, "ocr": ocr_config}, shared, verifier, policy)
+
+    def extract_outcomes(self, data: bytes) -> list[PageExtractionOutcome]:
+        if isinstance(self._ocr_provider, TesseractPDFExtractor):
+            return super().extract_outcomes(data)
+        from ragnor.ingestion._provider_pdf import extract_auto  # noqa: PLC0415
+
+        return extract_auto(self, data)
+
+    async def aextract_outcomes(self, data: bytes) -> list[PageExtractionOutcome]:
+        if isinstance(self._ocr_provider, TesseractPDFExtractor):
+            return await super().aextract_outcomes(data)
+        from ragnor.ingestion._provider_pdf import aextract_auto  # noqa: PLC0415
+
+        return await aextract_auto(self, data)

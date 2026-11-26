@@ -278,3 +278,38 @@ def test_policy_exclusion_never_emits_text():
     assert result.authoritative
     assert not result
     assert result.skipped[0].reason == "policy_excluded"
+
+
+def test_zero_page_pdf_is_never_a_successful_empty_revision():
+    from pypdf import PdfWriter
+
+    out = BytesIO()
+    PdfWriter().write(out)
+    result = extract_documents(out.getvalue(), "empty.pdf", "empty", {}, {})
+    assert not result.authoritative
+    assert not result
+    assert result.errors
+
+
+def test_unicode_text_survives_strict_extraction_and_unverified_unicode_page_is_withheld():
+    from types import SimpleNamespace
+
+    text = "مرحبا بالعالم 你好世界 😀 e\u0301"
+    complete = [PageExtractionOutcome(1, PageExtractionStatus.EXTRACTED, text, reason="native")]
+    partial = [
+        *complete,
+        PageExtractionOutcome(2, PageExtractionStatus.PARTIAL, text, reason="ocr_unverified"),
+    ]
+
+    def adapter(outcomes):
+        return SimpleNamespace(
+            id="test", version="1", options={}, extract_outcomes=lambda data: outcomes
+        )
+
+    ok = extract_documents(b"x", "u.pdf", "u", {}, {}, adapter(complete))
+    assert ok.authoritative
+    assert [document.content for document in ok] == [text]
+    blocked = extract_documents(b"x", "u.pdf", "u", {}, {}, adapter(partial))
+    assert not blocked.authoritative
+    assert not blocked
+    assert text not in str(blocked.errors)
