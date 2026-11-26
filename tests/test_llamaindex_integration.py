@@ -259,7 +259,7 @@ async def test_vector_store_fails_closed_on_cross_scope_row() -> None:
     _, alice, _ = await seeded()
     alice_view = RagnorVectorStore(inner, isolation_scope="alice")
     await alice_view.async_add([node("a9", "stray note")])
-    rows = await inner.get(ids=["a9"], metadata_fields=alice_view._metadata_fields())
+    rows = await inner.get(ids=["alice:a9"], metadata_fields=alice_view._metadata_fields())
     rows[0]["metadata"]["tenant_id"] = "bob"
     with pytest.raises(ScopeViolationError):
         alice_view._node(rows[0])
@@ -386,8 +386,8 @@ async def test_retriever_dense_and_hybrid_are_scoped() -> None:
         metadata_fields=["kind"],
     )
     hits = await dense.aretrieve("invoice payment")
-    assert {h.node.node_id for h in hits} == {"a1", "a2"}
-    assert hits[0].node.node_id == "a1"
+    assert {h.node.node_id for h in hits} == {"alice:a1", "alice:a2"}
+    assert hits[0].node.get_content() == CORPUS_A["a1"]
     assert hits[0].score >= hits[-1].score
 
     hybrid = RagnorRetriever(
@@ -397,8 +397,8 @@ async def test_retriever_dense_and_hybrid_are_scoped() -> None:
         similarity_top_k=5,
     )
     bob_hits = await hybrid.aretrieve(QueryBundle("invoice dispute"))
-    assert {h.node.node_id for h in bob_hits} <= {"b1", "b2"}
-    assert bob_hits[0].node.node_id == "b1"
+    assert {h.node.node_id for h in bob_hits} <= {"bob:b1", "bob:b2"}
+    assert bob_hits[0].node.get_content() == CORPUS_B["b1"]
 
 
 def test_retriever_sync_path_and_isolation() -> None:
@@ -407,8 +407,8 @@ def test_retriever_sync_path_and_isolation() -> None:
         DenseRetrieval(store, _Embedder()), isolation_scope="bob", threshold=2.0
     )
     hits = retriever.retrieve("quarterly roadmap")
-    assert hits[0].node.node_id == "b2"
-    assert all(h.node.node_id.startswith("b") for h in hits)
+    assert hits[0].node.get_content() == CORPUS_B["b2"]
+    assert all(h.node.node_id.startswith("bob:") for h in hits)
 
 
 async def test_retriever_scope_cannot_be_overridden() -> None:
