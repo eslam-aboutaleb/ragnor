@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import unicodedata
 from dataclasses import replace
 
 from ragnor.ingestion.extraction_types import (
@@ -57,6 +58,64 @@ def _table(table, page, budget) -> ExtractionTable:
     return ExtractionTable(_box(table.bbox, page), len(ys) - 1, len(xs) - 1, tuple(cells))
 
 
+def _rtl_share(text: str) -> float:
+    letters = [c for c in text if unicodedata.bidirectional(c) in {"L", "R", "AL"}]
+    return (
+        sum(unicodedata.bidirectional(c) in {"R", "AL"} for c in letters) / len(letters)
+        if letters
+        else 0.0
+    )
+
+
+def _is_rtl_word(text: str) -> bool:
+    return _rtl_share(text) > 0.5
+
+
+def to_logical_order(objects: list[dict]) -> list[dict]:
+    """Turn pdfminer's visual-order words on right-to-left lines into logical order.
+
+    pdfminer returns glyphs left to right as drawn, so an Arabic or Hebrew line
+    arrives with its words and the characters inside each word reversed.
+    Lines are runs of words with the same baseline. A line whose letters are
+    mostly right-to-left has its words reversed and each right-to-left word's
+    characters reversed; left-to-right runs (Latin words, numbers) keep their
+    internal order. Left-to-right lines are returned untouched.
+    """
+    out: list[dict] = []
+    line: list[dict] = []
+
+    def flush() -> None:
+        if not line:
+            return
+        if _rtl_share(" ".join(w["text"] for w in line)) <= 0.5:
+            out.extend(line)
+            line.clear()
+            return
+        fixed = [
+            {**w, "text": w["text"][::-1]} if _is_rtl_word(w["text"]) else w for w in reversed(line)
+        ]
+        # reversing the line also reversed runs of LTR words; restore them
+        i = 0
+        while i < len(fixed):
+            if _is_rtl_word(fixed[i]["text"]):
+                i += 1
+                continue
+            j = i
+            while j < len(fixed) and not _is_rtl_word(fixed[j]["text"]):
+                j += 1
+            fixed[i:j] = fixed[i:j][::-1]
+            i = j
+        out.extend(fixed)
+        line.clear()
+
+    for word in objects:
+        if line and abs(word["top"] - line[-1]["top"]) > 2:
+            flush()
+        line.append(word)
+    flush()
+    return out
+
+
 def _text(words, tables, include_tables):
     if not include_tables:
         return " ".join(word.text for word in words)
@@ -93,7 +152,7 @@ def extract_native(data, baseline, config, budget):
         for original, evidence in zip(document.pages, baseline, strict=True):
             try:
                 page = original.crop(original.mediabox)
-                objects = page.extract_words(**config["word_settings"])
+                objects = to_logical_order(page.extract_words(**config["word_settings"]))
                 budget.add("words", len(objects))
                 words, unlocated_words = [], 0
                 for word in objects:
