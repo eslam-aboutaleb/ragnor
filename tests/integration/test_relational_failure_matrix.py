@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import os
 from datetime import timedelta
+from time import perf_counter
+from typing import Protocol
 from uuid import uuid4
 
 import pytest
@@ -20,6 +22,56 @@ from ragnor.jobs.outbox import LostJobOwnershipError
 from tests.sqlite_host import create_sqlite_engine
 
 pytestmark = pytest.mark.asyncio
+
+
+class _HeldLock(Protocol):
+    async def acquire(self) -> None: ...
+
+    async def release(self) -> None: ...
+
+
+async def _release_after(locker: _HeldLock, seconds: float) -> None:
+    await asyncio.sleep(seconds)
+    await locker.release()
+
+
+class _SqliteWriteLock:
+    """Hold a real SQLite writer lock, taken through the driver itself."""
+
+    def __init__(self, path) -> None:
+        self._path = str(path)
+        self._connection = None
+
+    async def acquire(self) -> None:
+        import aiosqlite
+
+        self._connection = await aiosqlite.connect(self._path, isolation_level=None)
+        await self._connection.execute("BEGIN IMMEDIATE")
+
+    async def release(self) -> None:
+        await self._connection.rollback()
+        await self._connection.close()
+
+
+class _PostgresTableLock:
+    """Hold a real PostgreSQL EXCLUSIVE table lock in an open transaction."""
+
+    def __init__(self, url: str) -> None:
+        self._dsn = url.replace("postgresql+asyncpg://", "postgresql://", 1)
+        self._connection = None
+        self._transaction = None
+
+    async def acquire(self) -> None:
+        import asyncpg
+
+        self._connection = await asyncpg.connect(self._dsn)
+        self._transaction = self._connection.transaction()
+        await self._transaction.start()
+        await self._connection.execute(f"LOCK TABLE {jobs.name} IN EXCLUSIVE MODE")
+
+    async def release(self) -> None:
+        await self._transaction.rollback()
+        await self._connection.close()
 
 
 @pytest.mark.parametrize("dialect", ["sqlite", "postgresql"])
@@ -130,3 +182,50 @@ async def test_same_host_owned_failure_matrix(dialect: str, tmp_path) -> None:  
     finally:
         await first_engine.dispose()
         await second_engine.dispose()
+
+
+@pytest.mark.parametrize("dialect", ["sqlite", "postgresql"])
+async def test_claim_retries_through_transient_database_lock(dialect: str, tmp_path) -> None:
+    """A locked/busy database fails early claim attempts; bounded retry still claims.
+
+    SQLite raises a driver busy error; PostgreSQL cancels the blocked statement
+    at its timeout. Both are transient claim failures the adapter must retry
+    until the lock clears, not surface to the host.
+    """
+    if dialect == "postgresql":
+        url = os.environ.get("RAGNOR_TEST_DATABASE_URL")
+        if not url:
+            pytest.skip("requires a real PostgreSQL service")
+        engine = create_async_engine(
+            url, connect_args={"server_settings": {"statement_timeout": "250"}}
+        )
+        locker: _HeldLock = _PostgresTableLock(url)
+    else:
+        path = tmp_path / "retry.db"
+        url = f"sqlite+aiosqlite:///{path}"
+        engine = create_sqlite_engine(url, timeout=0.05)
+        locker = _SqliteWriteLock(path)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    scope = f"retry-{uuid4()}"
+    store = RelationalJobStoreFactory(sessions).job_store(scope=scope)
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(metadata.create_all)
+        expected = {f"job-{number}" for number in range(3)}
+        for key in expected:
+            await store.enqueue({"scope": scope, "idempotency_key": key})
+        await store.validate_schema()  # finish one-time preflight before the lock
+        await locker.acquire()
+        releaser = asyncio.create_task(_release_after(locker, 0.6))
+        started = perf_counter()
+        try:
+            claimed = await store.claim_and_mark_processing(3, "worker-retry")
+        finally:
+            elapsed = perf_counter() - started
+            await releaser
+        assert len(claimed) == 3
+        assert {job.payload["idempotency_key"] for job in claimed} == expected
+        assert {job.claim_owner for job in claimed} == {"worker-retry"}
+        assert elapsed >= 0.2  # the first attempt really failed before retry won
+    finally:
+        await engine.dispose()

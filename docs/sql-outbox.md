@@ -88,9 +88,13 @@ def begin_sqlite(connection):
 
 Use that pair only for a SQLite engine. SQLite serializes file writers; more
 workers may increase contention instead of throughput. Claims use conditional
-updates and fenced leases. Busy/operational claim failures retry with bounded
+updates and fenced leases. Transient claim failures retry with bounded
 backoff: at most 20 claim attempts, exponential delay starting at 25 ms,
-capped at 500 ms with jitter. After exhaustion the error reaches the host.
+capped at 500 ms with jitter. Retried failures are driver busy/operational
+errors, deadlocks (SQLSTATE 40P01), lock or statement timeouts (55P03, 57014),
+serialization failures (40001) and connection losses (SQLSTATE class 08).
+Permanent database errors, such as constraint violations, raise immediately.
+After exhaustion the error reaches the host.
 Set connection and statement timeouts in the host so one blocked attempt does
 not outlive the worker lease. Set the worker's processing deadline below the
 lease or renew it during long work. Monitor retry failures and rerun the real
@@ -110,8 +114,8 @@ with the host's other authoritative state.
 
 CI runs the same failure matrix on real PostgreSQL and file-backed SQLite,
 including separate worker processes, killed-worker replay, fencing, duplicate
-enqueue, rollback, reservations, publication order, tenant isolation, and
-reconnection. `benchmarks/relational_outbox_profile.py` records 1/2/4-worker
+enqueue, rollback, reservations, publication order, tenant isolation,
+reconnection, and claim retry through a transient database lock. `benchmarks/relational_outbox_profile.py` records 1/2/4-worker
 throughput for each database without treating one machine's result as an SLA.
 In a local 80-job run on 25 October 2026, observed jobs per second were:
 
