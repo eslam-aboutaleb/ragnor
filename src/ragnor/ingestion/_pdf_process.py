@@ -131,6 +131,7 @@ def _execute(data, engine, config, limits):
             code = response["error"]
             allowed = {
                 "dependency_missing",
+                "input_limit",
                 "invalid_document",
                 "output_limit",
                 "resource_limit",
