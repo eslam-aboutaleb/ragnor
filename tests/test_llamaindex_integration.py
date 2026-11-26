@@ -17,6 +17,10 @@ import pytest
 
 pytest.importorskip("llama_index.core")
 
+from tests.llamaindex_env import harden_nltk_cache  # noqa: E402
+
+harden_nltk_cache()
+
 from llama_index.core import Settings, StorageContext, VectorStoreIndex  # noqa: E402
 from llama_index.core.base.embeddings.base import BaseEmbedding  # noqa: E402
 from llama_index.core.node_parser import SentenceSplitter  # noqa: E402

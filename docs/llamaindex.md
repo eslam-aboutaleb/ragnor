@@ -96,3 +96,11 @@ Isolation notes:
   readers are tested.
 - Tested with `llama-index-core` 0.12.0 (the lower bound) and the latest release
   in CI. The upper bound `<0.15` is a guard, not a promise.
+
+## Environment note: NLTK data permissions
+
+`SentenceSplitter` loads bundled NLTK data. Recent NLTK refuses data from a
+directory that group or other accounts can write to, so on a host with a
+permissive umask it raises `LookupError: Resource 'stopwords' not found`. If you
+hit it, run `chmod -R go-w <site-packages>/llama_index/core/_static/nltk_cache`.
+The test suite does this itself (`tests/llamaindex_env.py`).
