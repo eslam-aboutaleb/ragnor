@@ -88,3 +88,30 @@ Honest gaps: this does not report EX-02 retrieval Recall@K or end-to-end citatio
 accuracy, since that needs an embedding model and the EX-02 harness. The ingestion
 pipeline still calls `chunker.chunk(text)`, so passing a `StructuredDocument`
 through the pipeline automatically needs EX-03.
+
+## Real-corpus benchmark (lexical retrieval)
+
+`python -m benchmarks.structured_chunking_real --budget N` runs the real
+`PdfPlumberExtractor` over the EX-02 fixture PDFs, chunks each page with
+`SlidingWindowChunker` (page text as ingestion produces it today, tables inline
+as HTML) and with `StructuredDocumentChunker`, indexes every chunk in one BM25
+index and asks 125 table-cell questions derived from the corpus annotations
+(row label plus column header). A chunk answers a question when row label,
+column header and value are all in it, on the right page. Contract probes, no
+embedding model, so this is lexical retrieval only, on a small synthetic corpus.
+
+| Budget (words) | Sliding Recall@5 | Structured Recall@5 | Sliding / structured chunks |
+|---|---|---|---|
+| 20 | 0.160 | 0.472 | 77 / 86 |
+| 40 | 0.552 | 0.736 | 39 / 53 |
+| 80 | 1.000 | 1.000 | 25 / 28 |
+| 200 | 1.000 | 1.000 | 24 / 20 |
+
+Structured chunking helps when the budget is smaller than a table, because it
+repeats the header and caption on every partition. At budgets of 80 words or
+more every table fits whole in these documents and the two tie (0.992 Recall@1
+both, MRR 0.996 vs 0.995). At small budgets structured still cannot answer 33
+of 125 questions at 40 words and 66 at 20, because a row plus its header does
+not always fit the budget. It costs more chunks at small budgets (53 vs 39 at
+40 words). This corpus has few and short tables, so the tie at larger budgets
+does not show the benefit on long real-world tables.
