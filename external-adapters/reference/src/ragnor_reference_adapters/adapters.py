@@ -63,9 +63,7 @@ class ReferenceEmbedder:
 
     def _embed(self, text: str) -> list[float]:
         digest = hashlib.sha256(text.encode("utf-8")).digest()
-        return [
-            (digest[index % len(digest)] / 127.5) - 1.0 for index in range(self.dimension)
-        ]
+        return [(digest[index % len(digest)] / 127.5) - 1.0 for index in range(self.dimension)]
 
 
 class ReferenceEventSink:
