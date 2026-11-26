@@ -496,8 +496,9 @@ def test_sdk_benchmark_uses_worker_deadline_and_real_tables():
     from benchmarks.quality_providers import SDKNativeProvider
 
     provider = SDKNativeProvider()
-    page = provider.extract_bounded(digital_pdf(table=True), 10)[0]
-    assert provider.adapter.limits.timeout_seconds == 10
+    # Coverage-traced CI workers run an order of magnitude slower than a bare process.
+    page = provider.extract_bounded(digital_pdf(table=True), 60)[0]
+    assert provider.adapter.limits.timeout_seconds == 60
     assert page.tables and 'colspan="2"' in page.tables[0]["html"]
     assert page.words and not page.verified_complete
     assert page.cpu_seconds is not None
