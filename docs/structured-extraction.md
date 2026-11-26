@@ -77,3 +77,33 @@ registered id, version and *safe* options (no prompts, credentials, URL
 userinfo, long free text or bytes). It feeds `build_snapshot`: a changed
 provider version, option, recipe/model value or mode changes the snapshot and
 forces a re-index; an unchanged configuration compares equal.
+
+## Page profiling and routing
+
+`ragnor.extraction.routing` (zero dependencies) decides, per page, which
+capability reads it. `PageProfile` holds cheap facts: kind (`digital`, `scan`,
+`mixed`, `blank`, `unknown`), `/Rotate`, dominant text direction, text length,
+image/drawing/annotation flags and a text-column hint. `route_page` maps a
+profile plus `Available` capabilities (built from registered `ProviderSpec`s)
+onto a `RouteDecision`: `native`, `layout`, `ocr`, `skip_blank` or
+`unroutable`.
+
+* Pure and deterministic: same profile, capabilities and policy give the same
+  decision. No model or network call. A remote provider is used only with
+  `RoutePolicy(allow_remote=True)`; a local one always wins.
+* Cost order is text, layout, OCR. A scan needs OCR. A mixed page (text plus
+  images, drawings or annotations) prefers layout, then OCR, and uses native
+  text only when nothing else is configured.
+* Nothing is dropped. With no provider able to read a page the decision is
+  `unroutable` and names the missing capability; only a verified blank page is
+  `skip_blank`, and it is still reported. `plan_document` returns exactly one
+  decision per page.
+* Sideways or upside-down text is recorded (`visual_orientation`) and flagged
+  `bbox_requires_rotation_transform` when boxes need the rotated frame.
+
+`ragnor.ingestion.pdf_profiler.PdfPageProfiler` (`ragnor[pdf]`) builds
+profiles from the PDF structure and text-positioning operators with pypdf. It
+renders nothing, implements the `PageProfiler` port and also exposes
+`profile_pages`. Limitations: the column hint counts left-edge clusters of
+upright text lines, so it is a hint, not layout analysis; it does not decode
+rotated images inside scans.

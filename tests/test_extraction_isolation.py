@@ -186,3 +186,17 @@ def test_registered_provider_closure_under_cancellation_and_timeout():
     assert err.value.code == "fallback_exhausted" and closed == ["slow"]
     with pytest.raises(ExtractionConfigError):
         registry.create("slow", {}) and registry.create("nope")
+
+
+def test_routing_imports_and_runs_without_any_optional_engine():
+    script = f"""
+    import sys
+    for name in {VENDORS!r}:
+        sys.modules[name] = None
+    from ragnor.extraction import Available, Capability, PageKind, PageProfile, route_page
+    d = route_page(PageProfile(1, PageKind.SCAN), Available(local=frozenset({{Capability.OCR}})))
+    assert d.route.value == "ocr", d
+    print('ok')
+    """
+    result = run(script)
+    assert result.returncode == 0, result.stderr

@@ -38,6 +38,17 @@ from ragnor.extraction.registry import (
     ProviderRegistry,
     ProviderSpec,
 )
+from ragnor.extraction.routing import (
+    Available,
+    PageKind,
+    PageProfile,
+    Route,
+    RouteDecision,
+    RoutePolicy,
+    plan_document,
+    route_page,
+    summarize,
+)
 from ragnor.extraction.serializers import (
     from_json,
     region_text,
@@ -74,6 +85,15 @@ from ragnor.extraction.types import (
 )
 
 __all__ = [
+    "Available",
+    "PageKind",
+    "PageProfile",
+    "Route",
+    "RouteDecision",
+    "RoutePolicy",
+    "plan_document",
+    "route_page",
+    "summarize",
     "ENTRY_POINT_GROUP",
     "SCHEMA_VERSION",
     "ArtifactStore",
