@@ -121,6 +121,14 @@ ignore = [
 "src/ragnor/stores/pgvector.py" = [
     "S608",
 ]
+# Fixture generator is a developer tool with drawing-oriented call shapes
+# (many small layout arguments) and a seeded, non-cryptographic RNG.
+"benchmarks/pdf_extraction/generate_fixtures.py" = [
+    "E501",
+    "PLR0913",
+    "PLR0917",
+    "S311",
+]
 
 [tool.setuptools.package-data]
 ragnor = ["py.typed", "jobs/adapters/migrations/*.sql"]

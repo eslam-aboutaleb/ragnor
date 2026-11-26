@@ -1,0 +1,8 @@
+# Generation-time-only dependencies for
+#   python -m benchmarks.pdf_extraction.generate_fixtures
+# Never installed by CI, tests, or the benchmark runner: the generated PDFs,
+# manifest and baseline are committed artifacts.
+reportlab>=4
+pillow>=10
+arabic-reshaper>=3
+python-bidi>=0.4
