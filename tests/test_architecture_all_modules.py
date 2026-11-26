@@ -29,6 +29,10 @@ VENDOR_ROOTS = frozenset(
         "watchfiles",
         "mcp",
         "pypdf",
+        "pypdfium2",
+        "PIL",
+        "docling",
+        "docling_core",
         "opentelemetry",
     }
 )
