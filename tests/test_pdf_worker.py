@@ -158,7 +158,8 @@ def test_render_rejects_unknown_engine_and_oversized_page_selection():
         (PDFExtractionLimits(max_bytes=1), b"pdf"),
         (PDFExtractionLimits(max_words=1), "scanned"),
         (PDFExtractionLimits(max_text_chars=1), "scanned"),
-    ])
+    ],
+)
 def test_quotas_reject_instead_of_silently_truncating(fake_ocr, limits, data):
     data = scanned_pdf() if data == "scanned" else data
     with pytest.raises(PDFExtractionError, match="input_limit|resource_limit"):
