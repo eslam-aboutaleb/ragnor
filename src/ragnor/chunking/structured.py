@@ -44,9 +44,7 @@ BBox = tuple[float, float, float, float]
 CHUNKER_VERSION = "structured-v1"
 """Bump when chunk boundaries, text projection or identity derivation change."""
 
-REGION_KINDS = frozenset(
-    {"heading", "paragraph", "list", "table", "figure", "formula", "caption"}
-)
+REGION_KINDS = frozenset({"heading", "paragraph", "list", "table", "figure", "formula", "caption"})
 _ATOMIC_KINDS = frozenset({"table", "figure", "formula"})
 _ASSET_KEYS = frozenset({"html", "json", "crop", "image"})
 
@@ -491,9 +489,7 @@ class StructuredDocumentChunker:
         chunks: list[Chunk] = []
         for part, (first, last) in enumerate(ranges):
             text = render(first, last, part, parts)
-            spans = [
-                self._row_span(table, index, rows[index]) for index in range(first, last)
-            ]
+            spans = [self._row_span(table, index, rows[index]) for index in range(first, last)]
             if not rows:
                 spans = [_span(table)]
             extra: dict[str, Any] = {

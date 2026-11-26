@@ -208,8 +208,14 @@ class TestProvenance:
 
     def test_figure_and_formula_stay_atomic_with_caption(self) -> None:
         d = doc(
-            region("f", "figure", "Bar chart of sales", page=4, bbox=(0, 0, 0.5, 0.5),
-                   assets={"crop": "s3://bucket/crops/f.png"}),
+            region(
+                "f",
+                "figure",
+                "Bar chart of sales",
+                page=4,
+                bbox=(0, 0, 0.5, 0.5),
+                assets={"crop": "s3://bucket/crops/f.png"},
+            ),
             region("fc", "caption", "Figure 2", caption_for="f"),
             region("e", "formula", "E = mc^2", page=4),
         )
@@ -299,7 +305,9 @@ class TestBudget:
             table("t", 40, caption="A caption for the table"),
         )
         for limit in (45, 60, 90):
-            chunks = StructuredDocumentChunker(EXACT, max_tokens=limit, strict=True).chunk_document(d)
+            chunks = StructuredDocumentChunker(EXACT, max_tokens=limit, strict=True).chunk_document(
+                d
+            )
             assert chunks
             assert all(words(c.text) <= limit for c in chunks)
             assert all(c.metadata["token_count"] == words(c.text) for c in chunks)
@@ -514,8 +522,11 @@ def test_no_paragraph_words_or_table_rows_are_lost(data, limit) -> None:
     for region_ in structured.regions:
         if region_.kind != "paragraph":
             continue
-        pieces = [c.text for c in chunks
-                  if any(s["region_id"] == region_.region_id for s in c.metadata["source_spans"])]
+        pieces = [
+            c.text
+            for c in chunks
+            if any(s["region_id"] == region_.region_id for s in c.metadata["source_spans"])
+        ]
         assert pieces, "paragraph lost"
         body = " ".join(p.split("\n\n", 1)[-1] if "\n\n" in p else p for p in pieces).split()
         # strip repeated section prefix words that may follow the first newline
@@ -525,7 +536,9 @@ def test_no_paragraph_words_or_table_rows_are_lost(data, limit) -> None:
         if region_.kind != "table":
             continue
         attributed = [
-            s["row"] for c in chunks for s in c.metadata["source_spans"]
+            s["row"]
+            for c in chunks
+            for s in c.metadata["source_spans"]
             if s["region_id"] == region_.region_id and s["kind"] == "table_row"
         ]
         assert attributed == list(range(len(region_.rows)))
@@ -544,7 +557,8 @@ def test_heading_level_shift_keeps_content_and_paths(data, limit) -> None:
         structured.fingerprint,
         tuple(
             StructuredRegion(r.region_id, "heading", text=r.text, level=r.level + 2)
-            if r.kind == "heading" else r
+            if r.kind == "heading"
+            else r
             for r in structured.regions
         ),
     )
@@ -665,7 +679,10 @@ class TestMarkdownFallbackAndCompat:
         )
         pages = [
             PageExtractionOutcome(
-                2, PageExtractionStatus.EXTRACTED, text="Parts list.\n\nSecond block.", tables=(table_,)
+                2,
+                PageExtractionStatus.EXTRACTED,
+                text="Parts list.\n\nSecond block.",
+                tables=(table_,),
             ),
             PageExtractionOutcome(1, PageExtractionStatus.EXTRACTED, text="Cover page."),
         ]
@@ -673,7 +690,10 @@ class TestMarkdownFallbackAndCompat:
             pages, document_id="d", fingerprint="f", access={"tenant_id": "t"}
         )
         assert [r.region_id for r in d.regions] == [
-            "p1-text0", "p2-text0", "p2-text1", "p2-table0",
+            "p1-text0",
+            "p2-text0",
+            "p2-text1",
+            "p2-table0",
         ]
         chunks = StructuredDocumentChunker(EXACT, max_tokens=80, strict=True).chunk_document(d)
         tbl = next(c for c in chunks if c.metadata["kind"] == "table")
