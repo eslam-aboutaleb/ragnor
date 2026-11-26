@@ -40,6 +40,10 @@ from ragnor.ingestion.extraction_types import (
     PDFExtractionLimits,
     PageVerifier,
 )
+from ragnor.ingestion.pdf_extractors import TesseractPDFExtractor, TesseractOCRProvider
+from ragnor.ingestion.ocr import OCRProvider
+from ragnor.ingestion.litellm_ocr import LiteLLMOCRProvider
+from ragnor.ingestion.docling_adapter import DoclingPDFExtractor
 from ragnor.ingestion.http_connector import Credential, HttpApiConnector, WebsiteConnector
 from ragnor.ingestion.object_connector import ObjectStorageClient, ObjectStorageConnector
 from ragnor.ingestion.sources import ConnectorDocumentSource, DocumentSourceConnector
@@ -58,6 +62,10 @@ ObjectStoreConnector = ObjectStorageConnector
 S3Connector = ObjectStorageConnector
 
 __all__ = [
+    "OCRProvider",
+    "LiteLLMOCRProvider",
+    "TesseractOCRProvider",
+    "DoclingPDFExtractor",
     "EvidenceAllowlistVerifier",
     "ExtractionCell",
     "ExtractionRegion",
@@ -68,6 +76,7 @@ __all__ = [
     "PageVerifier",
     "PageExtractionOutcome",
     "PageExtractionStatus",
+    "TesseractPDFExtractor",
     "ApiConnector",
     "ChangeEvent",
     "ChangeEventSource",

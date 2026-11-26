@@ -166,6 +166,10 @@ The core install has **zero third-party packages** — `import ragnor.*` never r
 | `all`              | `ragnor[litellm,pgvector,qdrant,chroma,faiss]` | Every shipped capability at once                           |
 
 The `pdf` and `web` extras enable PDF text extraction and HTTP document loading.
+Optional `pdf-ocr`, `pdf-llm` and `pdf-docling` extras add sandboxed local Tesseract OCR,
+hosted multimodal OCR through LiteLLM, and a Docling layout/table adapter. See
+[SDK PDF extractors](docs/pdf-extractors.md) for structured results and host
+verification policies. Tesseract, its language models and Docling models are provisioned by the host.
 
 ---
 

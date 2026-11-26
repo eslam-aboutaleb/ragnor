@@ -69,6 +69,8 @@ faiss = [
 ]
 pdf = ["pypdf>=5,<7"]
 pdf-ocr = ["pypdf>=5,<7", "pypdfium2>=5.14,<6", "pillow>=12,<14"]
+pdf-llm = ["ragnor[pdf-ocr,litellm]"]
+pdf-docling = ["pypdf>=5,<7", "docling>=2,<3"]
 directory = ["pathspec>=0.12,<2"]
 watch = ["watchfiles>=0.24"]
 web = ["httpx>=0.28,<1"]
@@ -78,7 +80,7 @@ opentelemetry = ["opentelemetry-api>=1.20"]
 mcp = ["mcp>=1.0.0"]
 tokenizers-tiktoken = ["tiktoken>=0.7,<1"]
 all = [
-    "ragnor[litellm,pgvector,database,qdrant,chroma,faiss,pdf,pdf-ocr,directory,watch,web,object-storage,rerank,opentelemetry,mcp,tokenizers-tiktoken]",
+    "ragnor[litellm,pgvector,database,qdrant,chroma,faiss,pdf,pdf-ocr,pdf-llm,pdf-docling,directory,watch,web,object-storage,rerank,opentelemetry,mcp,tokenizers-tiktoken]",
 ]
 
 
