@@ -15,6 +15,7 @@ import os
 import platform
 import sys
 import tracemalloc
+from dataclasses import replace
 from pathlib import Path
 
 from benchmarks.pdf_extraction.manifest import SCHEMA_VERSION, Manifest, PageAnnotation
@@ -95,7 +96,7 @@ def _score_one(annotation: PageAnnotation, result, error: str | None) -> dict:
     score = score_page(
         annotation,
         result.text,
-        actual_tables=result.tables,
+        actual_tables=_bind_tables(annotation, result.tables),
         provider_blocks=result.blocks,
     )
     return {
@@ -109,6 +110,27 @@ def _score_one(annotation: PageAnnotation, result, error: str | None) -> dict:
         "cost_usd": result.cost_usd,
         "unexpected": False,
     }
+
+
+def _bind_tables(annotation: PageAnnotation, tables):
+    """Give unlabeled provider tables the region id of the expected table at the same rank.
+
+    Providers cannot know annotation ids. Tables and expected regions are both
+    ordered top to bottom, then left to right; surplus tables stay unmatched.
+    """
+    if not tables or all(t.region_id for t in tables):
+        return tables
+    boxes = {r.region_id: r.bbox for r in annotation.regions}
+    expected = sorted(
+        annotation.tables,
+        key=lambda t: (boxes[t.region_id].y0, boxes[t.region_id].x0)
+        if t.region_id in boxes
+        else (0, 0),
+    )
+    return [
+        replace(table, region_id=expected[i].region_id) if i < len(expected) else table
+        for i, table in enumerate(tables)
+    ]
 
 
 def _error_expected_row(annotation: PageAnnotation, result, error: str | None, where: str) -> dict:

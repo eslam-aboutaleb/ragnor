@@ -9,6 +9,8 @@ for hosts that need OCR or layout extraction; every one of them emits
 
 | Adapter | Extra | Runs | Output |
 | --- | --- | --- | --- |
+| `PdfPlumberExtractor` | `pdf-layout` | Sandboxed SDK worker; no OCR needed | Native words, regions, table cells with row/column spans |
+| `AutoPDFExtractor` | `pdf-auto` | Native first; OCR only for uncertain pages | Native text and tables, OCR text for image pages |
 | `TesseractPDFExtractor` / `TesseractOCRProvider` | `pdf-ocr` | Sandboxed SDK worker; host-installed Tesseract | Word boxes, confidence, text |
 | `LiteLLMOCRProvider` | `pdf-llm` | Hosted multimodal model via LiteLLM | Text/Markdown only, no boxes |
 | `DoclingPDFExtractor` | `pdf-docling` | Sandboxed SDK worker; host-provisioned Docling models | Text and table cells/spans |
@@ -21,6 +23,43 @@ certifies a page: output stays `partial` until a `PageVerifier` accepts the
 exact evidence hash, which binds source bytes, provider, model, prompt and
 rendered image identities. `EvidenceAllowlistVerifier` accepts only explicit
 SHA-256 evidence digests supplied by the host.
+
+## Native layout and automatic routing
+
+```sh
+pip install 'ragnor[pdf-auto]'   # pdf-layout (pdfplumber) plus pdf-ocr
+```
+
+`PdfPlumberExtractor` reads machine-generated PDFs without OCR. It returns
+normalized word and region boxes (top-left origin on the full MediaBox) and table
+cells with row/column spans. `include_tables=True` replaces table words with
+escaped table HTML at the table's first word; `False` keeps plain word flow while
+still returning structured tables. One ambiguous table grid is rejected on its
+own: the page keeps its words, becomes `partial` and records `rejected_tables`.
+
+`AutoPDFExtractor` keeps complete native pages and sends only pages with no usable
+native text, or with image content, to OCR. Native tables are kept next to OCR
+text and the words inside those table boxes are replaced by the native table HTML
+so values are not duplicated. If OCR returns nothing for a page that had native
+text, the native text is kept. Configure the verifier on the router, not on its
+child adapters. Shared quotas are the strictest of the router and both children.
+`ocr=` accepts any `OCRProvider`, including `LiteLLMOCRProvider`.
+
+```python
+from ragnor.ingestion import AutoPDFExtractor, TesseractPDFExtractor
+
+extractor = AutoPDFExtractor(
+    ocr=TesseractPDFExtractor(language="ara+eng", tessdata_dir="/path/to/tessdata"),
+)
+pages = extractor.extract_outcomes(pdf_bytes)
+```
+
+As with every adapter here, OCR and uncertain visual pages stay `partial` until a
+host `PageVerifier` accepts the exact evidence hash.
+
+For corpus-level quality measurement of these adapters (CER, token recall, region
+and table scores, retrieval probes, review packets) see
+[PDF quality benchmarks](pdf-quality-benchmarks.md).
 
 ## Limits
 
