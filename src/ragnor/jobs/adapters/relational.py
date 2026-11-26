@@ -34,7 +34,7 @@ from sqlalchemy import (
     select,
     update,
 )
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ragnor.db.schema import ingestion_locks, metadata
@@ -97,6 +97,35 @@ generation_reservations = Table(
     Column("generation_key", String, primary_key=True),
     Column("content_digest", String, nullable=False),
 )
+
+
+_TRANSIENT_CLAIM_SQLSTATES = frozenset(
+    {
+        "40001",  # serialization failure
+        "40P01",  # deadlock detected
+        "55P03",  # lock not available
+        "57014",  # statement canceled (statement/lock timeout)
+    }
+)
+
+
+def _is_retryable_claim_error(error: BaseException) -> bool:
+    """Only busy, lock-conflict, timeout and connection failures merit a claim retry.
+
+    Driver-level busy errors surface as :class:`OperationalError`. PostgreSQL
+    deadlock, lock-timeout and statement-cancellation failures arrive as a
+    generic :class:`DBAPIError` and are retryable only for these transient
+    SQLSTATEs (plus class ``08`` connection errors); anything else, such as a
+    constraint violation or syntax error, must reach the host immediately.
+    """
+    if isinstance(error, OperationalError):
+        return True
+    if isinstance(error, DBAPIError):
+        sqlstate = getattr(error.orig, "sqlstate", None)
+        if not isinstance(sqlstate, str):
+            return False
+        return sqlstate in _TRANSIENT_CLAIM_SQLSTATES or sqlstate.startswith("08")
+    return False
 
 
 def _affected(result: Any) -> int:
@@ -375,8 +404,8 @@ class RelationalEmbeddingJobStore:
                                 ).one()
                                 chosen.append(self._from_row(row))
                     return chosen
-            except OperationalError:
-                if attempt == 19:
+            except DBAPIError as error:
+                if attempt == 19 or not _is_retryable_claim_error(error):
                     raise
                 jitter = 0.5 + secrets.randbelow(1000) / 1000
                 await asyncio.sleep(min(0.025 * 2**attempt, 0.5) * jitter)
