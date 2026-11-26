@@ -1,8 +1,9 @@
 """Provider-agnostic settings read from generic environment variable names.
 
-Nothing here names a vendor. Models are LiteLLM model strings chosen by the
-repo owner in Actions secrets. Secret values are never printed, logged or
-written to results: ``Settings.public()`` carries only whether each is set.
+Nothing here names a vendor. Key and base URL use the owner's gateway
+convention (LITELLM_API_KEY, LITELLM_API_BASE Actions secrets). Models are
+LiteLLM model strings passed as workflow inputs, not secrets. Secret values are
+never printed, logged or written to results: ``Settings.public()`` carries only whether each is set.
 """
 
 from __future__ import annotations
@@ -10,9 +11,9 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-# The only secret/env names the benchmark workflow reads.
-API_KEY = "RAGNOR_BENCH_API_KEY"
-API_BASE = "RAGNOR_BENCH_API_BASE"
+# The only secrets the benchmark workflow reads (same names as the owner's other repos).
+API_KEY = "LITELLM_API_KEY"
+API_BASE = "LITELLM_API_BASE"
 EMBEDDING_MODEL = "RAGNOR_BENCH_EMBEDDING_MODEL"
 EMBEDDING_API_KEY = "RAGNOR_BENCH_EMBEDDING_API_KEY"
 EMBEDDING_API_BASE = "RAGNOR_BENCH_EMBEDDING_API_BASE"
@@ -21,7 +22,8 @@ VLM_API_KEY = "RAGNOR_BENCH_VLM_API_KEY"
 VLM_API_BASE = "RAGNOR_BENCH_VLM_API_BASE"
 QDRANT_URL = "RAGNOR_BENCH_QDRANT_URL"  # set by the workflow, not a secret
 
-SECRET_NAMES = (
+SECRET_NAMES = (API_KEY, API_BASE)  # repository secrets
+ENV_NAMES = (
     API_KEY,
     API_BASE,
     EMBEDDING_MODEL,

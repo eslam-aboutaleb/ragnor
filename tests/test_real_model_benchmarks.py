@@ -150,7 +150,7 @@ def test_cli_rejects_unknown_suites_and_caps_above_the_hard_limit(capsys):
 
 
 def test_dry_run_lists_missing_settings_by_name_only(capsys, monkeypatch):
-    for name in cfg.SECRET_NAMES:
+    for name in cfg.ENV_NAMES:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv(cfg.API_KEY, SECRET_VALUE)
     assert bench_run.main(["--suites", "embeddings,vlm", "--dry-run"]) == 0
@@ -160,7 +160,7 @@ def test_dry_run_lists_missing_settings_by_name_only(capsys, monkeypatch):
 
 
 def test_unconfigured_suites_are_skipped_not_failed(tmp_path, monkeypatch):
-    for name in (*cfg.SECRET_NAMES, cfg.QDRANT_URL):
+    for name in (*cfg.ENV_NAMES, cfg.QDRANT_URL):
         monkeypatch.delenv(name, raising=False)
     code = bench_run.main(["--suites", "embeddings,qdrant,vlm", "--out", str(tmp_path)])
     report = json.loads((tmp_path / "results.json").read_text())
@@ -208,10 +208,12 @@ def test_every_action_is_pinned_to_a_commit_sha(workflow_text):
 
 def test_secrets_are_only_referenced_in_step_env_with_known_names(workflow_text):
     refs = re.findall(r"\$\{\{\s*secrets\.([A-Z0-9_]+)\s*\}\}", workflow_text)
-    assert refs and set(refs) <= set(cfg.SECRET_NAMES)
+    assert set(refs) == set(cfg.SECRET_NAMES) == {"LITELLM_API_KEY", "LITELLM_API_BASE"}
     for line in workflow_text.splitlines():
         if "secrets." in line and not line.lstrip().startswith("#"):
-            assert re.match(r"\s+RAGNOR_BENCH_[A-Z_]+: \$\{\{ secrets\.[A-Z_]+ \}\}$", line), line
+            assert re.match(
+                r"\s+LITELLM_API_(KEY|BASE): \$\{\{ secrets\.LITELLM_API_(KEY|BASE) \}\}$", line
+            ), line
 
 
 def test_workflow_never_echoes_or_traces_secrets(workflow_text):
@@ -222,16 +224,34 @@ def test_workflow_never_echoes_or_traces_secrets(workflow_text):
 
 def test_user_inputs_reach_the_shell_only_through_env(workflow_text):
     for line in workflow_text.splitlines():
-        if "inputs." in line:
+        if "inputs." in line and not line.lstrip().startswith("#"):
             stripped = line.strip()
-            assert stripped.startswith(("SUITES:", "MAX_COST:", "MAX_PAGES:", "if:")), line
+            assert stripped.startswith(
+                (
+                    "SUITES:",
+                    "MAX_COST:",
+                    "MAX_PAGES:",
+                    "EMBED_MODEL:",
+                    "VLM_MODEL:",
+                    "RAGNOR_BENCH_",
+                    "if:",
+                )
+            ), line
 
 
 def test_workflow_uploads_results_and_writes_a_job_summary(workflow_text):
     assert "upload-artifact@" in workflow_text and "GITHUB_STEP_SUMMARY" in workflow_text
 
 
+def test_models_are_inputs_with_gateway_alias_defaults(workflow):
+    triggers = workflow.get(True) or workflow.get("on")
+    inputs = triggers["workflow_dispatch"]["inputs"]
+    assert inputs["embedding_model"]["default"] == "openai/rag-embedding"
+    assert inputs["vlm_model"]["default"] == "openai/general-reasoning"
+
+
 def test_workflow_secret_list_matches_the_docs():
     docs = (ROOT / "docs/real-model-benchmarks.md").read_text()
     for name in cfg.SECRET_NAMES:
         assert f"`{name}`" in docs
+    assert "RAGNOR_BENCH_API_KEY" not in docs

@@ -6,8 +6,9 @@ name: Real-model benchmarks
 # other than main, so a branch cannot edit this file and then run it with the
 # secrets. Merge workflow changes first, then dispatch from main.
 #
-# Provider-agnostic: models are LiteLLM model strings in secrets, keys and
-# endpoints are generic names. See docs/real-model-benchmarks.md.
+# Provider-agnostic: key and base URL use the same secret names as the owner's
+# other repos (LITELLM_API_KEY, LITELLM_API_BASE, an OpenAI-compatible gateway).
+# Models are LiteLLM model strings passed as inputs. See docs/real-model-benchmarks.md.
 
 on:
   workflow_dispatch:
@@ -16,6 +17,14 @@ on:
         description: "Comma-separated: docling, embeddings, qdrant, vlm"
         required: true
         default: "docling,embeddings,qdrant"
+      embedding_model:
+        description: "LiteLLM embedding model (gateway alias)"
+        required: true
+        default: "openai/rag-embedding"
+      vlm_model:
+        description: "LiteLLM vision model (gateway alias)"
+        required: true
+        default: "openai/general-reasoning"
       max_cost_usd:
         description: "Hard spend cap for the whole run in USD (max 10)"
         required: true
@@ -60,6 +69,8 @@ jobs:
           SUITES: ${{ inputs.suites }}
           MAX_COST: ${{ inputs.max_cost_usd }}
           MAX_PAGES: ${{ inputs.max_vlm_pages }}
+          EMBED_MODEL: ${{ inputs.embedding_model }}
+          VLM_MODEL: ${{ inputs.vlm_model }}
         run: |
           python - <<'PY'
           import os, re, sys
@@ -67,6 +78,9 @@ jobs:
           ok = {"docling", "embeddings", "qdrant", "vlm"}
           if not suites or any(s.strip() not in ok for s in suites):
               sys.exit("suites must be a comma-separated subset of docling, embeddings, qdrant, vlm")
+          for key in ("EMBED_MODEL", "VLM_MODEL"):
+              if not re.fullmatch(r"[A-Za-z0-9._/:-]{1,100}", os.environ[key]):
+                  sys.exit(f"{key} must be a plain model string")
           cost = float(os.environ["MAX_COST"])
           if not 0 < cost <= 10:
               sys.exit("max_cost_usd must be in (0, 10]")
@@ -82,27 +96,19 @@ jobs:
         run: docling-tools models download --output-dir "$RUNNER_TEMP/docling-models"
       - name: Check settings (names only, no values)
         env:
-          RAGNOR_BENCH_API_KEY: ${{ secrets.RAGNOR_BENCH_API_KEY }}
-          RAGNOR_BENCH_API_BASE: ${{ secrets.RAGNOR_BENCH_API_BASE }}
-          RAGNOR_BENCH_EMBEDDING_MODEL: ${{ secrets.RAGNOR_BENCH_EMBEDDING_MODEL }}
-          RAGNOR_BENCH_EMBEDDING_API_KEY: ${{ secrets.RAGNOR_BENCH_EMBEDDING_API_KEY }}
-          RAGNOR_BENCH_EMBEDDING_API_BASE: ${{ secrets.RAGNOR_BENCH_EMBEDDING_API_BASE }}
-          RAGNOR_BENCH_VLM_MODEL: ${{ secrets.RAGNOR_BENCH_VLM_MODEL }}
-          RAGNOR_BENCH_VLM_API_KEY: ${{ secrets.RAGNOR_BENCH_VLM_API_KEY }}
-          RAGNOR_BENCH_VLM_API_BASE: ${{ secrets.RAGNOR_BENCH_VLM_API_BASE }}
+          LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
+          LITELLM_API_BASE: ${{ secrets.LITELLM_API_BASE }}
+          RAGNOR_BENCH_EMBEDDING_MODEL: ${{ inputs.embedding_model }}
+          RAGNOR_BENCH_VLM_MODEL: ${{ inputs.vlm_model }}
           RAGNOR_BENCH_QDRANT_URL: http://localhost:6333
           SUITES: ${{ inputs.suites }}
         run: python -m benchmarks.real_models.run --suites "$SUITES" --dry-run
       - name: Run benchmarks
         env:
-          RAGNOR_BENCH_API_KEY: ${{ secrets.RAGNOR_BENCH_API_KEY }}
-          RAGNOR_BENCH_API_BASE: ${{ secrets.RAGNOR_BENCH_API_BASE }}
-          RAGNOR_BENCH_EMBEDDING_MODEL: ${{ secrets.RAGNOR_BENCH_EMBEDDING_MODEL }}
-          RAGNOR_BENCH_EMBEDDING_API_KEY: ${{ secrets.RAGNOR_BENCH_EMBEDDING_API_KEY }}
-          RAGNOR_BENCH_EMBEDDING_API_BASE: ${{ secrets.RAGNOR_BENCH_EMBEDDING_API_BASE }}
-          RAGNOR_BENCH_VLM_MODEL: ${{ secrets.RAGNOR_BENCH_VLM_MODEL }}
-          RAGNOR_BENCH_VLM_API_KEY: ${{ secrets.RAGNOR_BENCH_VLM_API_KEY }}
-          RAGNOR_BENCH_VLM_API_BASE: ${{ secrets.RAGNOR_BENCH_VLM_API_BASE }}
+          LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
+          LITELLM_API_BASE: ${{ secrets.LITELLM_API_BASE }}
+          RAGNOR_BENCH_EMBEDDING_MODEL: ${{ inputs.embedding_model }}
+          RAGNOR_BENCH_VLM_MODEL: ${{ inputs.vlm_model }}
           RAGNOR_BENCH_QDRANT_URL: http://localhost:6333
           SUITES: ${{ inputs.suites }}
           MAX_COST: ${{ inputs.max_cost_usd }}
