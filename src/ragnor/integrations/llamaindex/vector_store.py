@@ -21,6 +21,7 @@ from pydantic import PrivateAttr
 
 from ragnor.core.validation import validate_identifier
 from ragnor.integrations.llamaindex._async import run_sync
+from ragnor.retrieval.capabilities import get_backend_capabilities
 from ragnor.retrieval.types import ScopeViolationError
 
 _NODE_CONTENT = "node_content"
@@ -37,7 +38,10 @@ class RagnorVectorStore(BasePydanticVectorStore):
 
     * ``isolation_scope`` is required at construction.
     * Every node written is stamped with the scope; a node whose own
-      metadata sets the scope field to a different value is rejected.
+      metadata sets the scope field (in any letter case) to a different
+      value is rejected.
+    * Store row ids are namespaced by scope (``<scope>:<node_id>``), so two
+      tenants using the same node id can never overwrite each other's rows.
     * Every query, get, delete and clear is restricted to the scope.
       Caller filters naming the scope field are rejected.
     * Query results are re-checked; a row from another scope raises
@@ -87,6 +91,12 @@ class RagnorVectorStore(BasePydanticVectorStore):
     def _metadata_fields(self) -> list[str]:
         return [_NODE_CONTENT, _NODE_TYPE, _REF_DOC, self._scope_field]
 
+    def _store_id(self, node_id: str) -> str:
+        return f"{self._scope}:{node_id}"
+
+    def _is_scope_key(self, key: str) -> bool:
+        return key.lower() == self._scope_field.lower()
+
     def _filters(self, filters: MetadataFilters | None) -> dict[str, Any]:
         out: dict[str, Any] = {}
         if filters is not None:
@@ -95,7 +105,7 @@ class RagnorVectorStore(BasePydanticVectorStore):
             for item in filters.filters:
                 if not isinstance(item, MetadataFilter):
                     raise NotImplementedError("nested metadata filters are not supported")
-                if item.key == self._scope_field:
+                if self._is_scope_key(item.key):
                     raise ValueError(
                         f"filters may not set the isolation scope field {self._scope_field!r}"
                     )
@@ -109,6 +119,8 @@ class RagnorVectorStore(BasePydanticVectorStore):
                         f"filter operator {item.operator.name} is not supported"
                     )
         out[self._scope_field] = self._scope
+        # Fail closed: refuse operators the backend does not declare support for.
+        get_backend_capabilities(self._store).validate_filters(out)
         return out
 
     def _document(self, node: BaseNode) -> dict[str, Any]:
@@ -116,7 +128,7 @@ class RagnorVectorStore(BasePydanticVectorStore):
         meta = node_to_metadata_dict(node, remove_text=False, flat_metadata=False)
         flat: dict[str, Any] = {}
         for key, value in (node.metadata or {}).items():
-            if key == self._scope_field:
+            if self._is_scope_key(key):
                 if value != self._scope:
                     raise ValueError(
                         f"node {node.node_id!r} sets {key!r} to a different scope than the store"
@@ -133,7 +145,7 @@ class RagnorVectorStore(BasePydanticVectorStore):
         flat[_NODE_TYPE] = meta["_node_type"]
         flat[_REF_DOC] = node.ref_doc_id or ""
         return {
-            "id": node.node_id,
+            "id": self._store_id(node.node_id),
             "text": node.get_content(),
             "metadata": flat,
             "embedding": embedding,
@@ -160,7 +172,7 @@ class RagnorVectorStore(BasePydanticVectorStore):
                 raise ValueError(f"node {doc['id']!r} has no embedding")
         if docs:
             await self._store.upsert(docs, extra_fields={self._scope_field: self._scope})
-        return [doc["id"] for doc in docs]
+        return [node.node_id for node in nodes]
 
     def add(self, nodes: list[BaseNode], **add_kwargs: Any) -> list[str]:
         return run_sync(self.async_add(nodes, **add_kwargs))
@@ -190,7 +202,10 @@ class RagnorVectorStore(BasePydanticVectorStore):
             raise ValueError("pass node_ids or filters; use clear() to remove the whole scope")
         if node_ids is not None and not node_ids:
             return
-        await self._require("delete")(ids=node_ids, filters=self._filters(filters))
+        await self._require("delete")(
+            ids=[self._store_id(i) for i in node_ids] if node_ids is not None else None,
+            filters=self._filters(filters),
+        )
 
     def delete_nodes(
         self,
@@ -218,7 +233,7 @@ class RagnorVectorStore(BasePydanticVectorStore):
         if node_ids is not None and not node_ids:
             return []
         rows = await self._require("get")(
-            ids=node_ids,
+            ids=[self._store_id(i) for i in node_ids] if node_ids is not None else None,
             filters=self._filters(filters),
             metadata_fields=self._metadata_fields(),
         )

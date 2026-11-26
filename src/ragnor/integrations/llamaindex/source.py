@@ -55,7 +55,6 @@ class LlamaIndexDocumentSource:
             content=doc.get_content(),
             external_id=doc.doc_id,
             metadata=metadata,
-            provenance={"adapter": "llamaindex", "reader": type(self._reader).__name__},
             extractor="llamaindex",
         )
 

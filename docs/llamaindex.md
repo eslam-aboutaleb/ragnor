@@ -48,23 +48,51 @@ adapter:
 raises `NotImplementedError` instead of being silently ignored. Sync methods
 work inside a running event loop (they run on a worker thread).
 
+## Verified against real backends
+
+`tests/integration/test_llamaindex_backends.py` runs the same suite on the
+in-memory store, a real Qdrant server and real PostgreSQL with pgvector
+(CI service containers `qdrant/qdrant` and `pgvector/pgvector`). It covers
+round trips, hybrid and keyword modes, get/delete/clear, idempotent upsert,
+`IngestionPipeline.run` with the LlamaIndex source and chunker, and these
+adversarial tenant-isolation cases: cross-scope read on every query path,
+cross-scope write of the same node id, cross-scope delete and clear, filter key
+and value injection, scope-field spoofing in filters and node metadata (any
+letter case), interleaved async writers and readers across tenants.
+
+Isolation notes:
+
+- Row ids are namespaced `<scope>:<node_id>`. Without that, two tenants using the
+  same node id would overwrite each other, because stores key rows by id.
+  Nodes returned through `RagnorVectorStore` keep their original id.
+  `RagnorRetriever` reads raw store rows, so over rows written by
+  `RagnorVectorStore` it shows the namespaced id.
+- When a pipeline writes rows, give the chunker `chunk_metadata={"tenant_id": ...}`.
+  Chunk ids include that metadata, so identical text for two tenants does not collide.
+- Filters are checked against the backend's declared capabilities and refused
+  if unsupported (Qdrant is equality-only).
+- Column-schema stores (pgvector) need a column for every metadata key a node or
+  document carries, and for `ref_doc_id`, `node_content` and `node_type`.
+
 ## Known gaps
 
-- Only the in-memory store is exercised in tests. Qdrant, pgvector, Chroma and
-  FAISS are not covered by this integration's tests. The adapter relies on
-  `extra_fields`, equality/`IN` filters and `delete(filters=...)`, so a backend
-  that handles those differently could behave differently.
+- Chroma and FAISS are not exercised through the adapter. The adapter was
+  tested on memory, Qdrant (server 1.12.6 locally, 1.20.0 in CI) and pgvector.
+- `IN` filters work only on the in-memory store. Qdrant refuses them (equality
+  only). pgvector declares `IN` support but its SQL cannot bind a list, so the
+  call raises instead of filtering.
 - `distance_threshold` defaults to infinity (no cutoff). Distances are not
-  comparable across metrics. Similarities returned to LlamaIndex are
-  `1 / (1 + distance)` (dense), the RRF score (hybrid) or the keyword score.
+  comparable across metrics. Qdrant's store supports only the L2 metric.
+  Similarities returned to LlamaIndex are `1 / (1 + distance)` (dense), the RRF
+  score (hybrid) or the keyword score.
 - No `NE`, `GT`, `LT`, `OR`, nested or text-match filters. No `MMR`, `SPARSE` or
   `SEMANTIC_HYBRID` modes. Query restriction by `node_ids`/`doc_ids` is not supported.
 - Only scalar metadata with identifier-safe keys is filterable. Other metadata
   is kept in the stored node but cannot be filtered on.
-- The adapters are not run through `IngestionPipeline.run` in tests. The source
-  and chunker are tested against the protocols and a store, not through the
-  version-tracked pipeline.
-- LlamaIndex readers that fetch from remote services are only as reliable as the
-  reader. No network readers are tested.
+- `IngestionPipeline.run` returns the store-wide count when a source is unchanged,
+  so on a store shared by tenants the returned number is not per tenant (existing
+  ragnor behavior, not changed here).
+- Remote LlamaIndex readers are only as reliable as the reader. No network
+  readers are tested.
 - Tested with `llama-index-core` 0.12.0 (the lower bound) and the latest release
   in CI. The upper bound `<0.15` is a guard, not a promise.
