@@ -409,6 +409,12 @@ rows = as_dicts(results)  # back to dicts for legacy consumers
 
 ## Ingestion
 
+PDF connector ingestion defaults to strict extraction: unverified visual or
+textless content rejects the PDF revision and preserves existing indexed content.
+Traversal completeness and extraction quality are checked separately. See
+[PDF policies and migration](docs/connectors.md#extraction-and-provenance) for legacy text views,
+explicit partial extraction, and the limits of the built-in pypdf adapter.
+
 For paginated directory, object-storage, HTTP/API, and website ingestion,
 including extraction, completeness/deletion safety, and security requirements,
 see the [source connector guide](docs/connectors.md).

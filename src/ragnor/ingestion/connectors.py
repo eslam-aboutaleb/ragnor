@@ -22,7 +22,24 @@ from ragnor.ingestion.directory_connector import (
     FilesystemWatcher,
     PeriodicReconciler,
 )
-from ragnor.ingestion.extractors import Extractor, HTMLExtractor, PDFExtractor, TextExtractor
+from ragnor.ingestion.extractors import (
+    Extractor,
+    HTMLExtractor,
+    PDFExtractor,
+    TextExtractor,
+    PageExtractionOutcome,
+    PageExtractionStatus,
+)
+from ragnor.ingestion.extraction_types import (
+    EvidenceAllowlistVerifier,
+    ExtractionCell,
+    ExtractionRegion,
+    ExtractionTable,
+    ExtractionWord,
+    PDFExtractionError,
+    PDFExtractionLimits,
+    PageVerifier,
+)
 from ragnor.ingestion.http_connector import Credential, HttpApiConnector, WebsiteConnector
 from ragnor.ingestion.object_connector import ObjectStorageClient, ObjectStorageConnector
 from ragnor.ingestion.sources import ConnectorDocumentSource, DocumentSourceConnector
@@ -41,6 +58,16 @@ ObjectStoreConnector = ObjectStorageConnector
 S3Connector = ObjectStorageConnector
 
 __all__ = [
+    "EvidenceAllowlistVerifier",
+    "ExtractionCell",
+    "ExtractionRegion",
+    "ExtractionTable",
+    "ExtractionWord",
+    "PDFExtractionError",
+    "PDFExtractionLimits",
+    "PageVerifier",
+    "PageExtractionOutcome",
+    "PageExtractionStatus",
     "ApiConnector",
     "ChangeEvent",
     "ChangeEventSource",
