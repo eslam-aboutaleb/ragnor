@@ -513,12 +513,13 @@ def documents(draw, *, heading_shift: int = 0):
 def test_no_paragraph_words_or_table_rows_are_lost(data, limit) -> None:
     structured, paragraphs, rows = data
     chunker = StructuredDocumentChunker(EXACT, max_tokens=limit, strict=True)
+    chunks = []
     try:
         chunks = chunker.chunk_document(structured)
     except OversizeUnitError:
         pytest.skip("generated unit larger than the strict budget")
     assert all(words(c.text) <= limit for c in chunks)
-    # paragraphs: every word appears, in order, within the chunks of that region
+    # paragraphs: every word appears within the chunks attributed to that region
     for region_ in structured.regions:
         if region_.kind != "paragraph":
             continue
