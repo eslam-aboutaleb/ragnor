@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add `StructuredDocumentChunker` (structure-aware chunking with source-span
+  provenance, #64): atomic tables and figures, row-group table splits with
+  repeated header and caption, exact `source_spans`, deterministic chunk ids.
 - Adopt Elastic License 2.0 (`Elastic-2.0`) for this source revision and future
   releases, preserving project notices. Earlier published artifacts retain
   their original terms. Previously published release 0.4.1 artifacts are unchanged.
