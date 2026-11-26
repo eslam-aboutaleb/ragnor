@@ -38,6 +38,33 @@ The example uses ephemeral local defaults; supply a real store, version store an
 | Event sink | `EventSink.emit(TelemetryEvent)`, privacy policy, non-blocking / failure isolation as required by host |
 | Authorization | Host scope authorizer; fail closed on unsupported mandatory scopes |
 
+## Run the published conformance suite
+
+The conformance checks ship inside the distribution as `ragnor.conformance`
+(`check_chunker`, `check_tokenizer`, `check_embedder`, `check_event_sink`,
+`check_document_source`). Your adapter package can run them from its own
+test suite against an installed Ragnor wheel -- no Ragnor checkout, no
+imports from Ragnor's test tree, no edits to Ragnor:
+
+```python
+from ragnor.conformance import check_chunker, check_embedder
+
+
+def test_my_chunker_conforms():
+    check_chunker(MyChunker())
+```
+
+A complete, independently authored example lives in
+[`external-adapters/reference/`](../../external-adapters/reference/): its own
+`pyproject.toml` (depending only on `ragnor`), adapters for each major
+category, and a pytest suite that runs the shipped checks. Use it as the
+template for publishing an adapter as its own installable package.
+
+Passing the shipped suite proves port conformance only. Deployed-client
+startup, cancellation and cleanup qualification is a separate step (tracked
+in SDK-02, issue #21), and durable claims (distributed locking, tenant
+isolation) still require real-infrastructure evidence.
+
 ## Clean Architecture requirements
 
 - Import Ragnor *ports/types* to implement your adapter. Application use cases must not import your concrete adapter package.
