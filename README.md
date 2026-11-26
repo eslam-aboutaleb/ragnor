@@ -415,7 +415,7 @@ see the [source connector guide](docs/connectors.md).
 
 ### The pipeline
 
-The pipeline runs in two phases. The **prepare phase** opens no transaction and takes no lock: **load source → hash the source manifest → compare snapshot → chunk → embed → validate**. The **critical section** is short: **re-check snapshot → retire old version → create version → upsert**, inside one transaction, serialized by an advisory lock when a `lock_key` is supplied (a PostgreSQL advisory lock — see below); omit it and serialize ingestion in your own infrastructure.
+The pipeline runs in two phases. The **prepare phase** opens no transaction and takes no lock: **load source → hash the source manifest → compare snapshot → chunk → embed → validate**. The **critical section** is short: **re-check snapshot → retire old version → create version → upsert**, inside one transaction, serialized by an advisory lock when a `lock_key` is supplied (a portable row lock in the host's database — see below); omit it and serialize ingestion in your own infrastructure.
 
 The split keeps a slow remote embedding request from holding a transaction and an advisory lock open, and it lets an unchanged source skip before any embedding request is made.
 
