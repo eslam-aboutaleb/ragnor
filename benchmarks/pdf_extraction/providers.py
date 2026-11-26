@@ -8,6 +8,8 @@ stream fragments.
 
 from __future__ import annotations
 
+import re
+
 import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
@@ -161,7 +163,7 @@ class SDKProvider:
             pages.append(
                 ProviderPage(
                     page=outcome.page,
-                    text=outcome.text,
+                    text=_plain_text(outcome.text),
                     status="error" if failed else ("ok" if outcome.text.strip() else "empty"),
                     error="page_failed" if failed else None,
                     blocks=_sdk_blocks(outcome),
@@ -180,6 +182,20 @@ class SDKProvider:
                 )
             )
         return pages
+
+
+_TAG = re.compile(r"<[^>]+>")
+
+
+def _plain_text(text: str) -> str:
+    """Text view without table markup.
+
+    Native/auto engines embed tables as HTML in ``text`` so chunkers keep the
+    structure. Text metrics (CER/WER) compare reading text with the annotated
+    text, so markup would be counted as insertions. Table structure is scored
+    separately from the cell data, so nothing is hidden from the benchmark.
+    """
+    return " ".join(_TAG.sub(" ", text).split())
 
 
 def _sdk_blocks(outcome) -> list[dict] | None:
