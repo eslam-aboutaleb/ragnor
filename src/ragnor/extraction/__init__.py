@@ -8,18 +8,27 @@ registered explicitly on a :class:`ProviderRegistry`.
 from __future__ import annotations
 
 from ragnor.extraction.adapters import from_page_outcomes, region_metadata, to_raw_documents
+from ragnor.extraction.citation import (
+    Citation,
+    ResolvedCitation,
+    citation_from_metadata,
+    resolve_citation,
+)
 from ragnor.extraction.errors import (
     ExtractionConfigError,
     ExtractionError,
     ExtractionLimitError,
 )
 from ragnor.extraction.extractor import StructuredExtractor
+from ragnor.extraction.figures import link_captions
 from ragnor.extraction.fingerprint import (
     extractor_fingerprint,
     fingerprint_hash,
     provider_fingerprint,
     safe_provider_options,
 )
+from ragnor.extraction.ids import deterministic_region_id
+from ragnor.extraction.layout import DEFAULT_LABELS, RegionNormalizer, normalize_docling
 from ragnor.extraction.ports import (
     ArtifactStore,
     DocumentExtractor,
@@ -31,6 +40,7 @@ from ragnor.extraction.ports import (
     RegionExtractor,
     Verifier,
 )
+from ragnor.extraction.reading_order import reconcile_reading_order
 from ragnor.extraction.registry import (
     ENTRY_POINT_GROUP,
     Capability,
@@ -38,6 +48,7 @@ from ragnor.extraction.registry import (
     ProviderRegistry,
     ProviderSpec,
 )
+from ragnor.extraction.routes import apply_routes
 from ragnor.extraction.serializers import (
     from_json,
     region_text,
@@ -47,6 +58,15 @@ from ragnor.extraction.serializers import (
     table_to_markdown,
     table_to_text,
     to_json,
+)
+from ragnor.extraction.tables import (
+    link_table_continuations,
+    logical_table,
+    merge_declared_table_boxes,
+    split_table_at,
+    stack_tables,
+    table_from_cell_dicts,
+    table_from_grid,
 )
 from ragnor.extraction.types import (
     SCHEMA_VERSION,
@@ -74,6 +94,24 @@ from ragnor.extraction.types import (
 )
 
 __all__ = [
+    "Citation",
+    "DEFAULT_LABELS",
+    "RegionNormalizer",
+    "ResolvedCitation",
+    "apply_routes",
+    "citation_from_metadata",
+    "deterministic_region_id",
+    "link_captions",
+    "link_table_continuations",
+    "logical_table",
+    "merge_declared_table_boxes",
+    "normalize_docling",
+    "reconcile_reading_order",
+    "resolve_citation",
+    "split_table_at",
+    "stack_tables",
+    "table_from_cell_dicts",
+    "table_from_grid",
     "ENTRY_POINT_GROUP",
     "SCHEMA_VERSION",
     "ArtifactStore",
