@@ -14,6 +14,7 @@ when used.
 | `chroma` | Chroma vector storage |
 | `faiss` | Local FAISS indexing |
 | `pdf` | PDF text extraction |
+| `pdf-ocr` | Sandboxed PDF rendering and local OCR worker; host installs Tesseract and its language models |
 | `directory` | Local directory extraction |
 | `watch` | File watching |
 | `web` | HTTP document loading |
