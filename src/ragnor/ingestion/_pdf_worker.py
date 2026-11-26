@@ -53,7 +53,10 @@ def process(data, request):
         ).extract_outcomes(data)
     except ImportError:
         raise
-    except Exception:
+    except Exception as exc:
+        # A quota breach is a limit, not a malformed document: report the fixed limit code.
+        if "exceeding max_pages" in str(exc):
+            raise PDFExtractionError("input_limit") from None
         raise PDFExtractionError("invalid_document") from None
     if sum(len(page.text) for page in baseline) > limits.max_text_chars:
         raise PDFExtractionError("resource_limit")

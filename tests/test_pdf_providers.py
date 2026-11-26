@@ -225,3 +225,18 @@ def test_page_selection_and_posix_requirement_are_enforced(fake_ocr):
     pages = adapter.extract_outcomes(mixed_pdf(), page_numbers=frozenset({2}))
     assert pages[0].provider == "pdf" and pages[0].complete
     assert pages[1].provider == "tesseract" and not pages[1].complete
+
+
+def test_direct_text_access_cannot_bypass_the_strict_gate(fake_ocr):
+    with pytest.raises(PDFExtractionError, match="unverified_content"):
+        ocr_adapter(fake_ocr).extract(scanned_pdf())
+    with pytest.raises(PDFExtractionError, match="unverified_content"):
+        ocr_adapter(fake_ocr, policy="review").extract_pages(scanned_pdf())
+    # Host-accepted evidence and the explicit opt-in still return text.
+    assert "4200" in ocr_adapter(fake_ocr, verifier=AcceptFixture()).extract(scanned_pdf())
+    assert "4200" in ocr_adapter(fake_ocr, policy="allow_partial").extract(scanned_pdf())
+
+
+async def test_async_direct_text_access_cannot_bypass_the_strict_gate(fake_ocr):
+    with pytest.raises(PDFExtractionError, match="unverified_content"):
+        await ocr_adapter(fake_ocr).aextract(scanned_pdf())

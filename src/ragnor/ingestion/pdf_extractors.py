@@ -101,7 +101,9 @@ class _PDFAdapter(Extractor):
         return await asyncio.to_thread(self.extract_outcomes, data)
 
     async def aextract_pages(self, data: bytes) -> list[tuple[int, str]]:
-        return [(page.page, page.text) for page in await self.aextract_outcomes(data)]
+        pages = await self.aextract_outcomes(data)
+        self._require_publishable(pages)
+        return [(page.page, page.text) for page in pages]
 
     async def aextract(self, data: bytes, *, name: str = "") -> str:
         return "\n\n".join(text for _, text in await self.aextract_pages(data) if text)
@@ -140,8 +142,19 @@ class _PDFAdapter(Extractor):
             },
         )
 
+    def _require_publishable(self, pages: list[PageExtractionOutcome]) -> None:
+        """Direct text access must not bypass the policy the connectors enforce."""
+        if self._policy == "allow_partial":
+            return
+        settled = {PageExtractionStatus.EXTRACTED, PageExtractionStatus.VERIFIED_BLANK}
+        settled.add(PageExtractionStatus.POLICY_EXCLUDED)
+        if any(page.status not in settled for page in pages):
+            raise PDFExtractionError("unverified_content")
+
     def extract_pages(self, data: bytes) -> list[tuple[int, str]]:
-        return [(page.page, page.text) for page in self.extract_outcomes(data)]
+        pages = self.extract_outcomes(data)
+        self._require_publishable(pages)
+        return [(page.page, page.text) for page in pages]
 
     def extract(self, data: bytes, *, name: str = "") -> str:
         return "\n\n".join(text for _, text in self.extract_pages(data) if text)
