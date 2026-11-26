@@ -12,3 +12,6 @@ coverage.xml
 dist/
 htmlcov/
 test-results/
+benchmarks/data/
+benchmarks/fixtures/
+docs/qualification/*.json
