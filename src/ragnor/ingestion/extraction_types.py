@@ -252,6 +252,7 @@ class PDFExtractionError(RuntimeError):
             "provider_failed",
             "invalid_worker_response",
             "verification_failed",
+            "unverified_content",
             "ocr_requires_posix_process_cleanup",
         }
     )

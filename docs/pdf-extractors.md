@@ -89,7 +89,10 @@ extractor = TesseractPDFExtractor(verifier=verifier)
 
 A verifier is deterministic host code with `id`, `version` and `options`; its
 identity joins the extractor fingerprint, so a policy change forces
-reindexing. Non-boolean verdicts fail closed. Under the default `strict`
+reindexing. Non-boolean verdicts fail closed. Direct `extract()` and
+`extract_pages()` calls follow the same policy: under `strict` or `review` they
+raise `unverified_content` unless every page is verified, verified blank or
+policy excluded; only `allow_partial` returns unverified text. Under the default `strict`
 policy a single unverified page rejects the whole PDF revision and preserves
 previously indexed content; `allow_partial` publishes available text with
 provenance but never becomes authoritative.
