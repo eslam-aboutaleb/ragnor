@@ -1,0 +1,61 @@
+{
+  "version": "1.0.0",
+  "probes": [
+    {
+      "id": "invoice-total",
+      "query": "invoice total amount due",
+      "document_id": "ruled-invoice",
+      "page": 1,
+      "region_id": "r4"
+    },
+    {
+      "id": "q4-revenue",
+      "query": "digital segment Q4 612,900 table value",
+      "document_id": "borderless-financials",
+      "page": 1,
+      "region_id": "r2"
+    },
+    {
+      "id": "split-totals",
+      "query": "inventory totals all warehouses on hand",
+      "document_id": "split-table",
+      "page": 2,
+      "region_id": "r2"
+    },
+    {
+      "id": "warranty-clause",
+      "query": "warranty professional manner industry standards implied",
+      "document_id": "contract-clauses",
+      "page": 1,
+      "region_id": "r2"
+    },
+    {
+      "id": "quadratic",
+      "query": "solve x sqrt(b^2 - 4ac) equation roots",
+      "document_id": "formula-sheet",
+      "page": 1,
+      "region_id": "r3"
+    },
+    {
+      "id": "chart-caption",
+      "query": "weekly active workspaces by cohort",
+      "document_id": "chart-report",
+      "page": 1,
+      "region_id": "r4"
+    },
+    {
+      "id": "arabic-notice",
+      "query": "\u0645\u0648\u0639\u062f \u0623\u0639\u0645\u0627\u0644 \u0627\u0644\u0635\u064a\u0627\u0646\u0629 \u0627\u0644\u062f\u0648\u0631\u064a\u0629 \u0644\u0646\u0638\u0627\u0645 \u0627\u0644\u062a\u0643\u064a\u064a\u0641",
+      "document_id": "arabic-rtl-notice",
+      "page": 1,
+      "region_id": "r2"
+    },
+    {
+      "id": "newsletter-right",
+      "query": "volunteer schedule park cleanup weekday shift",
+      "document_id": "two-column-newsletter",
+      "page": 1,
+      "region_id": "r4"
+    }
+  ]
+}
