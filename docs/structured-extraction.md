@@ -90,7 +90,7 @@ onto a `RouteDecision`: `native`, `layout`, `ocr`, `skip_blank` or
 
 * Pure and deterministic: same profile, capabilities and policy give the same
   decision. No model or network call. A remote provider is used only with
-  `RoutePolicy(allow_remote=True)`; a local one always wins.
+  `RouteOptions(allow_remote=True)`; a local one always wins.
 * Cost order is text, layout, OCR. A scan needs OCR. A mixed page (text plus
   images, drawings or annotations) prefers layout, then OCR, and uses native
   text only when nothing else is configured.

@@ -14,7 +14,7 @@ from ragnor.extraction import (
     PageKind,
     PageProfile,
     Route,
-    RoutePolicy,
+    RouteOptions,
     plan_document,
     route_page,
     summarize,
@@ -187,7 +187,7 @@ def test_remote_providers_need_policy_opt_in():
     blocked = route_page(_p(PageKind.SCAN), remote)
     assert blocked.route is Route.UNROUTABLE
     assert "remote_provider_blocked_by_policy" in blocked.notes
-    allowed = route_page(_p(PageKind.SCAN), remote, RoutePolicy(allow_remote=True))
+    allowed = route_page(_p(PageKind.SCAN), remote, RouteOptions(allow_remote=True))
     assert allowed.route is Route.OCR
 
 
@@ -217,7 +217,7 @@ def test_sideways_pages_are_flagged_for_bbox_transform():
 
 def test_policy_can_disable_column_layout_routing():
     d = route_page(
-        _p(PageKind.DIGITAL, text_columns=3), ALL, RoutePolicy(prefer_layout_for_columns=False)
+        _p(PageKind.DIGITAL, text_columns=3), ALL, RouteOptions(prefer_layout_for_columns=False)
     )
     assert d.route is Route.NATIVE
 
