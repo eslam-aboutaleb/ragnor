@@ -8,18 +8,27 @@ registered explicitly on a :class:`ProviderRegistry`.
 from __future__ import annotations
 
 from ragnor.extraction.adapters import from_page_outcomes, region_metadata, to_raw_documents
+from ragnor.extraction.citation import (
+    Citation,
+    ResolvedCitation,
+    citation_from_metadata,
+    resolve_citation,
+)
 from ragnor.extraction.errors import (
     ExtractionConfigError,
     ExtractionError,
     ExtractionLimitError,
 )
 from ragnor.extraction.extractor import StructuredExtractor
+from ragnor.extraction.figures import link_captions
 from ragnor.extraction.fingerprint import (
     extractor_fingerprint,
     fingerprint_hash,
     provider_fingerprint,
     safe_provider_options,
 )
+from ragnor.extraction.ids import deterministic_region_id
+from ragnor.extraction.layout import DEFAULT_LABELS, RegionNormalizer, normalize_docling
 from ragnor.extraction.ports import (
     ArtifactStore,
     DocumentExtractor,
@@ -31,6 +40,7 @@ from ragnor.extraction.ports import (
     RegionExtractor,
     Verifier,
 )
+from ragnor.extraction.reading_order import reconcile_reading_order
 from ragnor.extraction.registry import (
     ENTRY_POINT_GROUP,
     Capability,
@@ -49,6 +59,7 @@ from ragnor.extraction.routing import (
     route_page,
     summarize,
 )
+from ragnor.extraction.routes import apply_routes
 from ragnor.extraction.serializers import (
     from_json,
     region_text,
@@ -58,6 +69,15 @@ from ragnor.extraction.serializers import (
     table_to_markdown,
     table_to_text,
     to_json,
+)
+from ragnor.extraction.tables import (
+    link_table_continuations,
+    logical_table,
+    merge_declared_table_boxes,
+    split_table_at,
+    stack_tables,
+    table_from_cell_dicts,
+    table_from_grid,
 )
 from ragnor.extraction.types import (
     SCHEMA_VERSION,
@@ -85,28 +105,21 @@ from ragnor.extraction.types import (
 )
 
 __all__ = [
-    "Available",
-    "PageKind",
-    "PageProfile",
-    "Route",
-    "RouteDecision",
-    "RoutePolicy",
-    "plan_document",
-    "route_page",
-    "summarize",
-    "ENTRY_POINT_GROUP",
-    "SCHEMA_VERSION",
     "ArtifactStore",
     "AssetRef",
     "AttemptStatus",
+    "Available",
     "BoundingBox",
     "Capability",
     "Cell",
+    "Citation",
     "CoordinateSpace",
+    "DEFAULT_LABELS",
     "DerivedContent",
     "DerivedKind",
     "DocumentExtractor",
     "DocumentProfile",
+    "ENTRY_POINT_GROUP",
     "ExtractionAttempt",
     "ExtractionConfigError",
     "ExtractionError",
@@ -120,6 +133,8 @@ __all__ = [
     "OCREngine",
     "OrderState",
     "Page",
+    "PageKind",
+    "PageProfile",
     "PageProfiler",
     "PageRenderer",
     "PageStatus",
@@ -129,21 +144,44 @@ __all__ = [
     "Region",
     "RegionExtractor",
     "RegionKind",
+    "RegionNormalizer",
+    "ResolvedCitation",
+    "Route",
+    "RouteDecision",
+    "RoutePolicy",
+    "SCHEMA_VERSION",
     "StructuredExtractor",
     "Table",
     "TextSpan",
     "Unit",
     "Verifier",
+    "apply_routes",
+    "citation_from_metadata",
+    "deterministic_region_id",
     "extractor_fingerprint",
     "fingerprint_hash",
     "from_json",
     "from_page_outcomes",
+    "link_captions",
+    "link_table_continuations",
+    "logical_table",
+    "merge_declared_table_boxes",
+    "normalize_docling",
+    "plan_document",
     "provider_fingerprint",
+    "reconcile_reading_order",
     "region_metadata",
     "region_text",
+    "resolve_citation",
     "result_to_markdown",
     "result_to_text",
+    "route_page",
     "safe_provider_options",
+    "split_table_at",
+    "stack_tables",
+    "summarize",
+    "table_from_cell_dicts",
+    "table_from_grid",
     "table_to_html",
     "table_to_markdown",
     "table_to_text",

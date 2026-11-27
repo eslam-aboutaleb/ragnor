@@ -1,0 +1,134 @@
+name: Real-model benchmarks
+
+# Manual only. This workflow reads repository secrets and spends money, so it
+# has no pull_request, pull_request_target, push or schedule trigger: a fork or
+# a PR can never reach the secrets. The job also refuses to run from any ref
+# other than main, so a branch cannot edit this file and then run it with the
+# secrets. Merge workflow changes first, then dispatch from main.
+#
+# Provider-agnostic: key and base URL use the same secret names as the owner's
+# other repos (LITELLM_API_KEY, LITELLM_API_BASE, an OpenAI-compatible gateway).
+# Models are LiteLLM model strings passed as inputs. See docs/real-model-benchmarks.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      suites:
+        description: "Comma-separated: docling, embeddings, qdrant, vlm"
+        required: true
+        default: "docling,embeddings,qdrant"
+      embedding_model:
+        description: "LiteLLM embedding model (gateway alias)"
+        required: true
+        default: "openai/rag-embedding"
+      vlm_model:
+        description: "LiteLLM vision model (gateway alias)"
+        required: true
+        default: "openai/general-reasoning"
+      max_cost_usd:
+        description: "Hard spend cap for the whole run in USD (max 10)"
+        required: true
+        default: "2"
+      max_vlm_pages:
+        description: "Most pages sent to the VLM"
+        required: true
+        default: "40"
+
+concurrency:
+  group: real-model-benchmarks
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: Real-model benchmark
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      qdrant:
+        image: qdrant/qdrant:v1.20.2
+        ports:
+          - 6333:6333
+        options: >-
+          --health-cmd "bash -c ':> /dev/tcp/127.0.0.1/6333'"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Validate inputs
+        env:
+          SUITES: ${{ inputs.suites }}
+          MAX_COST: ${{ inputs.max_cost_usd }}
+          MAX_PAGES: ${{ inputs.max_vlm_pages }}
+          EMBED_MODEL: ${{ inputs.embedding_model }}
+          VLM_MODEL: ${{ inputs.vlm_model }}
+        run: |
+          python - <<'PY'
+          import os, re, sys
+          suites = os.environ["SUITES"].split(",")
+          ok = {"docling", "embeddings", "qdrant", "vlm"}
+          if not suites or any(s.strip() not in ok for s in suites):
+              sys.exit("suites must be a comma-separated subset of docling, embeddings, qdrant, vlm")
+          for key in ("EMBED_MODEL", "VLM_MODEL"):
+              if not re.fullmatch(r"[A-Za-z0-9._/:-]{1,100}", os.environ[key]):
+                  sys.exit(f"{key} must be a plain model string")
+          cost = float(os.environ["MAX_COST"])
+          if not 0 < cost <= 10:
+              sys.exit("max_cost_usd must be in (0, 10]")
+          if not re.fullmatch(r"[0-9]{1,3}", os.environ["MAX_PAGES"]):
+              sys.exit("max_vlm_pages must be a whole number up to 999")
+          PY
+      - name: Install system OCR
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr
+      - name: Install ragnor with PDF auto, LiteLLM, Qdrant and Docling extras
+        run: python -m pip install -e '.[pdf-auto,pdf-docling,litellm,qdrant]' rank-bm25
+      - name: Prefetch Docling models
+        if: contains(inputs.suites, 'docling')
+        run: docling-tools models download --output-dir "$RUNNER_TEMP/docling-models"
+      - name: Check settings (names only, no values)
+        env:
+          LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
+          LITELLM_API_BASE: ${{ secrets.LITELLM_API_BASE }}
+          RAGNOR_BENCH_EMBEDDING_MODEL: ${{ inputs.embedding_model }}
+          RAGNOR_BENCH_VLM_MODEL: ${{ inputs.vlm_model }}
+          RAGNOR_BENCH_QDRANT_URL: http://localhost:6333
+          SUITES: ${{ inputs.suites }}
+        run: python -m benchmarks.real_models.run --suites "$SUITES" --dry-run
+      - name: Run benchmarks
+        env:
+          LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
+          LITELLM_API_BASE: ${{ secrets.LITELLM_API_BASE }}
+          RAGNOR_BENCH_EMBEDDING_MODEL: ${{ inputs.embedding_model }}
+          RAGNOR_BENCH_VLM_MODEL: ${{ inputs.vlm_model }}
+          RAGNOR_BENCH_QDRANT_URL: http://localhost:6333
+          SUITES: ${{ inputs.suites }}
+          MAX_COST: ${{ inputs.max_cost_usd }}
+          MAX_PAGES: ${{ inputs.max_vlm_pages }}
+        run: >
+          python -m benchmarks.real_models.run
+          --suites "$SUITES"
+          --max-cost-usd "$MAX_COST"
+          --max-vlm-pages "$MAX_PAGES"
+          --docling-artifacts "$RUNNER_TEMP/docling-models"
+          --out bench-results
+      - name: Job summary
+        if: always()
+        run: |
+          if [ -f bench-results/summary.md ]; then cat bench-results/summary.md >> "$GITHUB_STEP_SUMMARY"; fi
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: real-model-benchmark-results
+          path: bench-results/
+          if-no-files-found: ignore
+          retention-days: 30

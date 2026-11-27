@@ -40,7 +40,12 @@ from ragnor.ingestion.extraction_types import (
     PDFExtractionLimits,
     PageVerifier,
 )
-from ragnor.ingestion.pdf_extractors import TesseractPDFExtractor, TesseractOCRProvider
+from ragnor.ingestion.pdf_extractors import (
+    AutoPDFExtractor,
+    PdfPlumberExtractor,
+    TesseractPDFExtractor,
+    TesseractOCRProvider,
+)
 from ragnor.ingestion.ocr import OCRProvider
 from ragnor.ingestion.litellm_ocr import LiteLLMOCRProvider
 from ragnor.ingestion.docling_adapter import DoclingPDFExtractor
@@ -67,6 +72,7 @@ __all__ = [
     "TesseractOCRProvider",
     "DoclingPDFExtractor",
     "EvidenceAllowlistVerifier",
+    "AutoPDFExtractor",
     "ExtractionCell",
     "ExtractionRegion",
     "ExtractionTable",
@@ -76,6 +82,7 @@ __all__ = [
     "PageVerifier",
     "PageExtractionOutcome",
     "PageExtractionStatus",
+    "PdfPlumberExtractor",
     "TesseractPDFExtractor",
     "ApiConnector",
     "ChangeEvent",

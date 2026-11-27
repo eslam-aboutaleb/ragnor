@@ -7,22 +7,28 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_active_license_is_elastic_and_not_an_older_license() -> None:
+def test_active_license_is_mit_and_not_an_older_license() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
-    assert project["license"] == "Elastic-2.0"
+    assert project["license"] == "MIT"
     assert project["license-files"] == ["LICENSE", "NOTICE"]
     license_text = (ROOT / "LICENSE").read_text()
     assert hashlib.sha256((ROOT / "LICENSE").read_bytes()).hexdigest() == (
-        "48255018b41fc0e965b1115af7e6779bc218bb8a6747d561da800d5022622aa2"
+        "c28facedc5bfb2d238a3dac6375f057bb5f76eed029978babe1a810fffe8068c"
     )
-    assert license_text.startswith("Elastic License 2.0\n")
-    assert "## Limitations" in license_text
-    assert "## Termination" in license_text
-    assert "## No Liability" in license_text
+    assert license_text.startswith("MIT License\n")
+    assert "Copyright (c) 2026 Eslam Aboutaleb" in license_text
+    assert 'THE SOFTWARE IS PROVIDED "AS IS"' in license_text
     assert "Copyright (c) 2026 Eslam Aboutaleb" in (ROOT / "NOTICE").read_text()
     current_readme = (ROOT / "README.md").read_text().split("## License", 1)[1]
-    assert "Elastic License 2.0" in current_readme
-    assert "Elastic-2.0" in current_readme
+    assert "MIT License" in current_readme
+    assert "`MIT`" in current_readme
     assert "PolyForm" not in current_readme
-    assert "MIT License" not in current_readme
-    assert "Elastic-2.0" in (ROOT / "docs/licensing.md").read_text()
+    assert "Elastic" not in current_readme
+    licensing = (ROOT / "docs/licensing.md").read_text()
+    assert "SPDX `MIT`" in licensing
+
+
+def test_no_active_file_still_declares_elastic() -> None:
+    reference = tomllib.loads((ROOT / "external-adapters/reference/pyproject.toml").read_text())
+    assert reference["project"]["license"] == "MIT"
+    assert "Elastic-2.0" not in (ROOT / "scripts/check_distribution_license.py").read_text()

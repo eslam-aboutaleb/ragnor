@@ -55,6 +55,23 @@ python -m benchmarks.pdf_extraction baseline --provider pypdf --out new-baseline
 python -m benchmarks.pdf_extraction compare --baseline b.json --candidate c.json
 ```
 
+### Providers
+
+`pypdf` (default light extractor) plus the installed SDK adapters: `sdk-native`
+(`PdfPlumberExtractor`, needs `pdf-layout`), `sdk-ocr` (`TesseractPDFExtractor`,
+needs `pdf-ocr` and host Tesseract) and `sdk-auto` (`AutoPDFExtractor`, needs
+`pdf-auto`). SDK providers read pages with `allow_partial`, so unverified OCR
+text is measured and never approved. Only structure-aware providers fill
+`table_structure`, `merged_cell_fidelity` and `region_precision`; pypdf leaves
+them null. Provider tables are bound to the expected tables by page order
+(top to bottom, then left to right). Each provider needs its own checked-in
+baseline before it can gate CI; only `pypdf` has one today.
+
+```bash
+python -m pip install -e '.[pdf-auto]'
+python -m benchmarks.pdf_extraction run --provider sdk-auto --out sdk-auto.json
+```
+
 Reports are machine-readable JSON: run id, provider id/version/pinned
 config, library versions, python/platform/hardware, per-page metrics,
 per-family slices, p50/p95 latency, peak memory, cost per 1k pages and

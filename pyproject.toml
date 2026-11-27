@@ -8,7 +8,7 @@ version = "0.4.1"
 description = "Domain-agnostic RAG toolkit: embeddings, chunking, vector stores, retrieval, ingestion, evaluation, and jobs."
 readme = "README.md"
 requires-python = ">=3.11"
-license = "Elastic-2.0"
+license = "MIT"
 license-files = ["LICENSE", "NOTICE"]
 dependencies = []
 classifiers = [
@@ -36,6 +36,7 @@ test = [
     "sqlalchemy[asyncio]>=2.0.30",
     "asyncpg>=0.29",
     "pypdf>=5,<7",
+    "pdfplumber>=0.11.10,<0.12",
     "pypdfium2>=5.14,<6",
     "pillow>=12,<14",
     "pathspec>=0.12,<2",
@@ -44,6 +45,7 @@ test = [
     "qdrant-client>=1.9",
     "chromadb>=0.5",
     "faiss-cpu>=1.8",
+    "llama-index-core>=0.12.0,<0.15",
 ]
 
 litellm = [
@@ -67,8 +69,13 @@ chroma = [
 faiss = [
     "faiss-cpu>=1.8",
 ]
+llamaindex = [
+    "llama-index-core>=0.12.0,<0.15",
+]
 pdf = ["pypdf>=5,<7"]
+pdf-layout = ["pypdf>=5,<7", "pdfplumber>=0.11.10,<0.12"]
 pdf-ocr = ["pypdf>=5,<7", "pypdfium2>=5.14,<6", "pillow>=12,<14"]
+pdf-auto = ["ragnor[pdf-layout,pdf-ocr]"]
 pdf-llm = ["ragnor[pdf-ocr,litellm]"]
 pdf-docling = ["pypdf>=5,<7", "docling>=2,<3"]
 directory = ["pathspec>=0.12,<2"]
@@ -80,7 +87,7 @@ opentelemetry = ["opentelemetry-api>=1.20"]
 mcp = ["mcp>=1.0.0"]
 tokenizers-tiktoken = ["tiktoken>=0.7,<1"]
 all = [
-    "ragnor[litellm,pgvector,database,qdrant,chroma,faiss,pdf,pdf-ocr,pdf-llm,pdf-docling,directory,watch,web,object-storage,rerank,opentelemetry,mcp,tokenizers-tiktoken]",
+    "ragnor[litellm,pgvector,database,qdrant,chroma,faiss,llamaindex,pdf,pdf-layout,pdf-ocr,pdf-auto,pdf-llm,pdf-docling,directory,watch,web,object-storage,rerank,opentelemetry,mcp,tokenizers-tiktoken]",
 ]
 
 

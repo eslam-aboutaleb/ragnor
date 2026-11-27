@@ -107,3 +107,42 @@ renders nothing, implements the `PageProfiler` port and also exposes
 `profile_pages`. Limitations: the column hint counts left-edge clusters of
 upright text lines, so it is a hint, not layout analysis; it does not decode
 rotated images inside scans.
+
+## Layout, tables and citations (EX-05)
+
+Everything below is pure Python on top of the EX-03 model. No layout engine,
+VLM or network call ships in core.
+
+* **Regions** (`layout.RegionNormalizer`, `normalize_docling`): provider items
+  (label, box, optional grid/latex/text) become typed regions. Labels map to
+  `RegionKind`; unknown labels fall back to `text` unless `strict_labels` is set.
+  Bottom-left boxes are converted to the canonical top-left space. Region ids
+  come from `deterministic_region_id(revision, page, key)`, so they are stable
+  for one document revision and change with the revision.
+* **Reading order** (`reading_order.reconcile_reading_order`): a constrained
+  XY-cut with RTL and rotation support. Headers, footers, footnotes and sidebars
+  are tagged and kept, never dropped. When the cut is not clear (overlap, or a
+  gap smaller than the threshold) every affected region is marked
+  `order_state=ambiguous` instead of guessed.
+* **Tables** (`tables`): `table_from_grid` (rule-based output, ragged rows
+  rejected, `None` stays missing), `table_from_cell_dicts` (spans, header flags,
+  Docling offsets), `split_table_at`, `stack_tables`. Detected boxes are merged
+  only when the provider declares the group (`merge_declared_table_boxes`);
+  similarity is never used. `link_table_continuations` links a table across
+  pages when the next page's first table repeats the header or the provider
+  declared it; `logical_table` stacks the chain as a read-only view.
+* **Captions** (`figures.link_captions`): nearest clear figure or table, above
+  or below. Ties and orphans are reported as ambiguous and left unlinked.
+* **Citations** (`citation`): `to_raw_documents` stamps revision, page, region id
+  and bbox on every chunk. `resolve_citation` maps a retrieval hit back to the
+  region, and to one cell when `cell_text` matches exactly one cell. A revision
+  mismatch fails closed.
+* **Routes** (`routes.apply_routes`): per-kind provider routes through the
+  `RegionExtractor` port. Unknown providers and remote providers that were not
+  enabled fail before any data is sent; a failing route keeps the base region.
+* **Fidelity** (`fidelity`): `teds_like` (a sequence approximation, not the
+  published TEDS), cell accuracy, exact-cell accuracy, order accuracy, region recall.
+
+Limits: Docling input is tested against a docling-core-shaped dict, not a live
+Docling run. Fidelity tests use EX-02 annotation-derived inputs, not a live
+layout model's output.
