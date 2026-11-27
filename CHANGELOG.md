@@ -8,6 +8,10 @@
 - Adopt Elastic License 2.0 (`Elastic-2.0`) for this source revision and future
   releases, preserving project notices. Earlier published artifacts retain
   their original terms. Previously published release 0.4.1 artifacts are unchanged.
+- Relicense this source revision and future releases under the MIT License
+  (`MIT`), replacing Elastic License 2.0 (`Elastic-2.0`). Earlier published
+  artifacts, including release 0.4.1, retain their original terms. No release
+  is cut by this change.
 
 
 All notable changes to ragnor (published on PyPI as `ragnor`) are
@@ -25,6 +29,10 @@ bump and a changelog entry here, so hosts pinning `ragnor==x.y.z` get a
 stability contract rather than a moving target.
 
 ## [Unreleased]
+
+- Add opt-in visual page retrieval fallback (`ragnor.retrieval.visual`, optional
+  `ragnor.stores.qdrant_visual`) with staging, revocation, authorization, fusion
+  and a ViDoRe-style offline benchmark (Refs #68).
 
 ## [0.4.0] - 2026-10-11
 

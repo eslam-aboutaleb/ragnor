@@ -161,6 +161,7 @@ The core install has **zero third-party packages** — `import ragnor.*` never r
 | `qdrant`           | `qdrant-client>=1.9`                          | Qdrant vector store                                                |
 | `chroma`           | `chromadb>=0.5`                               | Chroma vector store                                                |
 | `faiss`            | `faiss-cpu>=1.8`                              | FAISS vector store                                                 |
+| `llamaindex`       | `llama-index-core>=0.12.0,<0.15`              | LlamaIndex reader, splitter, retriever and vector-store adapters (see [docs/llamaindex.md](docs/llamaindex.md)) |
 | `local-embeddings` | *(reserved — currently empty)*                | Does not install a local-model provider |
 | `test`             | `pytest`, `pytest-asyncio`, `aiosqlite`, `sqlalchemy[asyncio]`, `numpy`, `litellm` | Full test suite, including the LiteLLM integration check |
 | `all`              | `ragnor[litellm,pgvector,qdrant,chroma,faiss]` | Every shipped capability at once                           |
@@ -888,10 +889,7 @@ The hooks run `ruff check`, `ruff format`, and the standard whitespace/EOF/YAML 
 
 ## License
 
-Ragnor is source-available under the **Elastic License 2.0 (ELv2)**
-(SPDX: `Elastic-2.0`), which is not an OSI-approved open-source license.
-Commercial integration is permitted subject to the license terms, including
-restrictions on offering substantial Ragnor functionality as a hosted or
-managed service. See [LICENSE](LICENSE), [NOTICE](NOTICE), and the
-[licensing guide](docs/licensing.md) for terms and illustrative examples.
-Previously distributed releases retain their original license terms.
+Ragnor is released under the **MIT License** (SPDX: `MIT`). See
+[LICENSE](LICENSE), [NOTICE](NOTICE) and the [licensing guide](docs/licensing.md).
+Previously distributed releases (up to 0.4.1) retain the license terms under
+which they were distributed.
