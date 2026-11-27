@@ -48,6 +48,17 @@ async def main() -> None:
     # when installing only the base distribution.
     assert all("extra ==" in requirement for requirement in requirements), requirements
 
+    # Structured extraction contracts import without any optional engine.
+    import sys  # noqa: PLC0415
+
+    from ragnor import extraction  # noqa: PLC0415
+
+    registry = extraction.ProviderRegistry()
+    assert registry.ids() == []
+    for vendor in ("litellm", "pypdf", "pypdfium2", "PIL", "docling", "sqlalchemy", "httpx"):
+        assert vendor not in sys.modules, vendor
+    assert extraction.SCHEMA_VERSION == 1
+
     builder = RagnorBuilder.local(HostEmbedder(), embedding_dim=2)
     rag = await builder.with_chunker(HostChunker()).build()
 
