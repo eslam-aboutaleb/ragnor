@@ -22,5 +22,5 @@ interfaces can contain `Any`; add annotations to host implementations and
 check them against their chosen protocols. The package does not require a
 particular host framework or type checker.
 
-Current distributions declare `Elastic-2.0` and include LICENSE and NOTICE.
+Current distributions declare `MIT` and include LICENSE and NOTICE.
 Previously published artifacts retain their original license terms.
