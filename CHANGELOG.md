@@ -8,6 +8,8 @@
 - Adopt Elastic License 2.0 (`Elastic-2.0`) for this source revision and future
   releases, preserving project notices. Earlier published artifacts retain
   their original terms. Previously published release 0.4.1 artifacts are unchanged.
+- Add versioned document-family extraction recipes with a verification-guarded
+  fast path, scoped stores and a family benchmark (`ragnor.ingestion.recipes`, Refs #67).
 - Relicense this source revision and future releases under the MIT License
   (`MIT`), replacing Elastic License 2.0 (`Elastic-2.0`). Earlier published
   artifacts, including release 0.4.1, retain their original terms. No release
