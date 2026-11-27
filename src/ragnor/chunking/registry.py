@@ -11,9 +11,11 @@ from __future__ import annotations
 from ragnor.chunking.base import Chunker
 from ragnor.chunking.markdown import MarkdownSectionChunker
 from ragnor.chunking.sliding_window import SlidingWindowChunker
+from ragnor.chunking.structured import StructuredDocumentChunker
 from ragnor.core.registry import Registry
 
 chunker_registry: Registry[Chunker] = Registry()
 
 chunker_registry.register("sliding-window")(SlidingWindowChunker)
 chunker_registry.register("markdown")(MarkdownSectionChunker)
+chunker_registry.register("structured")(StructuredDocumentChunker)
