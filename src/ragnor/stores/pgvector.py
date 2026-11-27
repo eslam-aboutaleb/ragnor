@@ -911,15 +911,17 @@ class PgVectorStore(VectorStore):
                 else:
                     params[param_name] = doc[key]
                 row_placeholders.append(f":{param_name}")
-            for meta_key in all_meta_keys:
-                param_name = f"{meta_key}__{idx}"
-                params[param_name] = doc.get("metadata", {}).get(meta_key)
-                row_placeholders.append(f":{param_name}")
+            # Placeholder order must match the INSERT column order built in
+            # ``upsert``: id, text, embedding, extra fields, then metadata keys.
             if extra_fields:
                 for extra_key, extra_val in extra_fields.items():
                     param_name = f"_extra_{extra_key}__{idx}"
                     params[param_name] = extra_val
                     row_placeholders.append(f":{param_name}")
+            for meta_key in all_meta_keys:
+                param_name = f"{meta_key}__{idx}"
+                params[param_name] = doc.get("metadata", {}).get(meta_key)
+                row_placeholders.append(f":{param_name}")
             values_clauses.append(f"({', '.join(row_placeholders)})")
 
         return values_clauses, params

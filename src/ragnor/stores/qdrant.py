@@ -219,15 +219,32 @@ class QdrantStore(HybridVectorStore):
         """Create the collection on first use if it is missing."""
         if self._collection_ready:
             return
-        client = self._resolve_client()
-        if not await client.collection_exists(self.table_name):
-            from qdrant_client.models import Distance, VectorParams  # noqa: PLC0415
+        # Serialize first use: concurrent first calls otherwise both see "missing"
+        # and the second create_collection fails with 409 Conflict.
+        async with self._ensure_lock():
+            if self._collection_ready:
+                return
+            client = self._resolve_client()
+            if not await client.collection_exists(self.table_name):
+                from qdrant_client.models import Distance, VectorParams  # noqa: PLC0415
 
-            await client.create_collection(
-                collection_name=self.table_name,
-                vectors_config=VectorParams(size=self.embedding_dim, distance=Distance.EUCLID),
-            )
-        self._collection_ready = True
+                await client.create_collection(
+                    collection_name=self.table_name,
+                    vectors_config=VectorParams(size=self.embedding_dim, distance=Distance.EUCLID),
+                )
+            self._collection_ready = True
+
+    def _ensure_lock(self) -> Any:
+        """Return this store's collection-creation lock for the running loop."""
+        import asyncio  # noqa: PLC0415
+
+        loop = asyncio.get_running_loop()
+        lock = getattr(self, "_ensure_lock_obj", None)
+        if lock is None or getattr(self, "_ensure_lock_loop", None) is not loop:
+            lock = asyncio.Lock()
+            self._ensure_lock_obj = lock
+            self._ensure_lock_loop = loop
+        return lock
 
     async def _scroll_all_points(self, client: Any, query_filter: Any) -> list[Any]:
         all_points: list[Any] = []
