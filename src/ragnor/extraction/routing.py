@@ -76,7 +76,7 @@ class PageProfile:
 
 
 @dataclass(frozen=True)
-class RoutePolicy:
+class RouteOptions:
     """Host policy. Defaults are the cheapest local behaviour."""
 
     allow_remote: bool = False
@@ -120,7 +120,7 @@ class Available:
             (remote if spec.remote else local).update(spec.capabilities)
         return cls(frozenset(local), frozenset(remote - local))
 
-    def usable(self, cap: Capability, policy: RoutePolicy) -> bool:
+    def usable(self, cap: Capability, policy: RouteOptions) -> bool:
         return cap in self.local or (policy.allow_remote and cap in self.remote)
 
 
@@ -130,7 +130,7 @@ _NATIVE = (Route.NATIVE, Capability.TEXT)
 
 
 def _preferences(
-    profile: PageProfile, policy: RoutePolicy
+    profile: PageProfile, policy: RouteOptions
 ) -> tuple[tuple[tuple[Route, Capability], ...], str]:
     """Ordered (route, capability) choices, cheapest safe one first."""
     kind = profile.kind
@@ -149,10 +149,10 @@ def _preferences(
 
 
 def route_page(
-    profile: PageProfile, available: Available, policy: RoutePolicy | None = None
+    profile: PageProfile, available: Available, policy: RouteOptions | None = None
 ) -> RouteDecision:
     """Pick the cheapest route that cannot lose content on this page."""
-    policy = policy or RoutePolicy()
+    policy = policy or RouteOptions()
     n = profile.page
     if profile.kind is PageKind.BLANK:
         return RouteDecision(n, Route.SKIP_BLANK, None, "verified_blank")
@@ -178,7 +178,7 @@ def route_page(
 def plan_document(
     profiles: Iterable[PageProfile],
     available: Available,
-    policy: RoutePolicy | None = None,
+    policy: RouteOptions | None = None,
 ) -> list[RouteDecision]:
     """One decision per input page, in page order; length always matches."""
     return [route_page(p, available, policy) for p in profiles]
