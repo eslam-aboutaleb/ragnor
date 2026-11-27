@@ -161,6 +161,7 @@ The core install has **zero third-party packages** — `import ragnor.*` never r
 | `qdrant`           | `qdrant-client>=1.9`                          | Qdrant vector store                                                |
 | `chroma`           | `chromadb>=0.5`                               | Chroma vector store                                                |
 | `faiss`            | `faiss-cpu>=1.8`                              | FAISS vector store                                                 |
+| `llamaindex`       | `llama-index-core>=0.12.0,<0.15`              | LlamaIndex reader, splitter, retriever and vector-store adapters (see [docs/llamaindex.md](docs/llamaindex.md)) |
 | `local-embeddings` | *(reserved — currently empty)*                | Does not install a local-model provider |
 | `test`             | `pytest`, `pytest-asyncio`, `aiosqlite`, `sqlalchemy[asyncio]`, `numpy`, `litellm` | Full test suite, including the LiteLLM integration check |
 | `all`              | `ragnor[litellm,pgvector,qdrant,chroma,faiss]` | Every shipped capability at once                           |

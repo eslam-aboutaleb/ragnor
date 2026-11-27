@@ -1,0 +1,48 @@
+name: LlamaIndex compatibility
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/ragnor/integrations/**"
+      - "tests/test_llamaindex_integration.py"
+      - "pyproject.toml"
+      - ".github/workflows/llamaindex.yml"
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  llamaindex:
+    name: llama-index-core ${{ matrix.label }} (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: pinned 0.12.0
+            spec: "llama-index-core==0.12.0"
+            python-version: "3.11"
+          - label: latest (no upper bound)
+            spec: "llama-index-core"
+            python-version: "3.12"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install ragnor without extras, then the chosen llama-index-core
+        run: |
+          python -m pip install -e . pytest pytest-asyncio
+          python -m pip install --upgrade "${{ matrix.spec }}"
+          python -m pip list | grep -i llama-index-core
+      - name: Run the adapter tests (real LlamaIndex, real in-memory store)
+        run: python -m pytest -q tests/test_llamaindex_integration.py
