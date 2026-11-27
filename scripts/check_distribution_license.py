@@ -34,14 +34,14 @@ def check(artifact: Path, root: Path) -> None:
         metadata = files[f"{prefix}/PKG-INFO"]
         notices = {notice: f"{prefix}/{notice}" for notice in ("LICENSE", "NOTICE")}
     headers = BytesParser().parsebytes(metadata)
-    if headers.get("License-Expression") != "Elastic-2.0":
+    if headers.get("License-Expression") != "MIT":
         raise ValueError(f"{artifact}: wrong License-Expression")
     for notice, path in notices.items():
         if files.get(path) != (root / notice).read_bytes():
             raise ValueError(f"{artifact}: missing or modified {notice}")
         if notice not in headers.get_all("License-File", []):
             raise ValueError(f"{artifact}: missing License-File: {notice}")
-    print(f"{artifact.name}: Elastic-2.0 metadata and exact LICENSE/NOTICE verified")
+    print(f"{artifact.name}: MIT metadata and exact LICENSE/NOTICE verified")
 
 
 def main() -> None:
