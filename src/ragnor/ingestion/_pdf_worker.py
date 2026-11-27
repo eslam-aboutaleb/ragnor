@@ -9,7 +9,7 @@ import signal
 import sys
 import threading
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from importlib.metadata import PackageNotFoundError, version
 
 from ragnor.ingestion.extraction_types import PDFExtractionError, PDFExtractionLimits
@@ -31,6 +31,8 @@ def _versions():
     versions = {}
     for name in (
         "pypdf",
+        "pdfplumber",
+        "pdfminer.six",
         "pypdfium2",
         "pillow",
         "docling",
@@ -43,6 +45,39 @@ def _versions():
         except PackageNotFoundError:
             versions[name] = None
     return versions
+
+
+def _merge_ocr(native, page, auto, config):
+    """Combine one native page with its OCR result for the auto router."""
+    if not auto:
+        return page
+    if native.text.strip() and not page.text.strip():
+        # A failed OCR attempt must not erase recoverable native text.
+        return replace(
+            native,
+            diagnostics={**native.diagnostics, "ocr_fallback_status": str(page.status)},
+        )
+    if native.tables and page.provider == "tesseract":
+        page = replace(
+            page,
+            tables=native.tables,
+            diagnostics={**page.diagnostics, "native_table_provider": "pdfplumber"},
+        )
+        if page.text and config["native"]["include_tables"]:
+            inside = [
+                word.text
+                for word in page.words
+                if not any(
+                    t.bbox[0] <= (word.bbox[0] + word.bbox[2]) / 2 <= t.bbox[2]
+                    and t.bbox[1] <= (word.bbox[1] + word.bbox[3]) / 2 <= t.bbox[3]
+                    for t in native.tables
+                )
+            ]
+            page = replace(
+                page,
+                text=" ".join(inside) + "\n\n" + "\n".join(t.to_html() for t in native.tables),
+            )
+    return page
 
 
 def process(data, request):
@@ -87,22 +122,39 @@ def process(data, request):
             "page_count": len(baseline),
             "runtime": runtime,
         }
-    if engine != "ocr":
+    if engine not in {"native", "ocr", "auto"}:
         raise PDFExtractionError("invalid_document")
-    selected = {page.page for page in baseline}
-    if config.get("page_numbers") is not None:
-        requested = set(config["page_numbers"])
-        if not requested <= {p.page for p in baseline}:
-            raise PDFExtractionError("invalid_document")
-        selected &= requested
-    pages = baseline
-    if selected:
-        if os.name != "posix":
-            raise PDFExtractionError("provider_failed")
-        from ragnor.ingestion._pdf_ocr import extract_ocr  # noqa: PLC0415
+    if engine in {"native", "auto"}:
+        from ragnor.ingestion._pdf_native import extract_native  # noqa: PLC0415
 
-        ocr, runtime["tesseract"] = extract_ocr(data, baseline, config, budget, selected)
-        pages = [ocr.get(native.page, native) for native in pages]
+        pages = extract_native(
+            data, baseline, config["native"] if engine == "auto" else config, budget
+        )
+    else:
+        pages = baseline
+    if engine in {"ocr", "auto"}:
+        selected = {
+            page.page
+            for page in pages
+            if engine == "ocr" or (not page.complete and (not page.text.strip() or page.has_images))
+        }
+        if engine == "ocr" and config.get("page_numbers") is not None:
+            requested = set(config["page_numbers"])
+            if not requested <= {p.page for p in baseline}:
+                raise PDFExtractionError("invalid_document")
+            selected &= requested
+        if selected:
+            if os.name != "posix":
+                raise PDFExtractionError("provider_failed")
+            from ragnor.ingestion._pdf_ocr import extract_ocr  # noqa: PLC0415
+
+            ocr, runtime["tesseract"] = extract_ocr(
+                data, baseline, config["ocr"] if engine == "auto" else config, budget, selected
+            )
+            pages = [
+                _merge_ocr(native, ocr.get(native.page, native), engine == "auto", config)
+                for native in pages
+            ]
     if sum(len(page.text) for page in pages) > limits.max_text_chars:
         raise PDFExtractionError("resource_limit")
     return {
