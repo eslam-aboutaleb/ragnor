@@ -64,6 +64,7 @@ INNER_DIRS = (
     "core/",
     "embeddings/",
     "evaluation/",
+    "extraction/",
     "evidence/",
     "ingestion/",
     "jobs/",
