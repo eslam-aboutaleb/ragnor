@@ -10,7 +10,7 @@ permissions:
 jobs:
   author-check:
     name: Commit author identity
-    uses: eslam-aboutaleb/ci-workflows/.github/workflows/author-check.yml@b652f38eae567893c6fc5179e91024a6710fd623
+    uses: eslam-aboutaleb/ci-workflows/.github/workflows/author-check.yml@0ca1c71bd05c307c9bc1f45349e10f4d2bec940e
     permissions:
       contents: read
       pull-requests: read
