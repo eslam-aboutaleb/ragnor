@@ -15,3 +15,6 @@ test-results/
 benchmarks/data/
 benchmarks/fixtures/
 docs/qualification/*.json
+
+# Built or downloaded wheels belong in dist/, never the repo root
+/*.whl
