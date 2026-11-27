@@ -24,6 +24,10 @@ stability contract rather than a moving target.
 
 ## [Unreleased]
 
+- Add opt-in visual page retrieval fallback (`ragnor.retrieval.visual`, optional
+  `ragnor.stores.qdrant_visual`) with staging, revocation, authorization, fusion
+  and a ViDoRe-style offline benchmark (Refs #68).
+
 ## [0.4.0] - 2026-10-11
 
 ### Added
