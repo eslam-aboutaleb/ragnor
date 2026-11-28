@@ -1,5 +1,5 @@
 # Optional local benchmark environment; none are mandatory SDK dependencies.
-pypdf==6.21.4
+pypdf==7.1.1
 rapidfuzz==3.14.6
 pdfplumber==0.11.10
 pdfminer.six==20260107
